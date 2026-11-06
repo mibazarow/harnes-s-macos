@@ -79,13 +79,20 @@ struct MarkdownBlockView: View {
 
     private var resolvedBase: Color { baseColor }
 
+    @ViewBuilder
     private var paragraphView: some View {
-        Text(inlineText(node, bold: false, scale: 1))
-            .font(mono)
-            .foregroundStyle(resolvedBase)
-            .lineSpacing(lineSpacing)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
+        let text = inlineText(node, bold: false, scale: 1)
+        if lineSpacing < 0 {
+            SpacedText(content: text, lineSpacing: lineSpacing)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(text)
+                .font(mono)
+                .foregroundStyle(resolvedBase)
+                .lineSpacing(lineSpacing)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func headingView(_ heading: Heading) -> some View {
@@ -95,13 +102,20 @@ struct MarkdownBlockView: View {
         case 3: 1.12
         default: 1
         }
-        return Text(inlineText(heading, bold: true, scale: scale))
-            .font(mono)
-            .foregroundStyle(resolvedBase)
-            .lineSpacing(lineSpacing)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, heading.level == 1 ? 2 : 4)
+        let text = inlineText(heading, bold: true, scale: scale)
+        return Group {
+            if lineSpacing < 0 {
+                SpacedText(content: text, lineSpacing: lineSpacing)
+            } else {
+                Text(text)
+                    .font(mono)
+                    .foregroundStyle(resolvedBase)
+                    .lineSpacing(lineSpacing)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.top, heading.level == 1 ? 2 : 4)
     }
 
     private var quoteView: some View {

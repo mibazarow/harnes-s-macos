@@ -164,6 +164,9 @@ final class SettingsTests: XCTestCase {
         defaults.set(0.0, forKey: AppFont.lineSpacingKey)
         XCTAssertEqual(AppSettings(defaults: defaults).lineSpacing, 0)
 
+        defaults.set(-12.0, forKey: AppFont.lineSpacingKey)
+        XCTAssertEqual(AppSettings(defaults: defaults).lineSpacing, -12)
+
         defaults.set(7.0, forKey: AppFont.lineSpacingKey)
         XCTAssertEqual(AppSettings(defaults: defaults).lineSpacing, 7)
 

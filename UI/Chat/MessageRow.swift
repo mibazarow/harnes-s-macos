@@ -10,6 +10,13 @@ struct MessageRow: View {
 
     private var isUser: Bool { message.role == .user }
 
+    private var userText: AttributedString {
+        var text = AttributedString(message.text)
+        text.font = AppFont.mono(fontSize)
+        text.foregroundColor = palette.text
+        return text
+    }
+
     var body: some View {
         BubbleContainer(isUser: isUser) {
             content
@@ -43,13 +50,18 @@ struct MessageRow: View {
 
             if isUser {
                 if !message.text.isEmpty {
-                    Text(message.text)
-                        .font(AppFont.mono(fontSize))
-                        .foregroundStyle(palette.text)
-                        .lineSpacing(lineSpacing)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if lineSpacing < 0 {
+                        SpacedText(content: userText, lineSpacing: lineSpacing)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Text(message.text)
+                            .font(AppFont.mono(fontSize))
+                            .foregroundStyle(palette.text)
+                            .lineSpacing(lineSpacing)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 if !message.attachments.isEmpty {
                     AttachmentGrid(attachments: message.attachments, palette: palette, fontSize: fontSize)
@@ -238,6 +250,13 @@ struct ReasoningBlock: View {
 
     @State private var expanded = false
 
+    private var reasoningText: AttributedString {
+        var attributed = AttributedString(text)
+        attributed.font = AppFont.mono(fontSize)
+        attributed.foregroundColor = palette.reasoning
+        return attributed
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
@@ -259,11 +278,17 @@ struct ReasoningBlock: View {
             .accessibilityLabel(expanded ? "Свернуть размышления" : "Показать размышления")
 
             if expanded {
-                Text(text)
-                    .font(AppFont.mono(fontSize))
-                    .foregroundStyle(palette.reasoning)
-                    .lineSpacing(lineSpacing)
-                    .textSelection(.enabled)
+                Group {
+                    if lineSpacing < 0 {
+                        SpacedText(content: reasoningText, lineSpacing: lineSpacing)
+                    } else {
+                        Text(text)
+                            .font(AppFont.mono(fontSize))
+                            .foregroundStyle(palette.reasoning)
+                            .lineSpacing(lineSpacing)
+                            .textSelection(.enabled)
+                    }
+                }
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(palette.reasoningBackground)

@@ -40,10 +40,16 @@ struct CodeBlockView: View {
             .padding(.top, 6)
             .padding(.bottom, 2)
 
-            Text(highlighted)
-                .font(AppFont.mono(fontSize))
-                .lineSpacing(lineSpacing)
-                .textSelection(.enabled)
+            Group {
+                if lineSpacing < 0 {
+                    SpacedText(content: highlighted, lineSpacing: lineSpacing)
+                } else {
+                    Text(highlighted)
+                        .font(AppFont.mono(fontSize))
+                        .lineSpacing(lineSpacing)
+                        .textSelection(.enabled)
+                }
+            }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)

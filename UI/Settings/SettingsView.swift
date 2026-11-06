@@ -66,7 +66,7 @@ struct GeneralSettingsView: View {
 
                 HStack(spacing: 12) {
                     Text("Межстрочный интервал")
-                    Slider(value: $settings.lineSpacing, in: 0...10, step: 1)
+                    Slider(value: $settings.lineSpacing, in: -12...20, step: 1)
                     Text("\(Int(settings.lineSpacing))")
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
