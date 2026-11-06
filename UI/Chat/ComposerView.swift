@@ -17,8 +17,14 @@ struct ComposerView: View {
     let onStop: () -> Void
 
     @State private var isTargeted = false
+    @State private var highlightedCommand = 0
+    @State private var paletteHidden = false
 
     private var mono: Font { AppFont.mono(fontSize) }
+
+    private var suggestions: [CommandSuggestion] {
+        paletteHidden ? [] : CommandCatalog.suggestions(for: text)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -45,6 +51,17 @@ struct ComposerView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
+                if !suggestions.isEmpty {
+                    CommandPalette(
+                        suggestions: suggestions,
+                        highlighted: min(highlightedCommand, suggestions.count - 1),
+                        palette: palette,
+                        fontSize: fontSize,
+                        onPick: accept
+                    )
+                    .padding(.bottom, 2)
+                }
+
                 HStack(alignment: .top, spacing: 8) {
                     Text("❯")
                         .font(mono)
@@ -66,7 +83,8 @@ struct ComposerView: View {
                             fontSize: fontSize,
                             textColor: palette.text.nsColor,
                             insertionColor: palette.accent.nsColor,
-                            onSend: onSend
+                            onSend: onSend,
+                            keyHandler: handlePaletteKey
                         )
                         .frame(height: height)
                     }
@@ -151,7 +169,43 @@ struct ComposerView: View {
         .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
             handleDrop(providers)
         }
+        .onChange(of: text) {
+            // Every edit re-opens the palette and resets the cursor: typing "m" after
+            // "/" should start from the first match, not from the old position.
+            paletteHidden = false
+            highlightedCommand = 0
+        }
         .onExitCommand(perform: onStop)
+    }
+
+    /// Returns true when the key belonged to the palette and must not reach the text
+    /// view: arrows, Tab, Enter and Escape while a suggestion is on screen.
+    private func handlePaletteKey(_ event: NSEvent) -> Bool {
+        let items = suggestions
+        guard !items.isEmpty else { return false }
+
+        switch event.keyCode {
+        case 126: // up
+            highlightedCommand = (highlightedCommand - 1 + items.count) % items.count
+            return true
+        case 125: // down
+            highlightedCommand = (highlightedCommand + 1) % items.count
+            return true
+        case 48, 36, 76: // tab, return, keypad enter
+            accept(items[min(highlightedCommand, items.count - 1)])
+            return true
+        case 53: // escape
+            paletteHidden = true
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func accept(_ suggestion: CommandSuggestion) {
+        text = suggestion.insert
+        highlightedCommand = 0
+        paletteHidden = false
     }
 
     private func addFiles() {
@@ -289,6 +343,7 @@ struct ComposerTextView: NSViewRepresentable {
     let textColor: NSColor
     let insertionColor: NSColor
     let onSend: () -> Void
+    let keyHandler: ((NSEvent) -> Bool)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -304,6 +359,7 @@ struct ComposerTextView: NSViewRepresentable {
 
         let textView = ComposerNSTextView()
         textView.onSend = onSend
+        textView.keyHandler = keyHandler
         textView.delegate = context.coordinator
         textView.isRichText = false
         textView.importsGraphics = false
@@ -334,9 +390,13 @@ struct ComposerTextView: NSViewRepresentable {
         guard let textView = scrollView.documentView as? ComposerNSTextView else { return }
         context.coordinator.parent = self
         textView.onSend = onSend
+        textView.keyHandler = keyHandler
 
         if textView.string != text {
             textView.string = text
+            // Text set from outside (a picked command) should leave the caret at the
+            // end, otherwise the next keystroke lands at the start.
+            textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
         }
 
         textView.font = AppFont.nsMono(fontSize)
@@ -379,8 +439,13 @@ struct ComposerTextView: NSViewRepresentable {
 
 final class ComposerNSTextView: NSTextView {
     var onSend: (() -> Void)?
+    var keyHandler: ((NSEvent) -> Bool)?
 
     override func keyDown(with event: NSEvent) {
+        if keyHandler?(event) == true {
+            return
+        }
+
         if event.keyCode == 36 || event.keyCode == 76 {
             if event.modifierFlags.contains(.shift) {
                 insertNewline(nil)

@@ -492,24 +492,5 @@ struct SlashCommandRouter: Sendable {
         return "~" + url.path.dropFirst(home.count)
     }
 
-    private static let helpText = """
-    **Команды**
-    - `/skills` — список скиллов
-    - `/skill install <путь|url>` — установить (`--force` для замены)
-    - `/skill remove <имя>` — удалить пользовательский скилл
-    - `/skill enable|disable <имя>` — включить или выключить
-    - `/mcp` — список MCP-серверов
-    - `/mcp add <имя> <команда…>` — stdio-сервер
-    - `/mcp add <имя> --url <адрес> [--sse]` — http/sse-сервер
-    - `/mcp remove|enable|disable <имя>`
-    - `/remember <текст>` — запомнить и закрепить
-    - `/memory` — последние записи памяти
-    - `/memory search <запрос>` или `/search <запрос>` — поиск по памяти
-    - `/memory forget <текст|id>` — забыть
-    - `/memory pin|unpin <id>` — закрепить запись
-    - `/secret save <алиас> <значение>` — сохранить пароль/секрет
-    - `/secret get <алиас>` — показать
-    - `/secret list` / `/secret search <текст>` / `/secret remove <алиас>`
-    - `/clear` — очистить вид
-    """
+    private static var helpText: String { CommandCatalog.helpText }
 }
