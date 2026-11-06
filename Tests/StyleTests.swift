@@ -174,3 +174,31 @@ final class StyleProfileTests: XCTestCase {
         XCTAssertNotNil(StyleCardExtractor.transcript(from: many))
     }
 }
+
+final class MarkdownHeadingTests: XCTestCase {
+    func testHeadingLadderIsFlatAndAbsolute() {
+        // At a 14 pt body this is 17 / 15 / 14 — the same ladder OpenCode uses.
+        XCTAssertEqual(MarkdownBlockView.headingSize(level: 1, fontSize: 14), 17)
+        XCTAssertEqual(MarkdownBlockView.headingSize(level: 2, fontSize: 14), 15)
+        XCTAssertEqual(MarkdownBlockView.headingSize(level: 3, fontSize: 14), 14)
+        XCTAssertEqual(MarkdownBlockView.headingSize(level: 6, fontSize: 14), 14)
+    }
+
+    func testHeadingGapDoesNotGrowWithFontSize() {
+        // The step between h1 and body stays 3 pt at any size, so a bigger font does
+        // not turn headings into posters.
+        for size in [11.0, 14.0, 20.0] as [CGFloat] {
+            XCTAssertEqual(
+                MarkdownBlockView.headingSize(level: 1, fontSize: size) - size,
+                3,
+                accuracy: 0.001
+            )
+        }
+    }
+
+    func testHeadingPaddingGrowsWithLevel() {
+        XCTAssertGreaterThan(MarkdownBlockView.headingPadding(level: 1), MarkdownBlockView.headingPadding(level: 2))
+        XCTAssertGreaterThan(MarkdownBlockView.headingPadding(level: 2), MarkdownBlockView.headingPadding(level: 3))
+        XCTAssertEqual(MarkdownBlockView.headingPadding(level: 4), 6)
+    }
+}

@@ -114,5 +114,7 @@ enum Prompts {
     - Russian, concise, markdown when useful. Code blocks for code and commands.
     - State what changed, where it lives, and what remains.
     - Ask before doing anything irreversible. Do not ask for permission you already have.
+    - No headings in a normal answer. Headings exist for long documents, not for chat. Numbered steps, lists and bold lead-ins carry structure on their own. If the answer fits on one screen, it has no `#`, `##` or `###` in it.
+    - Never open with a heading that repeats the question, and never label every paragraph. One bold phrase per section is enough.
     """
 }

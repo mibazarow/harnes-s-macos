@@ -79,19 +79,39 @@ struct MarkdownBlockView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func headingView(_ heading: Heading) -> some View {
-        let scale: CGFloat = switch heading.level {
-        case 1: 1.45
-        case 2: 1.25
-        case 3: 1.12
-        default: 1
+    /// Headings grow by a fixed number of points, not by a multiplier. On a 14 pt body
+    /// that is 17/15/14/14 — the ladder OpenCode uses. A multiplier compounds with the
+    /// user's font size, and on a monospaced face semibold already reads heavier, so
+    /// 1.25x looked like a different document.
+    /// Size ladder for a heading. Absolute increments keep the ratio flat as the user
+    /// changes the font size; a multiplier would scale the gap too.
+    static func headingSize(level: Int, fontSize: CGFloat) -> CGFloat {
+        switch level {
+        case 1: fontSize + 3
+        case 2: fontSize + 1
+        default: fontSize
         }
-        return Text(inlineText(heading, bold: true, scale: scale))
+    }
+
+    static func headingPadding(level: Int) -> CGFloat {
+        switch level {
+        case 1: 14
+        case 2: 10
+        case 3: 8
+        default: 6
+        }
+    }
+
+    private func headingView(_ heading: Heading) -> some View {
+        let level = heading.level
+        let size = Self.headingSize(level: level, fontSize: fontSize)
+
+        return Text(inlineText(heading, bold: level <= 3, scale: size / max(fontSize, 1)))
             .font(mono)
-            .foregroundStyle(resolvedBase)
+            .foregroundStyle(level >= 4 ? palette.dim : resolvedBase)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, heading.level == 1 ? 2 : 4)
+            .padding(.top, Self.headingPadding(level: level))
     }
 
     private var quoteView: some View {
