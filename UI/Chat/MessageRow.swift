@@ -69,8 +69,15 @@ struct MessageRow: View {
                         fontSize: fontSize,
                         isStreaming: message.state == .streaming
                     )
-                } else if message.state == .streaming, message.tools.isEmpty {
-                    ThinkingIndicator(palette: palette, fontSize: fontSize, started: message.date)
+                } else if message.state == .streaming,
+                          message.tools.isEmpty,
+                          (message.reasoning ?? "").isEmpty {
+                    // Only before anything arrives. Once reasoning or a tool trace is on
+                    // screen it already shows that work is happening, and a second
+                    // "thinking" line under it is just noise.
+                    Text("думает…")
+                        .font(AppFont.mono(fontSize))
+                        .foregroundStyle(palette.faint)
                 }
             }
         }
@@ -284,27 +291,5 @@ struct BubbleContainer<Content: View>: View {
         content
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 15)
-    }
-}
-
-/// Time to the first token is provider prefill, not local work. Showing the elapsed
-/// seconds makes that visible instead of looking like a freeze.
-private struct ThinkingIndicator: View {
-    let palette: Palette
-    let fontSize: CGFloat
-    let started: Date
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let seconds = Int(context.date.timeIntervalSince(started))
-            HStack(spacing: 6) {
-                Text(seconds < 2 ? "думает…" : "думает… \(seconds) с")
-                    .font(AppFont.mono(fontSize))
-                    .foregroundStyle(palette.faint)
-                Text(seconds < 2 ? "" : "модель читает контекст")
-                    .font(AppFont.mono(max(fontSize - 3, 9)))
-                    .foregroundStyle(palette.faint.opacity(0.7))
-            }
-        }
     }
 }
