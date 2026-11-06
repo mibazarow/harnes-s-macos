@@ -398,11 +398,10 @@ extension MarkdownBlockView {
             fragment.foregroundColor = palette.assistantText
         }
 
-        // Inline code is tinted with the accent and lifted on a faint plate, so commit
-        // hashes, paths and flags stand out without breaking the sentence flow.
+        // Inline code is tinted with the accent and left on the page background, so
+        // commit hashes, paths and flags stand out without a plate behind them.
         if style.code {
             fragment.foregroundColor = palette.accent
-            fragment.backgroundColor = palette.accent.opacity(0.18)
         }
 
         if style.strikethrough {
