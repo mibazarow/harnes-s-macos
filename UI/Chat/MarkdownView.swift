@@ -398,10 +398,11 @@ extension MarkdownBlockView {
             fragment.foregroundColor = palette.assistantText
         }
 
-        // Inline code keeps the body color and only lifts on a faint plate, so a line
-        // with several snippets still reads as one sentence.
+        // Inline code is tinted with the accent and lifted on a faint plate, so commit
+        // hashes, paths and flags stand out without breaking the sentence flow.
         if style.code {
-            fragment.backgroundColor = palette.assistantText.opacity(0.08)
+            fragment.foregroundColor = palette.accent
+            fragment.backgroundColor = palette.accent.opacity(0.18)
         }
 
         if style.strikethrough {
