@@ -3,7 +3,6 @@ import SwiftUI
 struct TranscriptView: View {
     let palette: Palette
     let fontSize: CGFloat
-    let lineSpacing: CGFloat
     let showTimestamps: Bool
 
     @Environment(ChatStore.self) private var chat
@@ -21,7 +20,6 @@ struct TranscriptView: View {
                             message: message,
                             palette: palette,
                             fontSize: fontSize,
-                            lineSpacing: lineSpacing,
                             showTimestamp: showTimestamps
                         )
                         .id(message.id)

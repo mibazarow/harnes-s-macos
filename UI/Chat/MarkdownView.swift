@@ -5,20 +5,13 @@ struct MarkdownView: View {
     let text: String
     let palette: Palette
     let fontSize: CGFloat
-    let lineSpacing: CGFloat
     var isStreaming: Bool = false
 
     var body: some View {
         let document = Document(parsing: text, options: [.parseBlockDirectives, .parseSymbolLinks])
         VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(document.children.enumerated()), id: \.offset) { _, child in
-                MarkdownBlockView(
-                    node: child,
-                    palette: palette,
-                    fontSize: fontSize,
-                    lineSpacing: lineSpacing,
-                    dimmed: false
-                )
+                MarkdownBlockView(node: child, palette: palette, fontSize: fontSize, dimmed: false)
             }
             if isStreaming {
                 Text("▍")
@@ -34,7 +27,6 @@ struct MarkdownBlockView: View {
     let node: Markup
     let palette: Palette
     let fontSize: CGFloat
-    let lineSpacing: CGFloat
     var dimmed: Bool
 
     private var baseColor: Color { dimmed ? palette.dim : palette.assistantText }
@@ -51,8 +43,7 @@ struct MarkdownBlockView: View {
                 code: code.code,
                 language: code.language,
                 palette: palette,
-                fontSize: fontSize,
-                lineSpacing: lineSpacing
+                fontSize: fontSize
             )
         } else if node is BlockQuote {
             quoteView
@@ -79,20 +70,13 @@ struct MarkdownBlockView: View {
 
     private var resolvedBase: Color { baseColor }
 
-    @ViewBuilder
     private var paragraphView: some View {
-        let text = inlineText(node, bold: false, scale: 1)
-        if lineSpacing < 0 {
-            SpacedText(content: text, lineSpacing: lineSpacing)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            Text(text)
-                .font(mono)
-                .foregroundStyle(resolvedBase)
-                .lineSpacing(lineSpacing)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        Text(inlineText(node, bold: false, scale: 1))
+            .font(mono)
+            .foregroundStyle(resolvedBase)
+            .lineSpacing(AppFont.lineSpacing)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func headingView(_ heading: Heading) -> some View {
@@ -102,20 +86,12 @@ struct MarkdownBlockView: View {
         case 3: 1.12
         default: 1
         }
-        let text = inlineText(heading, bold: true, scale: scale)
-        return Group {
-            if lineSpacing < 0 {
-                SpacedText(content: text, lineSpacing: lineSpacing)
-            } else {
-                Text(text)
-                    .font(mono)
-                    .foregroundStyle(resolvedBase)
-                    .lineSpacing(lineSpacing)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.top, heading.level == 1 ? 2 : 4)
+        return Text(inlineText(heading, bold: true, scale: scale))
+            .font(mono)
+            .foregroundStyle(resolvedBase)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, heading.level == 1 ? 2 : 4)
     }
 
     private var quoteView: some View {
@@ -125,7 +101,6 @@ struct MarkdownBlockView: View {
                     node: child,
                     palette: palette,
                     fontSize: fontSize,
-                    lineSpacing: lineSpacing,
                     dimmed: true
                 )
             }
@@ -158,7 +133,6 @@ struct MarkdownBlockView: View {
                                 node: child,
                                 palette: palette,
                                 fontSize: fontSize,
-                                lineSpacing: lineSpacing,
                                 dimmed: dimmed
                             )
                         }
@@ -178,7 +152,6 @@ struct MarkdownBlockView: View {
                         node: child,
                         palette: palette,
                         fontSize: fontSize,
-                        lineSpacing: lineSpacing,
                         dimmed: dimmed
                     )
                 }
@@ -193,7 +166,6 @@ struct MarkdownBlockView: View {
                     Text(inlineText(cell, bold: true, scale: 1))
                         .font(mono)
                         .foregroundStyle(palette.assistantText)
-                        .lineSpacing(lineSpacing)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }

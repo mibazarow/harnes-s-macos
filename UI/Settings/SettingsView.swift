@@ -64,15 +64,6 @@ struct GeneralSettingsView: View {
                         .frame(width: 22, alignment: .trailing)
                 }
 
-                HStack(spacing: 12) {
-                    Text("Межстрочный интервал")
-                    Slider(value: $settings.lineSpacing, in: -12...20, step: 1)
-                    Text("\(Int(settings.lineSpacing))")
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .frame(width: 22, alignment: .trailing)
-                }
-
                 Toggle("Показывать время сообщений", isOn: $settings.showTimestamps)
             }
 

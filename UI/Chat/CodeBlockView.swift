@@ -6,7 +6,6 @@ struct CodeBlockView: View {
     let language: String?
     let palette: Palette
     let fontSize: CGFloat
-    let lineSpacing: CGFloat
 
     @State private var copied = false
     @State private var resetTask: Task<Void, Never>?
@@ -40,16 +39,10 @@ struct CodeBlockView: View {
             .padding(.top, 6)
             .padding(.bottom, 2)
 
-            Group {
-                if lineSpacing < 0 {
-                    SpacedText(content: highlighted, lineSpacing: lineSpacing)
-                } else {
-                    Text(highlighted)
-                        .font(AppFont.mono(fontSize))
-                        .lineSpacing(lineSpacing)
-                        .textSelection(.enabled)
-                }
-            }
+            Text(highlighted)
+                .font(AppFont.mono(fontSize))
+                .lineSpacing(AppFont.lineSpacing)
+                .textSelection(.enabled)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)

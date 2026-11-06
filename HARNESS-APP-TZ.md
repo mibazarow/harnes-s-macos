@@ -202,12 +202,11 @@ HARNES_S_DATA/
 |---|---|---|
 | `fontSize` | 13 | размер шрифта интерфейса |
 | `fontFamily` | `Nordwand Mono` | выбранная гарнитура |
-| `lineSpacing` | 3 | межстрочный интервал, −12…20 |
 | `showTimestamps` | true | время у сообщений |
 | `compactionThresholdPercent` | 80 | порог компакции |
 | `autopilot` | false | работа без подтверждений |
 
-Ключи гарнитуры и интервала живут в `AppFont` (`AppFont.familyKey`, `AppFont.lineSpacingKey`), остальные — в `AppSettings`.
+Ключ гарнитуры живёт в `AppFont.familyKey`, остальные — в `AppSettings`. Межстрочный интервал не настраивается: это константа `AppFont.lineSpacing = 3`.
 
 ---
 
@@ -588,7 +587,7 @@ python3 Scripts/install_skills.py --include-gsd --gsd-runtime ~/.config/kilo ~/.
 ### 17.2 Шрифт
 
 - По умолчанию Nordwand Mono, встроен в бандл, регистрируется при старте.
-- В настройках можно выбрать любую установленную гарнитуру, размер 11–20 и межстрочный интервал −12…20. Отрицательные значения сжимают строки, вплоть до наложения букв: SwiftUI не умеет отрицательный `lineSpacing`, поэтому при значении ниже нуля текст рисуется через `NSTextField` с `lineHeightMultiple` (`UI/Chat/SpacedText.swift`). При нуле и выше работает обычный путь SwiftUI.
+- В настройках можно выбрать любую установленную гарнитуру и размер 11–20. Межстрочный интервал фиксирован (`AppFont.lineSpacing = 3`): настраивать его отдельно нельзя, чтобы шрифт и интервал не влияли друг на друга непредсказуемо.
 - При отсутствии выбранного шрифта используется системный моноширинный.
 
 ### 17.3 Раскладка
@@ -623,7 +622,7 @@ python3 Scripts/install_skills.py --include-gsd --gsd-runtime ~/.config/kilo ~/.
 
 ## 19. Тестирование
 
-Обязательный минимум (реализовано 76 тестов):
+Обязательный минимум (реализовано 75 тестов):
 
 - клиент провайдера: сборка URL, кодирование запроса, reasoning, инструменты, изображения;
 - интеграция с локальным SSE-сервером: текст, размышления, вызовы инструментов, ошибки;
@@ -696,7 +695,7 @@ python3 Scripts/install_skills.py --include-gsd --gsd-runtime ~/.config/kilo ~/.
    xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Debug -derivedDataPath .build build
    xcodebuild -project Harness.xcodeproj -scheme Harness -derivedDataPath .build -destination 'platform=macOS' test
    ```
-   Ожидаемо: сборка без ошибок, 76 тестов, 1 пропущен (живой scrapling), 0 падений.
+   Ожидаемо: сборка без ошибок, 75 тестов, 1 пропущен (живой scrapling), 0 падений.
 3. **Релиз.**
    ```bash
    xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Release -derivedDataPath .build build

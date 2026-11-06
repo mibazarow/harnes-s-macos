@@ -5,17 +5,9 @@ struct MessageRow: View {
     let message: ChatMessage
     let palette: Palette
     let fontSize: CGFloat
-    let lineSpacing: CGFloat
     let showTimestamp: Bool
 
     private var isUser: Bool { message.role == .user }
-
-    private var userText: AttributedString {
-        var text = AttributedString(message.text)
-        text.font = AppFont.mono(fontSize)
-        text.foregroundColor = palette.text
-        return text
-    }
 
     var body: some View {
         BubbleContainer(isUser: isUser) {
@@ -50,18 +42,13 @@ struct MessageRow: View {
 
             if isUser {
                 if !message.text.isEmpty {
-                    if lineSpacing < 0 {
-                        SpacedText(content: userText, lineSpacing: lineSpacing)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        Text(message.text)
-                            .font(AppFont.mono(fontSize))
-                            .foregroundStyle(palette.text)
-                            .lineSpacing(lineSpacing)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    Text(message.text)
+                        .font(AppFont.mono(fontSize))
+                        .foregroundStyle(palette.text)
+                        .lineSpacing(AppFont.lineSpacing)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if !message.attachments.isEmpty {
                     AttachmentGrid(attachments: message.attachments, palette: palette, fontSize: fontSize)
@@ -71,8 +58,7 @@ struct MessageRow: View {
                     ReasoningBlock(
                         text: reasoning,
                         palette: palette,
-                        fontSize: fontSize,
-                        lineSpacing: lineSpacing
+                        fontSize: fontSize
                     )
                 }
 
@@ -81,7 +67,6 @@ struct MessageRow: View {
                         text: message.text,
                         palette: palette,
                         fontSize: fontSize,
-                        lineSpacing: lineSpacing,
                         isStreaming: message.state == .streaming
                     )
                 } else if message.state == .streaming, message.tools.isEmpty {
@@ -246,16 +231,8 @@ struct ReasoningBlock: View {
     let text: String
     let palette: Palette
     let fontSize: CGFloat
-    let lineSpacing: CGFloat
 
     @State private var expanded = false
-
-    private var reasoningText: AttributedString {
-        var attributed = AttributedString(text)
-        attributed.font = AppFont.mono(fontSize)
-        attributed.foregroundColor = palette.reasoning
-        return attributed
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -278,17 +255,11 @@ struct ReasoningBlock: View {
             .accessibilityLabel(expanded ? "Свернуть размышления" : "Показать размышления")
 
             if expanded {
-                Group {
-                    if lineSpacing < 0 {
-                        SpacedText(content: reasoningText, lineSpacing: lineSpacing)
-                    } else {
-                        Text(text)
-                            .font(AppFont.mono(fontSize))
-                            .foregroundStyle(palette.reasoning)
-                            .lineSpacing(lineSpacing)
-                            .textSelection(.enabled)
-                    }
-                }
+                Text(text)
+                    .font(AppFont.mono(fontSize))
+                    .foregroundStyle(palette.reasoning)
+                    .lineSpacing(AppFont.lineSpacing)
+                    .textSelection(.enabled)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(palette.reasoningBackground)

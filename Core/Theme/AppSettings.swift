@@ -22,10 +22,6 @@ final class AppSettings {
         didSet { defaults.set(fontFamily, forKey: AppFont.familyKey) }
     }
 
-    var lineSpacing: Double {
-        didSet { defaults.set(lineSpacing, forKey: AppFont.lineSpacingKey) }
-    }
-
     var showTimestamps: Bool {
         didSet { defaults.set(showTimestamps, forKey: Key.showTimestamps) }
     }
@@ -45,12 +41,6 @@ final class AppSettings {
         self.fontSize = storedFontSize > 0 ? storedFontSize : 13
 
         self.fontFamily = defaults.string(forKey: AppFont.familyKey) ?? AppFont.bundledFamily
-
-        if defaults.object(forKey: AppFont.lineSpacingKey) == nil {
-            self.lineSpacing = 3
-        } else {
-            self.lineSpacing = defaults.double(forKey: AppFont.lineSpacingKey)
-        }
 
         if defaults.object(forKey: Key.showTimestamps) == nil {
             self.showTimestamps = true

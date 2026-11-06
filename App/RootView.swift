@@ -19,7 +19,6 @@ struct RootView: View {
             TranscriptView(
                 palette: palette,
                 fontSize: settings.fontSize,
-                lineSpacing: settings.lineSpacing,
                 showTimestamps: settings.showTimestamps
             )
 

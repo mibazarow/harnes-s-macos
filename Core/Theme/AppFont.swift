@@ -6,7 +6,6 @@ import SwiftUI
 enum AppFont {
     static let bundledFamily = "Nordwand Mono"
     static let familyKey = "fontFamily"
-    static let lineSpacingKey = "lineSpacing"
 
     nonisolated(unsafe) private static var didRegister = false
 
@@ -32,6 +31,10 @@ enum AppFont {
         }
         return stored
     }
+
+    /// Fixed spacing in points. Not user-configurable on purpose: an absolute value
+    /// reads inconsistently across font sizes, so it stays one calm default.
+    static let lineSpacing: CGFloat = 3
 
     static func isAvailable(_ family: String) -> Bool {
         NSFont(name: family, size: 13) != nil
