@@ -46,8 +46,11 @@ final class AppSettings {
 
         self.fontFamily = defaults.string(forKey: AppFont.familyKey) ?? AppFont.bundledFamily
 
-        let storedLineSpacing = defaults.double(forKey: AppFont.lineSpacingKey)
-        self.lineSpacing = storedLineSpacing > 0 ? storedLineSpacing : 3
+        if defaults.object(forKey: AppFont.lineSpacingKey) == nil {
+            self.lineSpacing = 3
+        } else {
+            self.lineSpacing = defaults.double(forKey: AppFont.lineSpacingKey)
+        }
 
         if defaults.object(forKey: Key.showTimestamps) == nil {
             self.showTimestamps = true

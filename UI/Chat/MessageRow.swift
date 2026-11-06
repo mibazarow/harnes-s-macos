@@ -5,6 +5,7 @@ struct MessageRow: View {
     let message: ChatMessage
     let palette: Palette
     let fontSize: CGFloat
+    let lineSpacing: CGFloat
     let showTimestamp: Bool
 
     private var isUser: Bool { message.role == .user }
@@ -45,7 +46,7 @@ struct MessageRow: View {
                     Text(message.text)
                         .font(AppFont.mono(fontSize))
                         .foregroundStyle(palette.text)
-                        .lineSpacing(AppFont.lineSpacing)
+                        .lineSpacing(lineSpacing)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -58,7 +59,8 @@ struct MessageRow: View {
                     ReasoningBlock(
                         text: reasoning,
                         palette: palette,
-                        fontSize: fontSize
+                        fontSize: fontSize,
+                        lineSpacing: lineSpacing
                     )
                 }
 
@@ -67,6 +69,7 @@ struct MessageRow: View {
                         text: message.text,
                         palette: palette,
                         fontSize: fontSize,
+                        lineSpacing: lineSpacing,
                         isStreaming: message.state == .streaming
                     )
                 } else if message.state == .streaming, message.tools.isEmpty {
@@ -231,6 +234,7 @@ struct ReasoningBlock: View {
     let text: String
     let palette: Palette
     let fontSize: CGFloat
+    let lineSpacing: CGFloat
 
     @State private var expanded = false
 
@@ -258,7 +262,7 @@ struct ReasoningBlock: View {
                 Text(text)
                     .font(AppFont.mono(fontSize))
                     .foregroundStyle(palette.reasoning)
-                    .lineSpacing(AppFont.lineSpacing)
+                    .lineSpacing(lineSpacing)
                     .textSelection(.enabled)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)

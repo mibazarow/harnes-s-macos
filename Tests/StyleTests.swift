@@ -153,3 +153,21 @@ final class StyleProfileTests: XCTestCase {
         XCTAssertNotNil(StyleCardExtractor.transcript(from: many))
     }
 }
+
+final class SettingsTests: XCTestCase {
+    @MainActor
+    func testLineSpacingKeepsZeroAndReadsStoredValue() {
+        let suite = "settings-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(0.0, forKey: AppFont.lineSpacingKey)
+        XCTAssertEqual(AppSettings(defaults: defaults).lineSpacing, 0)
+
+        defaults.set(7.0, forKey: AppFont.lineSpacingKey)
+        XCTAssertEqual(AppSettings(defaults: defaults).lineSpacing, 7)
+
+        defaults.removeObject(forKey: AppFont.lineSpacingKey)
+        XCTAssertEqual(AppSettings(defaults: defaults).lineSpacing, 3)
+    }
+}

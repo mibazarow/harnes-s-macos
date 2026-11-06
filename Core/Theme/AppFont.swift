@@ -33,11 +33,6 @@ enum AppFont {
         return stored
     }
 
-    static var lineSpacing: CGFloat {
-        let stored = UserDefaults.standard.double(forKey: lineSpacingKey)
-        return stored > 0 ? CGFloat(stored) : 3
-    }
-
     static func isAvailable(_ family: String) -> Bool {
         NSFont(name: family, size: 13) != nil
     }
