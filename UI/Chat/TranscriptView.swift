@@ -8,7 +8,12 @@ struct TranscriptView: View {
     @Environment(ChatStore.self) private var chat
 
     @State private var atBottom = true
+    @State private var nearBottom = true
+    /// True while the view should stay pinned to the newest message. Flipped off only
+    /// when the user scrolls away by hand, never by the answer growing underneath.
+    @State private var follow = true
     @State private var loadingOlder = false
+    @State private var lastAutoScroll = Date.distantPast
 
     private let bottomID = "transcript-bottom"
 
@@ -47,12 +52,18 @@ struct TranscriptView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(palette.background)
-            .onScrollGeometryChange(for: Bool.self) { geometry in
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 let offset = geometry.contentOffset.y + geometry.contentInsets.top
-                let visible = geometry.containerSize.height
-                return offset >= geometry.contentSize.height - visible - 120
-            } action: { _, isAtBottom in
-                atBottom = isAtBottom
+                return geometry.contentSize.height - offset - geometry.containerSize.height
+            } action: { _, distance in
+                nearBottom = distance <= 80
+                atBottom = distance <= 120
+            }
+            .onScrollPhaseChange { _, phase in
+                // Growth of the answer does not produce a scroll phase, so this is the
+                // only place where the user's own scrolling can disable following.
+                guard phase == .tracking || phase == .interacting || phase == .decelerating else { return }
+                follow = nearBottom
             }
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 let offset = geometry.contentOffset.y + geometry.contentInsets.top
@@ -63,8 +74,9 @@ struct TranscriptView: View {
                 Task { await loadOlder(proxy: proxy) }
             }
             .overlay(alignment: .bottomTrailing) {
-                if !atBottom {
+                if !atBottom && !follow {
                     ScrollToBottomButton(palette: palette) {
+                        follow = true
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo(bottomID, anchor: .bottom)
                         }
@@ -75,22 +87,47 @@ struct TranscriptView: View {
                 }
             }
             .onChange(of: chat.messages.count) {
-                // Follow new messages only when already reading the end, or when the
-                // user just sent something themselves.
-                if atBottom || chat.messages.last?.role == .user {
-                    withAnimation(.easeOut(duration: 0.16)) {
-                        proxy.scrollTo(bottomID, anchor: .bottom)
-                    }
+                // A message the user just sent always brings the view back down.
+                if chat.messages.last?.role == .user {
+                    follow = true
                 }
+                guard follow else { return }
+                stick(proxy, animated: true)
             }
-            .onChange(of: chat.messages.last?.text) {
-                guard atBottom else { return }
-                proxy.scrollTo(bottomID, anchor: .bottom)
+            .onChange(of: tailSignature) {
+                guard follow else { return }
+                stick(proxy)
             }
             .onAppear {
+                follow = true
                 proxy.scrollTo(bottomID, anchor: .bottom)
             }
         }
+    }
+
+    /// Coalesces streaming updates: scrolling on every token is janky, so the view
+    /// is pinned at most ~25 times per second.
+    private func stick(_ proxy: ScrollViewProxy, animated: Bool = false) {
+        let now = Date()
+        guard now.timeIntervalSince(lastAutoScroll) >= 0.04 else { return }
+        lastAutoScroll = now
+        if animated {
+            withAnimation(.easeOut(duration: 0.16)) {
+                proxy.scrollTo(bottomID, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(bottomID, anchor: .bottom)
+        }
+    }
+
+    /// Anything that changes the height of the newest message.
+    private var tailSignature: Int {
+        guard let last = chat.messages.last else { return 0 }
+        return chat.messages.count
+            &+ last.text.count
+            &+ (last.reasoning?.count ?? 0)
+            &+ last.tools.count
+            &+ last.attachments.count
     }
 
     private func loadOlder(proxy: ScrollViewProxy) async {
