@@ -28,3 +28,6 @@ Harness.xcodeproj/
 
 # Local runtime data (lives outside the repo, but guard anyway)
 HARNES_S_DATA/
+
+# Local release token (never commit)
+/DOCS/github-token.md
