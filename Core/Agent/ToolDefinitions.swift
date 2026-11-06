@@ -59,7 +59,7 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "search_code",
-            description: "Semantic + keyword search over indexed workspace code. Run index_workspace first.",
+            description: "Search the workspace code by meaning and by keywords. Uses the semantic index when it exists and falls back to scanning files when it does not, so indexing is optional.",
             parameters: schema([
                 "query": ["type": "string"],
                 "limit": ["type": "integer", "description": "Default 8"]
@@ -116,7 +116,7 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "task",
-            description: "Delegate a self-contained job to a fresh subagent with its own context. Returns only its final answer. Use for long searches or parallel investigation.",
+            description: "Delegate a self-contained job to a fresh subagent with its own context. Returns only its final answer. Pass paths to hand over files or folders you already found, so the subagent does not search for them again.",
             parameters: schema([
                 "prompt": ["type": "string", "description": "Full self-contained instruction"],
                 "read_only": ["type": "boolean", "description": "true = investigation only, no edits"],

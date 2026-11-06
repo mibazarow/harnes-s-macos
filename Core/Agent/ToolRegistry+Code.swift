@@ -114,11 +114,16 @@ extension ToolRegistry {
             command = "grep -rn --color=never -m \(limit) -E \(Self.shellQuote(pattern)) ."
         }
         let result = try Self.runSync(command, cwd: workspace, timeout: 30)
-        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed.hasPrefix("exit 1") {
+        // runSync prefixes the exit status; it is noise in a search result.
+        let body = result
+            .split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            .dropFirst()
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty, !result.hasPrefix("exit 1") else {
             return .ok("Ничего не найдено ни в индексе, ни в файлах.")
         }
-        return .ok("Поиск без индекса (совпадения по словам запроса):\n" + String(trimmed.prefix(20_000)))
+        return .ok("Поиск без индекса (совпадения по словам запроса):\n" + String(body.prefix(20_000)))
     }
 
     func gitCommit(_ args: [String: Any]) throws -> ToolResult {
