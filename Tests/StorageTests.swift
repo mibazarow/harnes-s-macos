@@ -44,6 +44,54 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(afterDelete, 2)
     }
 
+    func testMemoryPinnedSurvivesForgetAndPrune() async throws {
+        let database = try AppDatabase()
+        let memory = MemoryService(database: database)
+
+        let pinned = try await memory.add("Всегда собирать через xcodebuild", kind: "decision", pinned: true)
+        let loose = try await memory.add("Разовый контекст про встречу в четверг")
+
+        let removed = try await memory.forget(query: "Разовый контекст")
+        XCTAssertEqual(removed.map(\.id), [loose.id])
+
+        let afterForget = try await memory.list()
+        XCTAssertEqual(afterForget.map(\.id), [pinned.id])
+        XCTAssertTrue(afterForget[0].pinned)
+        let relisted = try await memory.list()
+        XCTAssertTrue(relisted.contains { $0.id == pinned.id })
+    }
+
+    func testMemoryPruneDropsUnusedButKeepsPinned() async throws {
+        let database = try AppDatabase()
+        let memory = MemoryService(database: database)
+
+        let pinned = try await memory.add("Соглашение проекта: тесты перед коммитом", pinned: true)
+        let used = try await memory.add("Пользователь предпочитает короткие ответы")
+        let stale = try await memory.add("Случайная заметка, к которой не возвращались")
+        try await memory.touch(ids: [used.id])
+
+        let pruned = try await memory.pruneUnused(olderThanDays: -1)
+        XCTAssertEqual(pruned, 1)
+
+        let ids = Set(try await memory.list().map(\.id))
+        XCTAssertTrue(ids.contains(pinned.id))
+        XCTAssertTrue(ids.contains(used.id))
+        XCTAssertFalse(ids.contains(stale.id))
+    }
+
+    func testMemoryForPromptPinsFirst() async throws {
+        let database = try AppDatabase()
+        let memory = MemoryService(database: database)
+
+        let loose = try await memory.add("Обычная заметка")
+        let pinned = try await memory.add("Железобетонный факт", pinned: true)
+        try await memory.touch(ids: [loose.id])
+
+        let prompt = try await memory.forPrompt(limit: 10)
+        XCTAssertEqual(prompt.first?.id, pinned.id)
+        XCTAssertEqual(prompt.last?.id, loose.id)
+    }
+
     @MainActor
     func testMessageQueueing() async throws {
         let chat = ChatStore(services: nil)

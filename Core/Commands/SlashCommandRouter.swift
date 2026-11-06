@@ -372,6 +372,33 @@ struct SlashCommandRouter: Sendable {
             } catch {
                 return SlashCommandResult(error.localizedDescription, isError: true)
             }
+        case "forget":
+            let query = arguments.dropFirst().joined(separator: " ")
+            guard !query.isEmpty else {
+                return SlashCommandResult("Нужно: `/memory forget <текст|id>`", isError: true)
+            }
+            do {
+                let removed = try await memory.forget(query: query)
+                guard !removed.isEmpty else {
+                    return SlashCommandResult("По запросу «\(query)» ничего не найдено.")
+                }
+                return SlashCommandResult("Забыто:\n" + removed.map { "`#\($0.id)` \($0.snippet)" }.joined(separator: "\n"))
+            } catch {
+                return SlashCommandResult(error.localizedDescription, isError: true)
+            }
+        case "pin", "unpin":
+            guard let raw = arguments.dropFirst().first, let id = Int64(raw) else {
+                return SlashCommandResult("Нужно: `/memory \(subcommand) <id>`", isError: true)
+            }
+            do {
+                guard let item = try await memory.item(id: id) else {
+                    return SlashCommandResult("Запись `#\(id)` не найдена.", isError: true)
+                }
+                try await memory.setPinned(id: id, pinned: subcommand == "pin")
+                return SlashCommandResult("`#\(id)` \(subcommand == "pin" ? "закреплена" : "раскреплена"): \(item.snippet)")
+            } catch {
+                return SlashCommandResult(error.localizedDescription, isError: true)
+            }
         default:
             return SlashCommandResult("Неизвестное действие `\(subcommand)`. `/memory list|search|delete`", isError: true)
         }
@@ -385,7 +412,8 @@ struct SlashCommandRouter: Sendable {
             }
             var lines = ["**Память** — последние \(items.count)"]
             for item in items {
-                lines.append("- `#\(item.id)` · \(item.scope)/\(item.kind) · \(item.snippet)")
+                let mark = item.pinned ? "📌 " : ""
+                lines.append("- `#\(item.id)` · \(mark)\(item.scope)/\(item.kind) · \(item.snippet)")
             }
             return SlashCommandResult(lines.joined(separator: "\n"))
         } catch {
@@ -459,9 +487,11 @@ struct SlashCommandRouter: Sendable {
     - `/mcp add <имя> <команда…>` — stdio-сервер
     - `/mcp add <имя> --url <адрес> [--sse]` — http/sse-сервер
     - `/mcp remove|enable|disable <имя>`
-    - `/remember <текст>` — запомнить
+    - `/remember <текст>` — запомнить и закрепить
     - `/memory` — последние записи памяти
     - `/memory search <запрос>` или `/search <запрос>` — поиск по памяти
+    - `/memory forget <текст|id>` — забыть
+    - `/memory pin|unpin <id>` — закрепить запись
     - `/secret save <алиас> <значение>` — сохранить пароль/секрет
     - `/secret get <алиас>` — показать
     - `/secret list` / `/secret search <текст>` / `/secret remove <алиас>`

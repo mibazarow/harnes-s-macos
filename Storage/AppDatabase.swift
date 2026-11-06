@@ -155,6 +155,19 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v5_memory_lifecycle") { db in
+            let columns = try db.columns(in: "memory").map(\.name)
+            if !columns.contains("pinned") {
+                try db.execute(sql: "ALTER TABLE memory ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;")
+            }
+            if !columns.contains("hits") {
+                try db.execute(sql: "ALTER TABLE memory ADD COLUMN hits INTEGER NOT NULL DEFAULT 0;")
+            }
+            if !columns.contains("last_used_at") {
+                try db.execute(sql: "ALTER TABLE memory ADD COLUMN last_used_at TEXT;")
+            }
+        }
+
         return migrator
     }
 }

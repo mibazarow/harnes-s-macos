@@ -20,6 +20,7 @@ final class ChatStore {
     private var planMode = false
     private var checkpointCovered: Int = 0
     private var registry: ToolRegistry?
+    private var memoryTouchedThisTurn = false
 
     init(services: AppServices? = nil) {
         self.services = services
@@ -56,6 +57,7 @@ final class ChatStore {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
 
+        memoryTouchedThisTurn = false
         messages.append(ChatMessage(role: .user, text: trimmed, attachments: attachments))
 
         if let services {
@@ -376,9 +378,23 @@ final class ChatStore {
             system += "\n\n# Conversation checkpoint (older messages)\n" + checkpointSummary
         }
 
-        if let services, let memories = try? await services.memory.recent(limit: 40), !memories.isEmpty {
-            let lines = memories.prefix(40).map { "- [\($0.kind)] \($0.content)" }.joined(separator: "\n")
-            system += "\n\n# Saved user memory\nThese facts are already known. Use them without asking again.\n" + lines
+        if let services, let memories = try? await services.memory.forPrompt(limit: 40), !memories.isEmpty {
+            let lines = memories.map { item in
+                let mark = item.pinned ? "📌 " : ""
+                return "- \(mark)[\(item.kind)] \(item.content)"
+            }.joined(separator: "\n")
+            if !memoryTouchedThisTurn {
+                memoryTouchedThisTurn = true
+                try? await services.memory.touch(ids: memories.map(\.id))
+            }
+            system += """
+
+
+            # Saved user memory
+            These facts are already known. Use them without asking again. Do not restate them to the user just to confirm.
+            📌 marks a fact the user asked to remember explicitly; treat it as fixed and never drop it.
+            \(lines)
+            """
         }
 
         if let services {

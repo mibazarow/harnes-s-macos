@@ -240,11 +240,24 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "memory_add",
-            description: "Save a durable fact to user memory.",
+            description: "Save a durable fact to user memory. Use for stable preferences, project conventions, decisions and corrections the user makes. Do not save one-off task state, things readable from files, secrets (use secret_save) or anything the user did not confirm.",
             parameters: schema([
-                "text": ["type": "string"],
-                "kind": ["type": "string", "description": "fact | decision | preference | pattern"]
+                "text": ["type": "string", "description": "One self-contained fact, without pronouns"],
+                "kind": ["type": "string", "description": "fact | decision | preference | pattern"],
+                "pinned": ["type": "boolean", "description": "true when the user asked to remember this explicitly"]
             ], required: ["text"])
+        ),
+        ToolDefinition(
+            name: "memory_forget",
+            description: "Delete saved memory by id, or by text query when the user asks to forget something.",
+            parameters: schema([
+                "query": ["type": "string", "description": "Memory id or text describing what to forget"]
+            ], required: ["query"])
+        ),
+        ToolDefinition(
+            name: "memory_list",
+            description: "List saved memory records with ids, so you can point at or delete a specific one.",
+            parameters: schema([:], required: [])
         ),
         ToolDefinition(
             name: "memory_search",

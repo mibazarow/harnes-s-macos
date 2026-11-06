@@ -103,6 +103,9 @@ struct MemoryItem: Identifiable, Sendable, Equatable {
     let kind: String
     let tags: [String]
     let createdAt: String
+    let pinned: Bool
+    let hits: Int
+    let lastUsedAt: String?
     var score: Double?
 
     var snippet: String {

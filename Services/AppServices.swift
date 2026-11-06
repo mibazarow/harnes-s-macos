@@ -47,7 +47,14 @@ struct AppServices: Sendable {
         do {
             try AppPaths.bootstrap()
             let database = try AppDatabase(path: AppPaths.databaseURL)
-            return AppServices(database: database)
+            let services = AppServices(database: database)
+            Task.detached(priority: .utility) {
+                if let pruned = try? await services.memory.pruneUnused(), pruned > 0 {
+                    Logger(subsystem: "app.project-s.swift", category: "memory")
+                        .info("Память: удалено \(pruned, privacy: .public) неиспользуемых записей")
+                }
+            }
+            return services
         } catch {
             Logger(subsystem: "app.project-s.swift", category: "storage")
                 .error("Не удалось открыть базу данных: \(error.localizedDescription, privacy: .public)")

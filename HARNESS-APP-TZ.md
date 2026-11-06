@@ -365,7 +365,7 @@ HARNES_S_DATA/
 
 ### 9.4 Знания и агент
 
-`memory_add`, `memory_search`, `secret_save`, `secret_get`, `secret_search`, `skill_list`, `skill_read`, `skill_install`, `mcp_list`, `mcp_tools`, `todowrite`, `todo_read`, `schedule_add`, `schedule_list`, `schedule_remove`, `task` (изолированный подагент), плюс все инструменты MCP как `mcp__<server>__<tool>`.
+`memory_add`, `memory_search`, `memory_forget`, `memory_list`, `secret_save`, `secret_get`, `secret_search`, `skill_list`, `skill_read`, `skill_install`, `mcp_list`, `mcp_tools`, `todowrite`, `todo_read`, `schedule_add`, `schedule_list`, `schedule_remove`, `task` (изолированный подагент), плюс все инструменты MCP как `mcp__<server>__<tool>`.
 
 `task` запускает отдельный цикл со своим контекстом, без доступа к секретам и планировщику, и возвращает только итог.
 
@@ -381,10 +381,14 @@ HARNES_S_DATA/
 
 - Дедупликация: перед вставкой считается Jaccard по множествам слов (длиной от 2 символов). При совпадении ≥ 0.5 запись обновляется, а не дублируется. Порог подобран так, чтобы пересказ и отрицание («любит кофе» / «не любит кофе») схлопывались в одну запись.
 - После записи считается эмбеддинг и кладётся в `embeddings`.
+- Решение «запоминать или нет» принимает модель по правилам из системного промпта: сохраняются устойчивые предпочтения, соглашения проекта, резкие поправки пользователя и принятые решения; не сохраняются разовое состояние задачи, догадки, содержимое файлов и секреты. Явное «запомни» ставит `pinned = 1` и не может быть вытеснено.
+- `memory_forget` удаляет запись по id или по текстовому запросу; закреплённые записи удаляются только при явном указании на них. `memory_list` показывает id для точечных операций.
+- `/memory forget`, `/memory pin`, `/memory unpin` делают то же из чата.
 
 ### 10.2 Чтение
 
-- В системный промпт подмешиваются последние 40 фактов: они доступны без вызова инструмента.
+- В системный промпт попадают 40 записей: сначала закреплённые, затем недавно использованные (`last_used_at`, иначе `updated_at`). Каждое обращение помечает записи как использованные (`hits + 1`), поэтому невостребованная память опускается вниз сама.
+- Саморефлексия: при запуске удаляются незакреплённые записи без единого обращения старше 90 дней. Явно закреплённое не трогается никогда.
 - `memory_search` — гибридный поиск: FTS5-ранжирование и косинус по эмбеддингам, слияние через взаимное ранжированное объединение (RRF, k = 60).
 - Если эмбеддингов нет, поиск работает только по FTS и не падает.
 
@@ -597,7 +601,7 @@ python3 Scripts/install_skills.py --include-gsd --gsd-runtime ~/.config/kilo ~/.
 
 ## 19. Тестирование
 
-Обязательный минимум (реализовано 72 теста):
+Обязательный минимум (реализовано 75 тестов):
 
 - клиент провайдера: сборка URL, кодирование запроса, reasoning, инструменты, изображения;
 - интеграция с локальным SSE-сервером: текст, размышления, вызовы инструментов, ошибки;
@@ -666,7 +670,7 @@ python3 Scripts/install_skills.py --include-gsd --gsd-runtime ~/.config/kilo ~/.
    xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Debug -derivedDataPath .build build
    xcodebuild -project Harness.xcodeproj -scheme Harness -derivedDataPath .build -destination 'platform=macOS' test
    ```
-   Ожидаемо: сборка без ошибок, 72 теста, 1 пропущен (живой scrapling), 0 падений.
+   Ожидаемо: сборка без ошибок, 75 тестов, 1 пропущен (живой scrapling), 0 падений.
 3. **Релиз.**
    ```bash
    xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Release -derivedDataPath .build build

@@ -64,7 +64,7 @@ actor ToolRegistry {
     static let mutatingTools: Set<String> = [
         "fs_write", "edit_file", "apply_patch", "trash_paths", "restore_trashed", "restore_version",
         "git_commit", "git_stash",
-        "bash", "schedule_add", "schedule_remove", "memory_add", "secret_save",
+        "bash", "schedule_add", "schedule_remove", "memory_add", "memory_forget", "secret_save",
         "skill_install", "index_workspace", "todowrite", "mcp__"
     ]
 
@@ -150,6 +150,8 @@ actor ToolRegistry {
             case "schedule_remove": return try scheduleRemove(args)
             case "memory_add": return try await memoryAdd(args)
             case "memory_search": return try await memorySearch(args)
+            case "memory_forget": return try await memoryForget(args)
+            case "memory_list": return try await memoryList(args)
             case "secret_save": return try await secretSave(args)
             case "secret_get": return try await secretGet(args)
             case "secret_search": return try await secretSearch(args)
@@ -801,14 +803,40 @@ actor ToolRegistry {
     private func memoryAdd(_ args: [String: Any]) async throws -> ToolResult {
         guard let memory else { return .fail("Память недоступна") }
         guard let text = args["text"] as? String else { return .fail("text обязателен") }
-        let item = try await memory.add(text, kind: (args["kind"] as? String) ?? "fact")
+        let pinned = (args["pinned"] as? Bool) ?? false
+        let item = try await memory.add(
+            text,
+            kind: (args["kind"] as? String) ?? "fact",
+            pinned: pinned
+        )
 
         if let embeddings, let vectors = try? await embeddings.embed([item.content]),
            let vector = vectors.first {
             try? await embeddings.store(refKind: "memory", refID: String(item.id), vector: vector)
         }
 
-        return .ok("Запомнил #\(item.id): \(item.content)")
+        let mark = item.pinned ? " (закреплено)" : ""
+        return .ok("Запомнил #\(item.id)\(mark): \(item.content)")
+    }
+
+    private func memoryForget(_ args: [String: Any]) async throws -> ToolResult {
+        guard let memory else { return .fail("Память недоступна") }
+        guard let query = args["query"] as? String, !query.isEmpty else {
+            return .fail("query обязателен: id записи или текст")
+        }
+        let removed = try await memory.forget(query: query)
+        guard !removed.isEmpty else { return .ok("Ничего не найдено — забывать нечего.") }
+        return .ok("Забыто:\n" + removed.map { "#\($0.id) \($0.content)" }.joined(separator: "\n"))
+    }
+
+    private func memoryList(_ args: [String: Any]) async throws -> ToolResult {
+        guard let memory else { return .fail("Память недоступна") }
+        let items = try await memory.list(limit: 60)
+        guard !items.isEmpty else { return .ok("Память пуста.") }
+        return .ok(items.map { item in
+            let mark = item.pinned ? "📌 " : ""
+            return "#\(item.id) \(mark)[\(item.kind)] \(item.content)"
+        }.joined(separator: "\n"))
     }
 
     private func memorySearch(_ args: [String: Any]) async throws -> ToolResult {
