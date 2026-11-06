@@ -132,3 +132,19 @@ final class TreeRendererTests: XCTestCase {
         XCTAssertTrue(output.contains("main.js"))
     }
 }
+
+final class FolderAttachmentTests: XCTestCase {
+    func testFolderAttachmentCarriesPathNotData() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("folder-attach-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let attachment = ChatAttachment(folder: url)
+        XCTAssertEqual(attachment.kind, .folder)
+        XCTAssertEqual(attachment.path, url.path)
+        XCTAssertEqual(attachment.name, url.lastPathComponent)
+        XCTAssertTrue(attachment.data.isEmpty)
+        XCTAssertNil(attachment.thumbnail)
+    }
+}

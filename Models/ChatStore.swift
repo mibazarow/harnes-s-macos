@@ -416,6 +416,8 @@ final class ChatStore {
             case .text:
                 let body = String(decoding: attachment.data, as: UTF8.self)
                 userText += "\n\n<file name=\"\(attachment.name)\" path=\"\(attachment.path)\">\n\(body.prefix(20_000))\n</file>"
+            case .folder:
+                userText += "\n\n[папка: \(attachment.path)]"
             case .other:
                 userText += "\n\n[приложен файл: \(attachment.path)]"
             }

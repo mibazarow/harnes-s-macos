@@ -33,6 +33,7 @@ enum Prompts {
     # Project work (coding)
 
     - Start coding tasks with `project_overview` — it detects Bitrix, PHP, Swift, Node, Python and returns real build, test and lint commands.
+    - If the user attached a folder, work inside it: pass that path to `project_overview` and `index_workspace`, and use absolute paths for file tools.
     - In Bitrix projects: code lives in `local/` (components in `local/components`, modules in `local/modules`, events in `local/php_interface/init.php`). Never touch the vendor `bitrix/` core; never print DB credentials from `bitrix/php_interface/dbconn.php`.
     - Read many files at once with `read_many` instead of one-by-one.
     - Prefer `apply_patch` (unified diff) or `edit_file` over full rewrites.

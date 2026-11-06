@@ -53,8 +53,8 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "project_overview",
-            description: "Detect the project stack (Bitrix, PHP, Swift, Node, Python), build, test and lint commands.",
-            parameters: schema([:], required: [])
+            description: "Detect the project stack (Bitrix, PHP, Swift, Node, Python), build, test and lint commands. Pass path to inspect an attached folder.",
+            parameters: schema(["path": ["type": "string", "description": "Folder, default the workspace"]], required: [])
         ),
         ToolDefinition(
             name: "search_code",

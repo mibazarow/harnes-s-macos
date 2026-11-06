@@ -129,13 +129,15 @@ struct AttachmentGrid: View {
                     .help("Открыть \(attachment.name)")
                 } else {
                     HStack(spacing: 8) {
-                        Image(systemName: attachment.kind == .text ? "doc.text" : "doc")
+                        Image(systemName: symbol(for: attachment.kind))
                             .foregroundStyle(palette.dim)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(attachment.name)
                                 .foregroundStyle(palette.text)
-                            Text(attachment.summary)
+                            Text(attachment.kind == .folder ? attachment.path : attachment.summary)
                                 .foregroundStyle(palette.faint)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
                         }
                     }
                     .font(AppFont.mono(max(fontSize - 2, 9)))
@@ -145,6 +147,15 @@ struct AttachmentGrid: View {
                 }
             }
         }
+    }
+}
+
+private func symbol(for kind: ChatAttachment.Kind) -> String {
+    switch kind {
+    case .folder: "folder"
+    case .text: "doc.text"
+    case .image: "photo"
+    case .other: "doc"
     }
 }
 

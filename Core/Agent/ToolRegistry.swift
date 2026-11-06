@@ -112,7 +112,7 @@ actor ToolRegistry {
             case "edit_file": return try await editFile(args)
             case "apply_patch": return try await applyPatch(args)
             case "read_many": return try readMany(args)
-            case "project_overview": return projectOverview()
+            case "project_overview": return projectOverview(args)
             case "search_code": return await searchCode(args)
             case "git_commit": return try gitCommit(args)
             case "git_stash": return try gitStash(args)
@@ -529,9 +529,10 @@ actor ToolRegistry {
         return .ok(blocks.joined(separator: "\n\n"))
     }
 
-    private func projectOverview() -> ToolResult {
-        let profile = ProjectInspector(workspace: workspace).inspect()
-        return .ok(ProjectInspector(workspace: workspace).render(profile))
+    private func projectOverview(_ args: [String: Any]) -> ToolResult {
+        let root = (args["path"] as? String).map(resolve) ?? workspace
+        let inspector = ProjectInspector(workspace: root)
+        return .ok(inspector.render(inspector.inspect()))
     }
 
     private func searchCode(_ args: [String: Any]) async -> ToolResult {

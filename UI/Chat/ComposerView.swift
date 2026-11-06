@@ -81,6 +81,16 @@ struct ComposerView: View {
                     .help("Прикрепить файл")
                     .accessibilityLabel("Прикрепить файл")
 
+                    Button(action: addFolder) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(palette.dim)
+                            .frame(width: 26, height: 26)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Выбрать папку для работы")
+                    .accessibilityLabel("Выбрать папку")
+
                     if isStreaming {
                         Button(action: onStop) {
                             Image(systemName: "stop.fill")
@@ -161,6 +171,22 @@ struct ComposerView: View {
         }
     }
 
+    private func addFolder() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = false
+        panel.prompt = "Выбрать папку"
+        panel.title = "Папка для работы"
+        if panel.runModal() == .OK, let url = panel.url {
+            let folder = ChatAttachment(folder: url)
+            if !attachments.contains(where: { $0.kind == .folder && $0.path == folder.path }) {
+                attachments.append(folder)
+            }
+        }
+    }
+
     /// Collects dropped URLs in a lock-protected box: `NSItemProvider` completions
     /// arrive on arbitrary queues, so a captured `var` would be a data race.
     private final class URLBox: @unchecked Sendable {
@@ -207,6 +233,15 @@ struct AttachmentChip: View {
     let fontSize: CGFloat
     let onRemove: () -> Void
 
+    private var chipSymbol: String {
+        switch attachment.kind {
+        case .folder: "folder"
+        case .text: "doc.text"
+        case .image: "photo"
+        case .other: "doc"
+        }
+    }
+
     var body: some View {
         HStack(spacing: 6) {
             if let thumbnail = attachment.thumbnail, let image = NSImage(data: thumbnail) {
@@ -216,7 +251,7 @@ struct AttachmentChip: View {
                     .frame(width: 28, height: 28)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             } else {
-                Image(systemName: attachment.kind == .text ? "doc.text" : "doc")
+                Image(systemName: chipSymbol)
                     .font(.system(size: 13))
                     .foregroundStyle(palette.dim)
                     .frame(width: 28, height: 28)

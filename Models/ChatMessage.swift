@@ -5,6 +5,7 @@ struct ChatAttachment: Identifiable, Sendable, Equatable {
     enum Kind: String, Sendable {
         case image
         case text
+        case folder
         case other
     }
 
@@ -46,6 +47,17 @@ struct ChatAttachment: Identifiable, Sendable, Equatable {
         self.byteCount = data.count
         self.data = data
         self.thumbnail = kind == .image ? Self.thumbnail(from: data) : nil
+    }
+
+    /// A directory the user picked as the context for this turn.
+    init(folder url: URL) {
+        self.id = UUID()
+        self.name = url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
+        self.path = url.path
+        self.kind = .folder
+        self.byteCount = 0
+        self.data = Data()
+        self.thumbnail = nil
     }
 
     init(name: String, path: String, kind: Kind, data: Data, thumbnail: Data?) {
