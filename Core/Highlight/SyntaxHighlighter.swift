@@ -11,6 +11,7 @@ enum CodeLanguage: String, Sendable {
     case html
     case css
     case yaml
+    case diff
     case plain
 
     static func detect(_ raw: String?) -> CodeLanguage {
@@ -27,12 +28,15 @@ enum CodeLanguage: String, Sendable {
         case "html", "xml", "svg": return .html
         case "css", "scss": return .css
         case "yaml", "yml": return .yaml
+        case "diff", "patch", "udiff": return .diff
         default: return .plain
         }
     }
 
     var keywords: [String] {
         switch self {
+        case .diff:
+            return []
         case .swift:
             return [
                 "actor", "any", "as", "associatedtype", "async", "await", "break", "case",
@@ -100,7 +104,7 @@ enum CodeLanguage: String, Sendable {
             return #"--[^\n]*|/\*[\s\S]*?\*/"#
         case .html:
             return #"<!--[\s\S]*?-->"#
-        case .json, .plain:
+        case .json, .plain, .diff:
             return nil
         }
     }
@@ -115,7 +119,7 @@ enum CodeLanguage: String, Sendable {
             return #"`(?:\\.|[^`\\])*`|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*""#
         case .html:
             return #""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'"#
-        case .plain:
+        case .plain, .diff:
             return nil
         default:
             return #"'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*""#
@@ -133,6 +137,10 @@ struct SyntaxHighlighter {
         var plain = AttributedString(code)
         plain.font = baseFont
         plain.foregroundColor = palette.assistantText
+
+        // Diffs are colored by line, not by token: `-`/`+` only mean anything at the
+        // start of a line, and a token pass would paint the code inside them anyway.
+        if language == .diff { return highlightDiff(code, font: baseFont) }
 
         guard let regex = compiledRegex() else { return plain }
 
@@ -164,6 +172,30 @@ struct SyntaxHighlighter {
             result.append(tail)
         }
 
+        return result
+    }
+
+    private func highlightDiff(_ code: String, font: Font) -> AttributedString {
+        var result = AttributedString()
+        let lines = code.split(separator: "\n", omittingEmptySubsequences: false)
+        for (index, line) in lines.enumerated() {
+            let ending = index == lines.count - 1 ? "" : "\n"
+            var chunk = AttributedString(String(line) + ending)
+            chunk.font = font
+            let text = String(line)
+            if text.hasPrefix("+++") || text.hasPrefix("---") {
+                chunk.foregroundColor = palette.type
+            } else if text.hasPrefix("+") {
+                chunk.foregroundColor = palette.accent
+            } else if text.hasPrefix("-") {
+                chunk.foregroundColor = palette.dim
+            } else if text.hasPrefix("@@") {
+                chunk.foregroundColor = palette.keyword
+            } else {
+                chunk.foregroundColor = palette.assistantText
+            }
+            result.append(chunk)
+        }
         return result
     }
 

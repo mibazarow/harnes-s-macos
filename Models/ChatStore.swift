@@ -56,6 +56,13 @@ final class ChatStore {
                 embeddings: $0.embeddings
             )
         }
+        #if DEBUG
+        if let demo = DemoTranscript.messages {
+            self.messages = demo
+            return
+        }
+        #endif
+
         self.messages = [
             ChatMessage(
                 role: .assistant,

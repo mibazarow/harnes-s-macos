@@ -2,7 +2,15 @@ import Foundation
 
 enum AppPaths {
     static var dataDirectory: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        #if DEBUG
+        // Demo and screenshot runs use a throwaway folder instead of the real one.
+        // Not compiled into Release, so a shipped build always uses the real path.
+        if let override = ProcessInfo.processInfo.environment["HARNESS_DATA_DIR"],
+           !override.trimmingCharacters(in: .whitespaces).isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        #endif
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("HARNES_S_DATA", isDirectory: true)
     }
 

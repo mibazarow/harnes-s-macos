@@ -83,6 +83,10 @@ struct RootView: View {
     }
 
     private var modelLabel: String? {
+        #if DEBUG
+        // Demo screenshots show a finished, working install — not a download in flight.
+        if DemoTranscript.scenario != nil { return nil }
+        #endif
         guard let installer = services?.modelInstaller else { return nil }
         switch installer.phase {
         case .checking, .ready:
