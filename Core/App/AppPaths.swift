@@ -30,6 +30,12 @@ enum AppPaths {
         dataDirectory.appendingPathComponent("models", isDirectory: true)
     }
 
+    /// Where the EmbeddingGemma 2 files live. Downloaded after install, not shipped
+    /// inside the app bundle, so the data folder stays the one movable unit.
+    static var embeddingModelDirectory: URL {
+        modelsDirectory.appendingPathComponent("embeddinggemma-2", isDirectory: true)
+    }
+
     static var workspaceDirectory: URL {
         dataDirectory.appendingPathComponent("workspace", isDirectory: true)
     }

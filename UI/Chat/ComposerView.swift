@@ -13,6 +13,8 @@ struct ComposerView: View {
     let providerLabel: String
     let contextLabel: String
     let contextWarning: Bool
+    let modelLabel: String?
+    let modelWarning: Bool
     let onSend: () -> Void
     let onStop: () -> Void
 
@@ -135,6 +137,14 @@ struct ComposerView: View {
                     if queuedCount > 0 {
                         Text("· в очереди: \(queuedCount)")
                             .foregroundStyle(palette.reasoning)
+                    }
+
+                    if let modelLabel {
+                        Text("· \(modelLabel)")
+                            .foregroundStyle(modelWarning ? palette.reasoning : palette.faint)
+                            .help(modelWarning
+                                  ? "Модель эмбеддингов не скачалась. Семантический поиск работает по ключевым словам; загрузка повторится при следующем запуске."
+                                  : "Скачивается встроенная модель эмбеддингов. До конца загрузки поиск по памяти работает по ключевым словам.")
                     }
 
                     Spacer(minLength: 8)

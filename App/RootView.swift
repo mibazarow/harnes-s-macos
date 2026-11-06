@@ -37,6 +37,8 @@ struct RootView: View {
                 providerLabel: providerDirectory.label,
                 contextLabel: contextLabel,
                 contextWarning: contextPlan.isOverThreshold,
+                modelLabel: modelLabel,
+                modelWarning: modelWarning,
                 onSend: send,
                 onStop: chat.stop
             )
@@ -48,10 +50,22 @@ struct RootView: View {
         .task {
             chat.autopilot = settings.autopilot
             chat.compactionThreshold = settings.compactionThresholdPercent
+            services?.modelInstaller?.startIfNeeded()
             await chat.loadHistory()
             await providerDirectory.reload()
             await chat.warmUpMCP()
             startScheduler()
+        }
+        .onChange(of: services?.modelInstaller?.phase) { oldValue, newValue in
+            guard let newValue else { return }
+            switch newValue {
+            case .ready where oldValue?.isDownloading == true:
+                chat.notice("Модель эмбеддингов скачана. Семантический поиск по памяти и рабочей папке включён.")
+            case .failed(let reason):
+                chat.notice("Модель эмбеддингов не скачалась: \(reason). Поиск пока работает по ключевым словам; загрузка повторится при следующем запуске.")
+            default:
+                break
+            }
         }
         .onChange(of: settings.autopilot) { _, newValue in
             chat.autopilot = newValue
@@ -66,6 +80,23 @@ struct RootView: View {
             guard used > threshold else { return }
             chat.notice("Окно контекста уменьшилось: \(oldValue) → \(newValue) токенов. Сейчас в истории ~\(used). При следующем ответе старые сообщения свернутся в саммари; из базы ничего не удалится.")
         }
+    }
+
+    private var modelLabel: String? {
+        guard let installer = services?.modelInstaller else { return nil }
+        switch installer.phase {
+        case .checking, .ready:
+            return nil
+        case .downloading(let received, let total):
+            let percent = total > 0 ? Int(Double(received) / Double(total) * 100) : 0
+            return "эмбеддинги \(percent)%"
+        case .failed:
+            return "эмбеддинги: ошибка загрузки"
+        }
+    }
+
+    private var modelWarning: Bool {
+        if case .failed = services?.modelInstaller?.phase { true } else { false }
     }
 
     private func startScheduler() {

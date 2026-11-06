@@ -19,14 +19,17 @@ struct AppServices: Sendable {
     let skills: SkillsService
     let mcp: MCPService
     let mcpManager: MCPManager
+    /// Installs the embedding model into the data folder after a fresh install.
+    let modelInstaller: EmbeddingModelInstaller?
 
-    init(database: AppDatabase) {
+    init(database: AppDatabase, modelInstaller: EmbeddingModelInstaller? = nil) {
         self.database = database
         let providers = ProvidersService(database: database)
         self.providers = providers
         self.secrets = SecretsService(database: database)
         self.memory = MemoryService(database: database)
-        self.embeddings = EmbeddingsService(database: database)
+        self.modelInstaller = modelInstaller
+        self.embeddings = EmbeddingsService(database: database, installer: modelInstaller)
         self.history = ChatHistoryService(database: database)
         self.compaction = CompactionService()
         self.indexer = WorkspaceIndexer(
@@ -44,6 +47,7 @@ struct AppServices: Sendable {
         self.mcpManager = MCPManager(configService: mcpConfig)
     }
 
+    @MainActor
     static func live() -> AppServices? {
         do {
             // The test bundle launches this app as its host, so without this guard a
@@ -54,7 +58,7 @@ struct AppServices: Sendable {
             }
             try AppPaths.bootstrap()
             let database = try AppDatabase(path: AppPaths.databaseURL)
-            let services = AppServices(database: database)
+            let services = AppServices(database: database, modelInstaller: EmbeddingModelInstaller())
             Task.detached(priority: .utility) {
                 if let pruned = try? await services.memory.pruneUnused(), pruned > 0 {
                     Logger(subsystem: "app.project-s.swift", category: "memory")

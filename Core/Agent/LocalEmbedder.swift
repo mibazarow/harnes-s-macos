@@ -18,13 +18,16 @@ actor LocalEmbedder {
     private let modelDirectory: URL
     private var session: ORTSessionBox?
     private var tokenizer: TokenizerLoader.Handle?
+    /// Inputs the loaded graph actually declares. Exports differ: the multimodal
+    /// one wants image/video/audio features, the text-only one rejects them.
+    private var declaredInputs: Set<String> = []
 
     private let maxSequenceLength = 512
     /// The model takes a batch, but a big one multiplies peak memory. Eight keeps a
     /// 512-token window comfortably inside a few hundred megabytes.
     private let batchSize = 8
 
-    init(modelDirectory: URL = AppPaths.modelsDirectory.appendingPathComponent("embeddinggemma-2", isDirectory: true)) {
+    init(modelDirectory: URL = AppPaths.embeddingModelDirectory) {
         self.modelDirectory = modelDirectory
     }
 
@@ -66,7 +69,9 @@ actor LocalEmbedder {
         let options = try ORTSessionOptions()
         try options.setGraphOptimizationLevel(.basic)
         try options.setIntraOpNumThreads(4)
-        session = ORTSessionBox(session: try ORTSession(env: env, modelPath: modelPath, sessionOptions: options))
+        let session = try ORTSession(env: env, modelPath: modelPath, sessionOptions: options)
+        declaredInputs = Set(try session.inputNames())
+        self.session = ORTSessionBox(session: session)
         #else
         throw NSError(domain: "LocalEmbedder", code: 2, userInfo: [
             NSLocalizedDescriptionKey: "OnnxRuntimeBindings не подключён"
@@ -153,14 +158,16 @@ actor LocalEmbedder {
             shape: [0, 512]
         )
 
+        var inputs: [String: ORTValue] = [
+            "input_ids": inputIDsValue,
+            "attention_mask": maskValue
+        ]
+        for optional in ["image_features", "video_features", "audio_features"] where declaredInputs.contains(optional) {
+            inputs[optional] = emptyFeatures
+        }
+
         let outputs = try box.session.run(
-            withInputs: [
-                "input_ids": inputIDsValue,
-                "attention_mask": maskValue,
-                "image_features": emptyFeatures,
-                "video_features": emptyFeatures,
-                "audio_features": emptyFeatures
-            ],
+            withInputs: inputs,
             outputNames: Set(["sentence_embedding"]),
             runOptions: nil
         )

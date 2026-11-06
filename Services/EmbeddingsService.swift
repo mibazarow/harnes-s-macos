@@ -8,14 +8,21 @@ import GRDB
 actor EmbeddingsService {
     private let database: AppDatabase
     private let local: LocalEmbedder
+    /// Only used to tell "still downloading" from "not installed at all" in errors.
+    private let installer: EmbeddingModelInstaller?
 
     /// Last few query vectors. Repeating a search — or re-running the same command —
     /// costs nothing instead of a full model pass.
     private var queryCache: [(text: String, vector: Vector)] = []
     private let queryCacheLimit = 8
 
-    init(database: AppDatabase, local: LocalEmbedder = LocalEmbedder()) {
+    init(
+        database: AppDatabase,
+        installer: EmbeddingModelInstaller? = nil,
+        local: LocalEmbedder = LocalEmbedder()
+    ) {
         self.database = database
+        self.installer = installer
         self.local = local
     }
 
@@ -31,6 +38,14 @@ actor EmbeddingsService {
 
     func embed(_ texts: [String]) async throws -> [Vector] {
         guard !texts.isEmpty else { return [] }
+        guard local.isAvailableOnDisk else {
+            let downloading = await installer?.phase.isDownloading ?? false
+            throw EmbeddingError.unavailable(
+                downloading
+                    ? "модель эмбеддингов ещё скачивается, поиск пока текстовый"
+                    : "модель эмбеддингов не установлена"
+            )
+        }
         try await local.prepare()
         return try await local.embed(texts).map { Vector(values: $0, model: "embeddinggemma-2") }
     }
@@ -139,5 +154,15 @@ actor EmbeddingsService {
         var result: Float = 0
         vDSP_dotpr(a, 1, b, 1, &result, vDSP_Length(a.count))
         return result
+    }
+}
+
+enum EmbeddingError: LocalizedError {
+    case unavailable(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unavailable(let reason): reason
+        }
     }
 }
