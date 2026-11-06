@@ -79,8 +79,13 @@ actor CompactionService {
     ) async throws -> String {
         guard !messages.isEmpty else { return previousSummary ?? "" }
 
+        // Bigger windows get bigger batches: the summary request must fit the model it
+        // is sent to, but there is no reason to make twenty round-trips when ten would
+        // do. The cap keeps a single request comfortably inside any modern window.
+        let budget = max(8_000, min(60_000, provider.contextWindow / 4))
+
         var summary = previousSummary ?? ""
-        for batch in Self.batches(messages) {
+        for batch in Self.batches(messages, budget: budget) {
             summary = try await summarize(
                 batch: batch,
                 provider: provider,
