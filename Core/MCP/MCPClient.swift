@@ -311,11 +311,4 @@ actor MCPManager {
         sessions[config.name] = created
         return created
     }
-
-    func restartAll() async {
-        for session in sessions.values {
-            await session.shutdown()
-        }
-        sessions.removeAll()
-    }
 }

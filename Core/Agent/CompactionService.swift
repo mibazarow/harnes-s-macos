@@ -51,12 +51,6 @@ actor CompactionService {
         }
     }
 
-    func clearCheckpoint(database: AppDatabase) throws {
-        try database.queue.write { db in
-            try db.execute(sql: "DELETE FROM app_state WHERE key = ?", arguments: [Self.key])
-        }
-    }
-
     /// Asks the model to fold `messages` into a compact factual summary.
     func summarize(
         messages: [ContextMessage],

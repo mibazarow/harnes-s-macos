@@ -3,11 +3,6 @@ import Foundation
 /// Best-effort LLM pass that writes a short tone card from the user's own messages.
 /// Mirrors Mecha: bounded input, one line out, cooldown, never blocks the chat.
 struct StyleCardExtractor: Sendable {
-    struct Result: Sendable {
-        let card: String
-        let samples: Int
-    }
-
     static let minSamples = 20
     static let maxInputMessages = 20
     static let maxInputMessageChars = 300

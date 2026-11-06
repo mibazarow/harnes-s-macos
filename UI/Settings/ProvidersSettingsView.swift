@@ -147,23 +147,8 @@ struct ProvidersSettingsView: View {
 
             Spacer()
 
-            Button {
-                editing = provider
-            } label: {
-                Image(systemName: "pencil")
-            }
-            .buttonStyle(.borderless)
-            .help("Изменить")
-
             Menu {
-                Button("Изменить") { editing = provider }
-                if !provider.isDefault {
-                    Button("Сделать основным") {
-                        Task { await makeDefault(provider, services: services) }
-                    }
-                }
-                Divider()
-                Button("Удалить", role: .destructive) { deleting = provider }
+                rowActions(provider, services: services)
             } label: {
                 Image(systemName: "ellipsis")
             }
@@ -172,14 +157,20 @@ struct ProvidersSettingsView: View {
         }
         .padding(.vertical, 4)
         .contextMenu {
-            Button("Изменить") { editing = provider }
-            if !provider.isDefault {
-                Button("Сделать основным") {
-                    Task { await makeDefault(provider, services: services) }
-                }
-            }
-            Button("Удалить", role: .destructive) { deleting = provider }
+            rowActions(provider, services: services)
         }
+    }
+
+    @ViewBuilder
+    private func rowActions(_ provider: ProviderModel, services: AppServices) -> some View {
+        Button("Изменить") { editing = provider }
+        if !provider.isDefault {
+            Button("Сделать основным") {
+                Task { await makeDefault(provider, services: services) }
+            }
+        }
+        Divider()
+        Button("Удалить", role: .destructive) { deleting = provider }
     }
 
     private func color(for health: String) -> Color {

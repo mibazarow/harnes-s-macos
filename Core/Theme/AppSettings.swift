@@ -6,8 +6,7 @@ import Observation
 final class AppSettings {
     private enum Key {
         static let fontSize = "fontSize"
-        static let fontFamily = "fontFamily"
-        static let lineSpacing = "lineSpacing"
+
         static let showTimestamps = "showTimestamps"
         static let compactionThresholdPercent = "compactionThresholdPercent"
         static let autopilot = "autopilot"
@@ -20,17 +19,11 @@ final class AppSettings {
     }
 
     var fontFamily: String {
-        didSet {
-            defaults.set(fontFamily, forKey: Key.fontFamily)
-            defaults.set(fontFamily, forKey: AppFont.defaultsKey)
-        }
+        didSet { defaults.set(fontFamily, forKey: AppFont.familyKey) }
     }
 
     var lineSpacing: Double {
-        didSet {
-            defaults.set(lineSpacing, forKey: Key.lineSpacing)
-            defaults.set(lineSpacing, forKey: AppFont.lineSpacingKey)
-        }
+        didSet { defaults.set(lineSpacing, forKey: AppFont.lineSpacingKey) }
     }
 
     var showTimestamps: Bool {
@@ -51,14 +44,10 @@ final class AppSettings {
         let storedFontSize = defaults.double(forKey: Key.fontSize)
         self.fontSize = storedFontSize > 0 ? storedFontSize : 13
 
-        let storedFamily = defaults.string(forKey: Key.fontFamily) ?? AppFont.bundledFamily
-        self.fontFamily = storedFamily
-        defaults.set(storedFamily, forKey: AppFont.defaultsKey)
+        self.fontFamily = defaults.string(forKey: AppFont.familyKey) ?? AppFont.bundledFamily
 
-        let storedLineSpacing = defaults.double(forKey: Key.lineSpacing)
-        let resolvedSpacing = storedLineSpacing > 0 ? storedLineSpacing : 3
-        self.lineSpacing = resolvedSpacing
-        defaults.set(resolvedSpacing, forKey: AppFont.lineSpacingKey)
+        let storedLineSpacing = defaults.double(forKey: AppFont.lineSpacingKey)
+        self.lineSpacing = storedLineSpacing > 0 ? storedLineSpacing : 3
 
         if defaults.object(forKey: Key.showTimestamps) == nil {
             self.showTimestamps = true

@@ -10,7 +10,7 @@ import Foundation
 struct LoopGuard: Sendable {
     private var lastCallSignature: String?
     private var lastProgressSignature: String?
-    private(set) var consecutiveRepeats = 0
+    private var consecutiveRepeats = 0
     let maxIdenticalIterations: Int
 
     init(maxIdenticalIterations: Int = 3) {
@@ -27,12 +27,6 @@ struct LoopGuard: Sendable {
             consecutiveRepeats = 1
         }
         return consecutiveRepeats >= maxIdenticalIterations
-    }
-
-    mutating func reset() {
-        lastCallSignature = nil
-        lastProgressSignature = nil
-        consecutiveRepeats = 0
     }
 
     static func callSignature(_ calls: [ToolCall]) -> String {
@@ -69,43 +63,15 @@ enum NoAttemptGuard {
     static func shouldCorrect(toolCallsMadeInRun: Int, finalText: String) -> Bool {
         toolCallsMadeInRun == 0 && looksLikeIncapability(finalText)
     }
-
-    static func shouldCorrectOnce(
-        alreadyCorrected: Bool,
-        toolCallsMadeInRun: Int,
-        finalText: String
-    ) -> Bool {
-        !alreadyCorrected && shouldCorrect(toolCallsMadeInRun: toolCallsMadeInRun, finalText: finalText)
-    }
 }
 
 /// Guards against claiming an action was done when it was not: no tool was
 /// called, or the last tool result was an error.
 enum FalseSuccessGuard {
-    static let correctionPrompt = """
-    СТОП. Ты сообщил о выполнении, но инструмент не вызывался (или вернул ошибку). \
-    Либо вызови нужный инструмент и доложи по его результату, либо честно скажи, что не сделал.
-    """
-
     static let unverifiedSuccessNote = """
     Внимание: инструмент не подтвердил успешное выполнение — действие могло быть НЕ выполнено. \
     Проверь результат сам или переформулируй запрос.
     """
-
-    static let destructiveCorrectionPrompt = """
-    СТОП. Ты сообщил об удалении/очистке, но выполнение НЕ подтверждено результатом инструмента. \
-    Проверь результат фактически: пере-запроси состояние. Если не удалилось — честно скажи, что действие НЕ выполнено.
-    """
-
-    static let destructiveToolNames: Set<String> = [
-        "trash_paths", "restore_trashed", "restore_version"
-    ]
-
-    private static let destructiveClaimRoots = [
-        "удалил", "удалена", "удалены", "удалён", "удален", "удалено",
-        "очистил", "очищена", "очищено", "очищены",
-        "стёр", "стерт", "стёрт", "в корзин"
-    ]
 
     private static let actionRoots = [
         "созда", "добав", "поставь", "постав", "установ", "удали", "удал",
@@ -121,19 +87,6 @@ enum FalseSuccessGuard {
         "сохранён", "сохранен", "успешно", "записал"
     ]
 
-    static func isDestructiveTool(_ name: String) -> Bool {
-        let lower = name.lowercased()
-        return destructiveToolNames.contains(lower)
-            || lower.contains("delete") || lower.contains("trash")
-            || lower.contains("_remove") || lower.contains("_clear") || lower.contains("_empty")
-    }
-
-    static func claimsDestructiveDone(_ text: String) -> Bool {
-        guard !text.isEmpty else { return false }
-        let lower = text.lowercased()
-        return destructiveClaimRoots.contains { lower.contains($0) }
-    }
-
     static func looksLikeActionRequest(_ text: String) -> Bool {
         guard !text.isEmpty else { return false }
         let lower = text.lowercased()
@@ -144,13 +97,6 @@ enum FalseSuccessGuard {
         guard !text.isEmpty else { return false }
         let lower = text.lowercased()
         return successRoots.contains { lower.contains($0) }
-    }
-
-    static func shouldCorrectDestructive(
-        assistantText: String,
-        destructiveToolConfirmed: Bool
-    ) -> Bool {
-        claimsDestructiveDone(assistantText) && !destructiveToolConfirmed
     }
 
     static func shouldCorrect(

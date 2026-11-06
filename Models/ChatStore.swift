@@ -175,8 +175,7 @@ final class ChatStore {
                 // "Did not even try": refuse without a single tool call.
                 // One corrective turn, never a loop.
                 if !corrected,
-                   NoAttemptGuard.shouldCorrectOnce(
-                       alreadyCorrected: corrected,
+                   NoAttemptGuard.shouldCorrect(
                        toolCallsMadeInRun: toolCallsInTurn,
                        finalText: answer
                    ) {
@@ -542,6 +541,14 @@ final class ChatStore {
 
     func loadHistory() async {
         guard let services else { return }
+
+        // Restore the compaction checkpoint, otherwise a saved summary would be
+        // silently dropped on restart.
+        if let checkpoint = try? await services.compaction.loadCheckpoint(database: services.database) {
+            checkpointSummary = checkpoint.summary
+            checkpointCovered = checkpoint.coveredMessageCount
+        }
+
         let stored: [StoredMessage]
         do {
             stored = try await services.history.recent(limit: 60)

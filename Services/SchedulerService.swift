@@ -18,7 +18,6 @@ struct ScheduledTask: Identifiable, Sendable, Equatable {
 final class SchedulerService: @unchecked Sendable {
     private let database: AppDatabase
     private var timer: Task<Void, Never>?
-    private(set) var isRunning = false
 
     var onFire: (@Sendable (ScheduledTask) -> Void)?
 
@@ -115,7 +114,6 @@ final class SchedulerService: @unchecked Sendable {
 
     func start(intervalSeconds: Double = 30) {
         guard timer == nil else { return }
-        isRunning = true
 
         timer = Task.detached(priority: .utility) { [weak self] in
             while !Task.isCancelled {
@@ -129,7 +127,6 @@ final class SchedulerService: @unchecked Sendable {
     func stop() {
         timer?.cancel()
         timer = nil
-        isRunning = false
     }
 
     private func tick() {

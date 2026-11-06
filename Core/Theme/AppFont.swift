@@ -5,7 +5,7 @@ import SwiftUI
 /// family in Settings; the choice persists in UserDefaults.
 enum AppFont {
     static let bundledFamily = "Nordwand Mono"
-    static let defaultsKey = "fontFamily"
+    static let familyKey = "fontFamily"
     static let lineSpacingKey = "lineSpacing"
 
     nonisolated(unsafe) private static var didRegister = false
@@ -26,7 +26,7 @@ enum AppFont {
 
     /// Selected family name, or the bundled one when unset/missing.
     static var family: String {
-        let stored = UserDefaults.standard.string(forKey: defaultsKey)
+        let stored = UserDefaults.standard.string(forKey: familyKey)
         guard let stored, !stored.isEmpty, NSFont(name: stored, size: 13) != nil else {
             return bundledFamily
         }

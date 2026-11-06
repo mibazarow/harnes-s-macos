@@ -55,9 +55,6 @@ struct StyleTrait: Codable, Sendable, Equatable {
 struct StyleProfile: Codable, Sendable, Equatable {
     var version: Int = 1
     var samples: Int = 0
-    var sessions: Int = 0
-    var firstDay: Int?
-    var lastDay: Int?
     var lastMessageAt: Int64 = 0
     var mode: StyleMode = .auto
     var profanityEnabled: Bool = true
@@ -270,7 +267,6 @@ enum StyleReducer {
     static let decayPerWeek = 0.95
     static let decayMinValue = 0.2
     static let dropAfterWeeks = 2.0
-    static let sessionGapMillis: Int64 = 2 * 60 * 60 * 1000
 
     static func apply(
         _ profile: StyleProfile,
@@ -281,11 +277,7 @@ enum StyleReducer {
         guard signal.hasContent else { return profile }
 
         var updated = decay(profile, now: now)
-        let newSession = updated.lastMessageAt == 0 || now - updated.lastMessageAt > sessionGapMillis
         updated.samples += 1
-        if newSession { updated.sessions += 1 }
-        if updated.firstDay == nil { updated.firstDay = day }
-        updated.lastDay = day
         updated.lastMessageAt = now
 
         func observe(_ key: StyleTraitKey, applicable: Bool, hit: Bool) {

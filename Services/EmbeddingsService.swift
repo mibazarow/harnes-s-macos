@@ -19,29 +19,9 @@ actor EmbeddingsService {
         LocalEmbedder().isAvailableOnDisk
     }
 
-    func backendDescription() async -> String {
-        if let (_, model) = await embedModel(), await providerSupportsEmbeddings() {
-            return "провайдер · \(model)"
-        }
-        if local.isAvailableOnDisk {
-            return "локально · embeddinggemma-2"
-        }
-        return "нет (только FTS)"
-    }
-
-    private func providerSupportsEmbeddings() async -> Bool {
-        guard let (provider, _) = await embedModel() else { return false }
-        guard provider.embedModel != nil else { return false }
-        return true
-    }
-
     struct Vector: Sendable {
         let values: [Float]
         let model: String
-
-        var norm: Float {
-            sqrt(values.reduce(0) { $0 + $1 * $1 })
-        }
     }
 
     func embedModel() async -> (provider: ProviderModel, model: String)? {
@@ -139,8 +119,7 @@ actor EmbeddingsService {
     }
 
     static func encode(_ values: [Float]) -> Data {
-        var copy = values
-        return copy.withUnsafeBufferPointer { Data(buffer: $0) }
+        values.withUnsafeBufferPointer { Data(buffer: $0) }
     }
 
     static func decode(_ data: Data) -> [Float]? {

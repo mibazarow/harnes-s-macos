@@ -161,25 +161,36 @@ struct ComposerView: View {
         }
     }
 
+    /// Collects dropped URLs in a lock-protected box: `NSItemProvider` completions
+    /// arrive on arbitrary queues, so a captured `var` would be a data race.
+    private final class URLBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var urls: [URL] = []
+
+        func append(_ url: URL) {
+            lock.lock(); urls.append(url); lock.unlock()
+        }
+
+        var all: [URL] {
+            lock.lock(); defer { lock.unlock() }
+            return urls
+        }
+    }
+
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
         let group = DispatchGroup()
-        var urls: [URL] = []
-        let lock = NSLock()
+        let box = URLBox()
 
         for provider in providers {
             group.enter()
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                if let url {
-                    lock.lock()
-                    urls.append(url)
-                    lock.unlock()
-                }
+                if let url { box.append(url) }
                 group.leave()
             }
         }
 
         group.notify(queue: .main) {
-            appendFiles(urls)
+            appendFiles(box.all)
         }
         return true
     }

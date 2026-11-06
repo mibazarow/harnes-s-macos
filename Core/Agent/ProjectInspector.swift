@@ -69,7 +69,7 @@ struct ProjectInspector: Sendable {
             swift: swift,
             node: node,
             python: python,
-            buildCommand: buildCommand(swift: swift, node: node, bitrix: bitrix),
+            buildCommand: buildCommand(swift: swift, node: node),
             testCommand: testCommand(swift: swift, node: node, python: python),
             lintCommand: lintCommand(php: php, swift: swift, node: node, python: python),
             notes: notes
@@ -92,7 +92,7 @@ struct ProjectInspector: Sendable {
         return nil
     }
 
-    private func buildCommand(swift: Bool, node: Bool, bitrix: Bool) -> String? {
+    private func buildCommand(swift: Bool, node: Bool) -> String? {
         if swift {
             if FileManager.default.fileExists(atPath: workspace.appendingPathComponent("project.yml").path) {
                 return "xcodegen generate && xcodebuild -scheme $(ls *.xcodeproj | head -1 | sed 's/.xcodeproj//') build"
@@ -100,7 +100,6 @@ struct ProjectInspector: Sendable {
             return "swift build"
         }
         if node { return "npm run build" }
-        if bitrix { return nil }
         return nil
     }
 

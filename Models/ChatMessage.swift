@@ -16,8 +16,6 @@ struct ChatAttachment: Identifiable, Sendable, Equatable {
     let data: Data
     let thumbnail: Data?
 
-    var isImage: Bool { kind == .image }
-
     init?(url: URL) {
         let values = try? url.resourceValues(forKeys: [.fileSizeKey])
         let size = values?.fileSize ?? 0

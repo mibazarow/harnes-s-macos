@@ -14,7 +14,6 @@ actor LocalEmbedder {
     }
 
     private(set) var state: State = .unavailable("не инициализирован")
-    private(set) var modelName: String = "embeddinggemma-2"
 
     private let modelDirectory: URL
     private var session: ORTSessionBox?

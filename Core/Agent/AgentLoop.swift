@@ -25,7 +25,6 @@ struct AgentLoop: Sendable {
             let task = Task {
                 do {
                     var messages = history
-                    var toolOnlyMessages: [ProviderMessage] = []
                     let schemas = await registry.schemas()
 
                     var step = 0
@@ -74,7 +73,6 @@ struct AgentLoop: Sendable {
                             toolCalls: calls
                         )
                         messages.append(assistant)
-                        toolOnlyMessages.append(assistant)
 
                         if !streamedText.isEmpty {
                             continuation.yield(.delta("\n\n"))
@@ -104,7 +102,6 @@ struct AgentLoop: Sendable {
                                 toolCallID: call.id
                             )
                             messages.append(toolMessage)
-                            toolOnlyMessages.append(toolMessage)
                         }
 
                         // Progress-aware anti-loop: same calls returning the same
