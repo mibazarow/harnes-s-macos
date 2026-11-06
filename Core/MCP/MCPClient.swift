@@ -24,13 +24,15 @@ struct MCPToolDescriptor: Sendable {
         ["type": AnySendable("object"), "additionalProperties": AnySendable(true)]
     }
 
-    var compactDescription: String {
+    var argsLabel: String {
         let names = argumentNames
-        guard !names.isEmpty else { return description }
+        guard !names.isEmpty else { return "" }
         let required = requiredArguments
         let rendered = names.map { required.contains($0) ? "\($0)*" : $0 }
-        return description + " Args (* = required): " + rendered.joined(separator: ", ")
+        return " Args (* = required): " + rendered.joined(separator: ", ")
     }
+
+    var compactDescription: String { description + argsLabel }
 }
 
 enum MCPError: LocalizedError {

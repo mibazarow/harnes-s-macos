@@ -902,29 +902,21 @@ actor ToolRegistry {
             return .ok(renderMCPTool(match))
         }
 
-        if let server {
-            return .ok(filtered.map { "- \($0.name): \(String($0.description.prefix(200)))" + argsLine($0) }.joined(separator: "\n"))
+        if server != nil {
+            return .ok(filtered.map { "- \($0.name): \(String($0.description.prefix(200)))" + $0.argsLabel }.joined(separator: "\n"))
         }
 
         var lines: [String] = []
         for (name, group) in Dictionary(grouping: filtered, by: \.server).sorted(by: { $0.key < $1.key }) {
             lines.append("## \(name)")
-            lines.append(contentsOf: group.map { "- \($0.name): \(String($0.description.prefix(160)))" + argsLine($0) })
+            lines.append(contentsOf: group.map { "- \($0.name): \(String($0.description.prefix(160)))" + $0.argsLabel })
         }
         return .ok(String(lines.joined(separator: "\n").prefix(20_000)))
     }
 
-    private func argsLine(_ tool: MCPToolDescriptor) -> String {
-        let names = tool.argumentNames
-        guard !names.isEmpty else { return "" }
-        let required = tool.requiredArguments
-        let rendered = names.map { required.contains($0) ? "\($0)*" : $0 }
-        return " Args (* = required): " + rendered.joined(separator: ", ")
-    }
-
     private func renderMCPTool(_ tool: MCPToolDescriptor) -> String {
         var text = "# \(tool.server) / \(tool.name)\n\(tool.description)\n"
-        text += "Exposure: \(tool.exposure)" + argsLine(tool) + "\n\n"
+        text += "Exposure: \(tool.exposure)" + tool.argsLabel + "\n\n"
         let plain = tool.inputSchema.mapValues { $0.value }
         if let data = try? JSONSerialization.data(withJSONObject: plain, options: [.prettyPrinted, .sortedKeys]),
            let json = String(data: data, encoding: .utf8) {
