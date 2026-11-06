@@ -72,6 +72,19 @@ struct AnySendable: @unchecked Sendable {
 }
 
 struct ProviderClient: Sendable {
+    /// One session for every request: keeps the connection to the provider alive
+    /// between turns, so only the first request pays DNS and TLS.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.waitsForConnectivity = false
+        config.timeoutIntervalForRequest = 300
+        config.timeoutIntervalForResource = 600
+        config.httpMaximumConnectionsPerHost = 6
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.urlCache = nil
+        return URLSession(configuration: config)
+    }()
+
     func stream(
         provider: ProviderModel,
         model: String,
@@ -100,7 +113,7 @@ struct ProviderClient: Sendable {
                         tools: tools
                     )
 
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    let (bytes, response) = try await Self.session.bytes(for: request)
                     if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                         var body = Data()
                         for try await byte in bytes {

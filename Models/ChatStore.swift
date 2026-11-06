@@ -21,6 +21,7 @@ final class ChatStore {
     private var checkpointCovered: Int = 0
     private var registry: ToolRegistry?
     private var memoryTouchedThisTurn = false
+    private var compactionTask: Task<Void, Never>?
     private var oldestStoredID: Int64?
     private(set) var hasMoreHistory = false
     private(set) var isLoadingOlder = false
@@ -145,13 +146,16 @@ final class ChatStore {
             }
         )
 
-        await compactIfNeeded(provider: provider, model: model, services: services)
+        let prepStart = ContinuousClock.now
         var history = await buildHistory(
             text: text,
             attachments: attachments,
             contextWindow: provider.contextWindow,
             services: services
         )
+        let prepMs = Self.millis(since: prepStart)
+        let promptChars = history.reduce(0) { $0 + $1.content.count }
+        Self.logLatency("prep=\(prepMs)ms prompt=\(promptChars)ch messages=\(history.count) model=\(model)")
         let loop = AgentLoop(
             provider: provider,
             model: model,
@@ -164,8 +168,14 @@ final class ChatStore {
             while true {
                 var toolCallsInTurn = 0
 
+                var firstTokenLogged = false
+                let requestStart = ContinuousClock.now
                 for try await event in loop.run(history: history) {
                     if Task.isCancelled { break }
+                    if !firstTokenLogged {
+                        firstTokenLogged = true
+                        Self.logLatency("first_token=\(Self.millis(since: requestStart))ms")
+                    }
                     switch event {
                     case .delta(let chunk):
                         append(chunk, to: assistantID)
@@ -203,6 +213,9 @@ final class ChatStore {
 
             finish(assistantID)
             applyFalseSuccessGuard(userText: text, assistantID: assistantID)
+            // Compaction is bookkeeping, not part of answering: run it after the
+            // answer so it never adds a second model round-trip before the first token.
+            scheduleCompaction(provider: provider, model: model, services: services)
             await maybeExtractStyleCard(provider: provider, model: model, services: services)
         } catch {
             finish(assistantID, notice: "Ошибка: \(error.localizedDescription)")
@@ -348,6 +361,14 @@ final class ChatStore {
         return providers.first(where: \.isDefault) ?? providers.first
     }
 
+    private func scheduleCompaction(provider: ProviderModel, model: String, services: AppServices) {
+        guard compactionTask == nil else { return }
+        compactionTask = Task { [weak self] in
+            await self?.compactIfNeeded(provider: provider, model: model, services: services)
+            self?.compactionTask = nil
+        }
+    }
+
     private func compactIfNeeded(provider: ProviderModel, model: String, services: AppServices) async {
         let plan = contextPlan(
             contextWindow: provider.contextWindow,
@@ -483,6 +504,25 @@ final class ChatStore {
 
         history.append(ProviderMessage(role: .user, content: userText, images: images))
         return history
+    }
+
+    private static func millis(since start: ContinuousClock.Instant) -> Int {
+        let elapsed = ContinuousClock.now - start
+        return Int(elapsed.components.seconds * 1_000)
+            + Int(elapsed.components.attoseconds / 1_000_000_000_000_000)
+    }
+
+    private static func logLatency(_ line: String) {
+        let url = AppPaths.logsDirectory.appendingPathComponent("latency.log")
+        let stamped = Timestamps.now() + " " + line + "\n"
+        try? AppPaths.ensureDirectory(AppPaths.logsDirectory)
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(Data(stamped.utf8))
+            try? handle.close()
+        } else {
+            try? Data(stamped.utf8).write(to: url)
+        }
     }
 
     private func mockReply(for text: String, assistantID: UUID) async {

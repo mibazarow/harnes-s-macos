@@ -131,17 +131,24 @@ actor SkillsService {
         return result.joined(separator: "\n")
     }
 
+    /// One line per skill in the prompt: 60 characters is enough to pick a skill by
+    /// name, and the full description is one `skill_read` away. At 118 skills the old
+    /// 140-character summaries overflowed the index cap and silently hid entries.
     private static func shortSummary(_ summary: String) -> String {
         let collapsed = summary
             .replacingOccurrences(of: "\n", with: " ")
             .split(separator: " ", omittingEmptySubsequences: true)
             .joined(separator: " ")
-        guard collapsed.count > 140 else { return collapsed }
+        guard collapsed.count > 60 else { return collapsed }
 
-        let head = String(collapsed.prefix(160))
-        if let dot = head.range(of: ". "), head.distance(from: head.startIndex, to: dot.lowerBound) > 40 {
+        let head = String(collapsed.prefix(80))
+        if let dot = head.range(of: ". "), head.distance(from: head.startIndex, to: dot.lowerBound) > 25 {
             return String(head[..<dot.lowerBound]) + "."
         }
-        return String(collapsed.prefix(137)).trimmingCharacters(in: .whitespaces) + "…"
+        let cut = String(collapsed.prefix(57)).trimmingCharacters(in: .whitespaces)
+        if let space = cut.lastIndex(of: " ") {
+            return String(cut[..<space]) + "…"
+        }
+        return cut + "…"
     }
 }
