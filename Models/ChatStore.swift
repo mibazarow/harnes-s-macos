@@ -7,10 +7,14 @@ final class ChatStore {
     private(set) var messages: [ChatMessage]
     private(set) var isStreaming = false
     private(set) var queuedCount = 0
+    /// Messages written while a turn is running. Rendered in a dock below the
+    /// transcript, never mixed into it: otherwise every new step of the running answer
+    /// pushes them up the screen.
+    private(set) var queuedMessages: [ChatMessage] = []
 
     private var streamTask: Task<Void, Never>?
     private var commandTask: Task<Void, Never>?
-    private var pending: [(id: UUID, text: String, attachments: [ChatAttachment])] = []
+
     private var replyIndex = 0
     private let services: AppServices?
     private let commands: SlashCommandRouter?
@@ -66,25 +70,24 @@ final class ChatStore {
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
 
         memoryTouchedThisTurn = false
-        let message = ChatMessage(
-            role: .user,
-            text: trimmed,
-            attachments: attachments,
-            state: isStreaming ? .queued : .complete
-        )
-        messages.append(message)
 
         if let services {
             Task { await services.style.observe(trimmed) }
         }
-        persist(.user, text: trimmed + attachments.map { "\n[файл: \($0.name)]" }.joined(), reasoning: nil)
 
         if isStreaming {
-            pending.append((message.id, trimmed, attachments))
-            queuedCount = pending.count
+            queuedMessages.append(ChatMessage(
+                role: .user,
+                text: trimmed,
+                attachments: attachments,
+                state: .queued
+            ))
+            queuedCount = queuedMessages.count
             return
         }
 
+        messages.append(ChatMessage(role: .user, text: trimmed, attachments: attachments))
+        persistUser(trimmed, attachments: attachments)
         start(trimmed, attachments: attachments)
     }
 
@@ -567,14 +570,15 @@ final class ChatStore {
         commandTask?.cancel()
         streamTask = nil
         commandTask = nil
-        let dropped = pending.count
-        pending.removeAll()
+        let dropped = queuedMessages.count
+        for var message in queuedMessages {
+            message.state = .cancelled
+            messages.append(message)
+        }
+        queuedMessages.removeAll()
         queuedCount = 0
         isStreaming = false
 
-        for index in messages.indices where messages[index].state == .queued {
-            messages[index].state = .complete
-        }
         if dropped > 0 {
             notice("Очередь очищена: \(dropped) сообщений не отправлено.")
         }
@@ -591,12 +595,12 @@ final class ChatStore {
     }
 
     private func dequeueNext() {
-        guard !isStreaming, !pending.isEmpty else { return }
-        let next = pending.removeFirst()
-        queuedCount = pending.count
-        if let index = messages.firstIndex(where: { $0.id == next.id }) {
-            messages[index].state = .complete
-        }
+        guard !isStreaming, !queuedMessages.isEmpty else { return }
+        var next = queuedMessages.removeFirst()
+        queuedCount = queuedMessages.count
+        next.state = .complete
+        messages.append(next)
+        persistUser(next.text, attachments: next.attachments)
         start(next.text, attachments: next.attachments)
     }
 
@@ -767,6 +771,11 @@ final class ChatStore {
             }
             return ChatMessage(role: role, text: entry.text, reasoning: entry.reasoning)
         }
+    }
+
+    private func persistUser(_ text: String, attachments: [ChatAttachment]) {
+        let files = attachments.map { "\n[файл: \($0.name)]" }.joined()
+        persist(.user, text: text + files, reasoning: nil)
     }
 
     private func persist(_ role: ChatMessage.Role, text: String, reasoning: String?) {

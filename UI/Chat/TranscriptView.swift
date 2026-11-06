@@ -43,6 +43,19 @@ struct TranscriptView: View {
                         .id(message.id)
                     }
 
+                    // Pending messages sit at the very bottom, under the running
+                    // answer, so they never drift up while the agent works.
+                    ForEach(chat.queuedMessages) { message in
+                        MessageRow(
+                            message: message,
+                            palette: palette,
+                            fontSize: fontSize,
+                            showTimestamp: showTimestamps
+                        )
+                        .id(message.id)
+                        .opacity(0.85)
+                    }
+
                     Color.clear
                         .frame(height: 1)
                         .id(bottomID)
@@ -94,6 +107,12 @@ struct TranscriptView: View {
                 guard follow else { return }
                 stick(proxy, animated: true)
             }
+            .onChange(of: chat.queuedMessages.count) {
+                // A message sent mid-run is the newest thing on screen, so the view
+                // follows it like any other new message.
+                follow = true
+                stick(proxy, animated: true)
+            }
             .onChange(of: tailSignature) {
                 guard follow else { return }
                 stick(proxy)
@@ -122,8 +141,10 @@ struct TranscriptView: View {
 
     /// Anything that changes the height of the newest message.
     private var tailSignature: Int {
-        guard let last = chat.messages.last else { return 0 }
+        let queued = chat.queuedMessages.count
+        guard let last = chat.messages.last else { return queued }
         return chat.messages.count
+            &+ queued
             &+ last.text.count
             &+ (last.reasoning?.count ?? 0)
             &+ last.tools.count

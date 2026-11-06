@@ -92,15 +92,9 @@ struct ComposerView: View {
                     .accessibilityLabel("Выбрать папку")
 
                     if isStreaming {
-                        Button(action: onStop) {
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: 11, weight: .semibold))
-                                .frame(width: 26, height: 26)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .help("Стоп (Esc)")
-                        .accessibilityLabel("Остановить ответ")
+                        // One control, two meanings: the ring says "working", the square
+                        // says "you can still stop this".
+                        StopButton(palette: palette, action: onStop)
                     }
 
                     Button(action: onSend) {
@@ -396,5 +390,48 @@ final class ComposerNSTextView: NSTextView {
             return
         }
         super.keyDown(with: event)
+    }
+}
+
+/// Stop control with a running indicator around it. The ring rotates continuously and
+/// the centre stays a plain stop square, so the affordance never changes shape while
+/// the agent works.
+private struct StopButton: View {
+    let palette: Palette
+    let action: () -> Void
+
+    @State private var spinning = false
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .stroke(palette.border, lineWidth: 2)
+
+                Circle()
+                    .trim(from: 0, to: 0.28)
+                    .stroke(
+                        palette.accent,
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(spinning ? 360 : 0))
+                    .animation(
+                        .linear(duration: 1.1).repeatForever(autoreverses: false),
+                        value: spinning
+                    )
+
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(hovering ? palette.reasoning : palette.accent)
+                    .frame(width: 9, height: 9)
+            }
+            .frame(width: 26, height: 26)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .onAppear { spinning = true }
+        .help("Идёт работа · нажми, чтобы остановить (Esc)")
+        .accessibilityLabel("Остановить ответ")
     }
 }

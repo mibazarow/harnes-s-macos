@@ -160,16 +160,21 @@ final class StorageTests: XCTestCase {
         chat.send("второе")
         XCTAssertEqual(chat.queuedCount, 1)
 
-        // The queued message is visible and marked as such, so the user can tell
-        // "sent but waiting" apart from "the model is slow".
-        let queued = try XCTUnwrap(chat.messages.last { $0.text == "второе" })
+        // The queued message lives in its own dock, not in the transcript: otherwise
+        // every step of the running answer would push it up the screen.
+        XCTAssertTrue(chat.messages.allSatisfy { $0.text != "второе" })
+        let queued = try XCTUnwrap(chat.queuedMessages.first)
+        XCTAssertEqual(queued.text, "второе")
         XCTAssertEqual(queued.state, .queued)
         XCTAssertEqual(queued.role, .user)
 
         chat.stop()
         XCTAssertEqual(chat.queuedCount, 0)
+        XCTAssertTrue(chat.queuedMessages.isEmpty)
         XCTAssertFalse(chat.isStreaming)
-        XCTAssertEqual(chat.messages.last { $0.text == "второе" }?.state, .complete)
+
+        // Cancelled messages move into the transcript so their text is not lost.
+        XCTAssertEqual(chat.messages.last { $0.text == "второе" }?.state, .cancelled)
     }
 
     @MainActor

@@ -32,17 +32,23 @@ struct MessageRow: View {
                         .foregroundStyle(palette.accent)
                 }
 
-                if message.state == .queued {
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock")
-                            .font(.system(size: max(fontSize - 4, 8)))
-                        Text("в очереди")
-                    }
-                    .foregroundStyle(palette.reasoning)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(palette.reasoning.opacity(0.12))
-                    .clipShape(Capsule())
+                switch message.state {
+                case .queued:
+                    StateBadge(
+                        symbol: "clock",
+                        text: "в очереди",
+                        color: palette.reasoning,
+                        fontSize: fontSize
+                    )
+                case .cancelled:
+                    StateBadge(
+                        symbol: "xmark",
+                        text: "не отправлено",
+                        color: palette.faint,
+                        fontSize: fontSize
+                    )
+                case .streaming, .complete:
+                    EmptyView()
                 }
 
                 Spacer(minLength: 0)
@@ -117,6 +123,27 @@ struct MessageRow: View {
         case .assistant: palette.dim
         case .system: palette.faint
         }
+    }
+}
+
+/// Small pill that explains why a message has no answer yet.
+struct StateBadge: View {
+    let symbol: String
+    let text: String
+    let color: Color
+    let fontSize: CGFloat
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol)
+                .font(.system(size: max(fontSize - 4, 8)))
+            Text(text)
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 1)
+        .background(color.opacity(0.12))
+        .clipShape(Capsule())
     }
 }
 
