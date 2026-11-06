@@ -196,12 +196,30 @@ final class SelfConfigTests: XCTestCase {
 
         let index = await service.promptIndex()
         XCTAssertFalse(index.isEmpty)
-        XCTAssertLessThanOrEqual(index.count, 7000)
+        XCTAssertLessThanOrEqual(index.count, 8000)
         XCTAssertTrue(index.contains("- coding:"))
 
         let body = try await service.read(name: "coding")
         XCTAssertTrue(body.contains("Path: "))
         XCTAssertTrue(body.contains("Scope: builtin"))
+    }
+
+    func testPromptIndexGroupsLargePrefixes() async throws {
+        let root = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let user = root.appendingPathComponent("user", isDirectory: true)
+        for suffix in ["a", "b", "c", "d", "e"] {
+            try writeSkill(to: user.appendingPathComponent("grp-\(suffix)", isDirectory: true), name: "grp-\(suffix)")
+        }
+        let service = SkillsService(
+            userDirectory: user,
+            builtinDirectory: root.appendingPathComponent("builtin", isDirectory: true)
+        )
+
+        let index = await service.promptIndex()
+        XCTAssertTrue(index.contains("- grp-* (5): a, b, c, d, e"))
+        XCTAssertFalse(index.contains("- grp-a:"))
     }
 
     func testMCPAddDisableRemove() async throws {

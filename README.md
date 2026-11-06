@@ -4,7 +4,7 @@
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-black?style=flat-square)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange?style=flat-square)](https://swift.org)
-[![Tests](https://img.shields.io/badge/tests-63%20green-brightgreen?style=flat-square)](#тесты)
+[![Tests](https://img.shields.io/badge/tests-69%20green-brightgreen?style=flat-square)](#тесты)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
 ---
@@ -75,14 +75,25 @@
 git clone https://github.com/<you>/harnes-s.git
 cd harnes-s
 xcodegen generate
-xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Debug build
+xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Debug -derivedDataPath .build build
 open .build/Build/Products/Debug/Harness.app
 ```
 
 Тесты:
 
 ```bash
-xcodebuild -project Harness.xcodeproj -scheme Harness -destination 'platform=macOS' test
+xcodebuild -project Harness.xcodeproj -scheme Harness -derivedDataPath .build -destination 'platform=macOS' test
+```
+
+Релиз и установка:
+
+```bash
+xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Release -derivedDataPath .build build
+codesign --verify --deep --strict .build/Build/Products/Release/Harness.app
+rm -rf /Applications/Harness.app
+cp -R .build/Build/Products/Release/Harness.app /Applications/
+xattr -dr com.apple.quarantine /Applications/Harness.app
+open /Applications/Harness.app
 ```
 
 ### Первый запуск
@@ -111,7 +122,7 @@ Services/     хранилище, провайдеры, память, эмбед
               планировщик, безопасность файлов, история
 Storage/      схема SQLite и миграции (GRDB)
 Models/       доменные модели и ChatStore
-Tests/        63 теста, включая живой SSE-сервер и MCP
+Tests/        69 тестов, включая живой SSE-сервер и MCP
 ```
 
 ### Модель данных
@@ -124,7 +135,8 @@ HARNES_S_DATA/
 │                           # messages, schedules, trash, file_versions, app_state
 ├── config/
 │   ├── mcp.json            # MCP-серверы
-│   └── skills/             # пользовательские скиллы
+│   ├── gsd/                # GSD Core: gsd-core/ и scripts/ для gsd-* скиллов
+│   └── skills/             # скиллы: SKILL.md в подпапках, .disabled выключает
 ├── workspace/              # рабочая папка по умолчанию
 ├── models/                 # EmbeddingGemma 2 (ONNX)
 ├── artifacts/              # скриншоты, крупные выводы
@@ -203,7 +215,7 @@ HARNES_S_DATA/
 
 ### Тесты
 
-63 теста: SSE-клиент на локальном сервере (дельты, reasoning, tool_calls, ошибки), применение патчей, определение проекта, рендер дерева, защиты агента, профиль стиля, консолидация памяти, планировщик, MCP handshake с живыми серверами, локальный ONNX-эмбеддер.
+69 тестов: SSE-клиент на локальном сервере (дельты, reasoning, tool_calls, ошибки), применение патчей, определение проекта, рендер дерева, защиты агента, профиль стиля, консолидация памяти, планировщик, MCP handshake с живыми серверами, локальный ONNX-эмбеддер, скиллы (парсер frontmatter, установка, чтение, индекс промпта, группировка).
 
 ```bash
 xcodebuild -project Harness.xcodeproj -scheme Harness -destination 'platform=macOS' test

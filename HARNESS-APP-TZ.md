@@ -1,6 +1,6 @@
 # HARNES-S — техническое задание
 
-**Версия:** 3.0 (описывает реализованное состояние)
+**Версия:** 3.1 (описывает реализованное состояние)
 **Назначение:** по этому документу приложение воспроизводится с нуля другой командой или моделью.
 **Статус:** всё, что описано ниже без пометки «план», реализовано и покрыто тестами.
 
@@ -49,14 +49,24 @@
 
 ```bash
 xcodegen generate
-xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Debug build
+xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Debug -derivedDataPath .build build
 open .build/Build/Products/Debug/Harness.app
 ```
 
 Тесты:
 
 ```bash
-xcodebuild -project Harness.xcodeproj -scheme Harness -destination 'platform=macOS' test
+xcodebuild -project Harness.xcodeproj -scheme Harness -derivedDataPath .build -destination 'platform=macOS' test
+```
+
+Релиз:
+
+```bash
+xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Release -derivedDataPath .build build
+codesign --verify --deep --strict .build/Build/Products/Release/Harness.app
+rm -rf /Applications/Harness.app
+cp -R .build/Build/Products/Release/Harness.app /Applications/
+xattr -dr com.apple.quarantine /Applications/Harness.app
 ```
 
 Проект генерируется из `project.yml`. Пакеты: GRDB (SQLite), swift-markdown, swift-transformers (токенизатор), onnxruntime-swift-package-manager, шрифт Nordwand Mono (MIT) в бандле.
@@ -106,7 +116,8 @@ HARNES_S_DATA/
 ├── database/harness.db
 ├── config/
 │   ├── mcp.json
-│   └── skills/
+│   ├── gsd/                 # gsd-core/ и scripts/ — рантайм GSD
+│   └── skills/              # SKILL.md в подпапках; .disabled выключает скилл
 ├── workspace/
 ├── models/embeddinggemma-2/
 ├── artifacts/
@@ -478,9 +489,17 @@ HARNES_S_DATA/
 - Включение и выключение — маркер `.disabled`, файлы не удаляются.
 - Пользовательский скилл с тем же именем перекрывает встроенный.
 
-Встроенные скиллы (`self-config`, `passwords`, `memory`, `coding`, `web-browser`) лежат в бандле и доступны только для чтения. Остальные скиллы живут в `config/skills` и не вшиваются в приложение: их можно ставить по одному или залить набором. Утилита `Scripts/install_skills.py` раскладывает внешние папки в `~/HARNES_S_DATA/config/skills`, нормализует frontmatter (в том числе свёрнутые `description: >`) и заменяет личные пути на плейсхолдеры. GSD-скиллы (`gsd-*`) не переносятся: они требуют внешнего рантайма `gsd-core`, которого в приложении нет.
+Встроенные скиллы (`self-config`, `passwords`, `memory`, `coding`, `web-browser`) лежат в бандле и доступны только для чтения. Все остальные скиллы живут в `config/skills` и не вшиваются в приложение: их можно ставить по одному или залить набором. Утилита `Scripts/install_skills.py` раскладывает внешние папки в `~/HARNES_S_DATA/config/skills`, нормализует frontmatter (в том числе свёрнутые `description: >`), убирает `@`-префиксы include-строк, вычищает личные пути и заменяет их плейсхолдерами.
 
-В системный промпт попадает только индекс включённых скиллов — имя и сокращённое описание, не более 7000 символов. Тело загружается по требованию инструментом `skill_read`, который возвращает инструкции, абсолютный путь каталога и список вложенных файлов. Плейсхолдер `<skill-dir>` в тексте скилла означает этот путь. Записи в индексе сортируются по имени; выключенные скиллы в индекс не попадают.
+GSD-скиллы устанавливаются той же утилитой с флагом `--include-gsd`; рантайм копируется рядом с каталогом скиллов:
+
+```bash
+python3 Scripts/install_skills.py --include-gsd --gsd-runtime ~/.config/kilo ~/.config/kilo/skills/gsd-*
+```
+
+Раскладка: `config/gsd/gsd-core/` и `config/gsd/scripts/` (второй нужен, потому что `gsd-tools.cjs` требует `../../../scripts/fix-slash-commands.cjs`). В тексте GSD-скиллов пути переписаны на `~/HARNES_S_DATA/config/gsd/gsd-core`, а `@`-include-строки превращены в обычные пути: агент читает их через `fs_read` перед стартом. Каждый GSD-скилл получает блок адаптации к HARNES-S: `<arguments>` — текст после имени скилла, именованных подагентов нет (роль передаётся в `task` вместе с `agents/<role>.md`), инструмента `question` нет (вопросы задаются в чате), имена инструментов маппятся на `fs_read`/`fs_write`/`edit_file`/`bash`/`fs_glob`/`fs_grep`/`todowrite`/`task`. Рантайм запускается как `node ~/HARNES_S_DATA/config/gsd/gsd-core/bin/gsd-tools.cjs <command>`; состояние — в `.planning/` проекта. Если рантайма нет, скилл честно сообщает, что GSD Core не установлен.
+
+В системный промпт попадает только индекс включённых скиллов — имя и сокращённое описание, не более 8000 символов. Скиллы, у которых общий префикс до первого дефиса и их пять и больше (например `gsd-*`), схлопываются в одну строку вида `- gsd-* (72): add-tests, ai-integration-phase, …`, чтобы индекс не разрастался. Тело загружается по требованию инструментом `skill_read`, который возвращает инструкции, абсолютный путь каталога и список вложенных файлов (тело — до 60 000 символов). Плейсхолдер `<skill-dir>` в тексте скилла означает этот путь. Выключенные скиллы в индекс не попадают; всё, что не влезло в лимит, сворачивается в строку «… and N more; call `skill_list`».
 
 ---
 
@@ -578,7 +597,7 @@ HARNES_S_DATA/
 
 ## 19. Тестирование
 
-Обязательный минимум (реализовано 63 теста):
+Обязательный минимум (реализовано 69 тестов):
 
 - клиент провайдера: сборка URL, кодирование запроса, reasoning, инструменты, изображения;
 - интеграция с локальным SSE-сервером: текст, размышления, вызовы инструментов, ошибки;
@@ -593,7 +612,8 @@ HARNES_S_DATA/
 - индексатор: чанкование, пропуск мелочи;
 - MCP: конфиг, имена, живой handshake и вызов;
 - локальные эмбеддинги: размерность, норма, детерминизм, семантика;
-- безопасность файлов: снапшот, откат, корзина, восстановление.
+- безопасность файлов: снапшот, откат, корзина, восстановление;
+- скиллы: разбор frontmatter (включая `>` и `|`), установка/выключение/удаление, чтение тела с путём и файлами, индекс промпта с лимитом и группировкой по префиксу.
 
 Тесты, требующие внешних сервисов, пропускаются, если сервис недоступен, и не ломают сборку.
 
@@ -614,7 +634,8 @@ HARNES_S_DATA/
 9. `/remember` и `/search` находят запись.
 10. Стиль накапливает счётчики, активируется не раньше второго дня, ручная карточка меняет ответ.
 11. MCP-сервер подключается и его инструменты вызываются.
-12. Все тесты зелёные.
+12. Скиллы видны в индексе промпта, `skill_read` отдаёт тело, путь и файлы; выключенный скилл исчезает из индекса.
+13. Все тесты зелёные.
 
 ---
 
@@ -630,3 +651,42 @@ HARNES_S_DATA/
 - экспорт и импорт профиля стиля;
 - шифрование базы паролей;
 - сравнение моделей на одном запросе.
+
+---
+
+## 22. Воспроизведение ваншотом
+
+Чек-лист для агента на другой машине. Ничего не нужно додумывать: шаги идут в том порядке, в котором проверялись.
+
+1. **Окружение.** macOS 26+, Apple Silicon, Xcode 26+, `brew install xcodegen`. Опционально Node.js (Playwright, `gsd-tools.cjs`), `php` для линта PHP.
+2. **Проект.**
+   ```bash
+   git clone <repo> harnes-s && cd harnes-s
+   xcodegen generate
+   xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Debug -derivedDataPath .build build
+   xcodebuild -project Harness.xcodeproj -scheme Harness -derivedDataPath .build -destination 'platform=macOS' test
+   ```
+   Ожидаемо: сборка без ошибок, 69 тестов, 1 пропущен (живой scrapling), 0 падений.
+3. **Релиз.**
+   ```bash
+   xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Release -derivedDataPath .build build
+   codesign --verify --deep --strict .build/Build/Products/Release/Harness.app
+   rm -rf /Applications/Harness.app && cp -R .build/Build/Products/Release/Harness.app /Applications/
+   xattr -dr com.apple.quarantine /Applications/Harness.app
+   ```
+4. **Первый запуск.** Создаётся `~/HARNES_S_DATA/` с `database/`, `config/`, `workspace/`, `models/`, `artifacts/`, `versions/`, `trash/`, `logs/`, `backups/`.
+5. **Провайдер.** `⌘,` → Провайдеры → Base URL `…/v1`, токен, «Проверить и загрузить модели», выбрать модель и окно контекста, уровень размышлений. Токен в репозиторий не попадает.
+6. **Скиллы (опционально).** Базовые пять уже в бандле. Свой набор:
+   ```bash
+   python3 Scripts/install_skills.py ~/path/to/skills
+   python3 Scripts/install_skills.py --include-gsd --gsd-runtime ~/.config/kilo ~/.config/kilo/skills/gsd-*
+   ```
+   Проверка: `/skills` показывает записи; `skill_read` по имени возвращает тело; в системном промпте есть индекс.
+7. **Эмбеддинги (опционально).** Положить `model_quantized.onnx`, `model_quantized.onnx_data`, `tokenizer.json`, `tokenizer_config.json` в `~/HARNES_S_DATA/models/embeddinggemma-2/`. Без них остаётся FTS.
+8. **MCP (опционально).** `config/mcp.json` со списком серверов stdio; пример:
+   ```json
+   {"servers": [{"name": "scrapling", "transport": "stdio", "command": "/path/to/scrapling-mcp", "args": [], "enabled": true, "exposure": "deferred", "scope": "global"}]}
+   ```
+9. **Приёмка.** Отправить сообщение → стримится текст и размышления; попросить прочитать файл → виден вызов инструмента; `Esc` останавливает; перезапуск восстанавливает историю; `/remember` и `/search` находят запись; `skill_read` отдаёт скилл.
+
+Не переносится автоматически: токен провайдера, модель эмбеддингов, бинарь scrapling и его venv, исходный каталог скиллов и рантайм GSD. Всё остальное — код и `project.yml`.

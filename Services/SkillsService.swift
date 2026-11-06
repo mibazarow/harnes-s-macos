@@ -69,23 +69,43 @@ actor SkillsService {
         return header + "\n\n---\n\n" + body
     }
 
-    func promptIndex(characterLimit: Int = 7000) -> String {
+    func promptIndex(characterLimit: Int = 8000) -> String {
         let records = loader.loadAll().filter(\.enabled)
         guard !records.isEmpty else { return "" }
 
-        var lines: [String] = []
-        var used = 0
+        var byPrefix: [String: [SkillRecord]] = [:]
         for record in records {
+            let prefix = record.name.split(separator: "-", maxSplits: 1).first.map(String.init) ?? record.name
+            byPrefix[prefix, default: []].append(record)
+        }
+
+        var lines: [String] = []
+        var grouped: Set<String> = []
+        for (prefix, group) in byPrefix where group.count >= 5 {
+            let names = group
+                .map { $0.name.hasPrefix(prefix + "-") ? String($0.name.dropFirst(prefix.count + 1)) : $0.name }
+                .sorted()
+            grouped.formUnion(group.map(\.name))
+            lines.append("- \(prefix)-* (\(group.count)): " + names.joined(separator: ", "))
+        }
+
+        for record in records where !grouped.contains(record.name) {
             let summary = Self.shortSummary(record.summary)
-            let line = summary.isEmpty ? "- \(record.name)" : "- \(record.name): \(summary)"
+            lines.append(summary.isEmpty ? "- \(record.name)" : "- \(record.name): \(summary)")
+        }
+
+        lines.sort()
+        var result: [String] = []
+        var used = 0
+        for (index, line) in lines.enumerated() {
             if used + line.count + 1 > characterLimit {
-                lines.append("- … and \(records.count - lines.count) more; call `skill_list` to see them.")
+                result.append("- … and \(lines.count - index) more; call `skill_list` to see them.")
                 break
             }
-            lines.append(line)
+            result.append(line)
             used += line.count + 1
         }
-        return lines.joined(separator: "\n")
+        return result.joined(separator: "\n")
     }
 
     private static func shortSummary(_ summary: String) -> String {

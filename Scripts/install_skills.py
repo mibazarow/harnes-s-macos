@@ -9,8 +9,10 @@ Default destination is ~/HARNES_S_DATA/config/skills, the directory HARNES-S
 reads at runtime. Skills are not compiled into the app bundle.
 
 Only SKILL.md frontmatter is rewritten; every other file in a skill folder is
-copied verbatim. Skills whose folder name starts with "gsd-" are skipped: they
-depend on an external runtime that is not part of this app.
+copied verbatim.
+
+GSD skills are skipped unless --include-gsd is passed: they can only run with the
+external GSD Core runtime installed at ~/.config/kilo/gsd-core.
 """
 
 import argparse
@@ -112,12 +114,75 @@ def collapse(text):
     return re.sub(r"\s+", " ", text).strip()
 
 
+GSD_RUNTIME_RELATIVE = "HARNES_S_DATA/config/gsd/gsd-core"
+GSD_RUNTIME = f"~/{GSD_RUNTIME_RELATIVE}"
+
+GSD_PREAMBLE = f"""
+# Running this skill inside HARNES-S
+
+This workflow comes from GSD Core and was written for a slash-command agent. Adapt it to this app:
+
+- Invoke it by loading this skill and treating `<arguments>` as the text the user typed after the skill name.
+- Every `{GSD_RUNTIME}/...` path is required reading. Open it with `fs_read` before starting, and follow any further `@` includes inside those files the same way.
+- There are no named subagent types. When the workflow says to spawn `gsd-<role>`, call the `task` tool with a self-contained prompt that includes the role file `{GSD_RUNTIME}/agents/<role>.md` (read it with `fs_read`).
+- There is no `question` tool. Ask the user directly in chat and offer numbered options in plain text.
+- Tool mapping: Read -> `fs_read`, Write -> `fs_write`, Edit -> `edit_file`, Bash -> `bash`, Glob -> `fs_glob`, Grep -> `fs_grep`, TodoWrite -> `todowrite`, Task -> `task`.
+- The runtime is Node.js: `node {GSD_RUNTIME}/bin/gsd-tools.cjs <command>`. If the runtime is missing, tell the user GSD Core is not installed.
+- GSD state lives in the project's `.planning/` directory.
+"""
+
+
 def sanitize(text, skill_name=None):
+    if skill_name and skill_name.startswith("gsd-"):
+        text = text.replace("@$HOME/.config/kilo/gsd-core", GSD_RUNTIME)
+        text = text.replace("$HOME/.config/kilo/gsd-core", GSD_RUNTIME)
+        text = text.replace("~/.config/kilo/gsd-core", GSD_RUNTIME)
+        text = text.replace("@$HOME", "$HOME")
     if skill_name:
         text = re.sub(SKILL_PATH_RE.format(name=re.escape(skill_name)), "<skill-dir>", text)
     for old, new in PATH_REPLACEMENTS:
         text = text.replace(old, new)
     return text
+
+
+GSD_RUNTIME_REPLACEMENTS = [
+    ("$HOME/.config/kilo/gsd-core", "~/" + GSD_RUNTIME_RELATIVE),
+    ("~/.config/kilo/gsd-core", "~/" + GSD_RUNTIME_RELATIVE),
+    (str(HOME / ".config/kilo/gsd-core"), "~/" + GSD_RUNTIME_RELATIVE),
+]
+
+
+def install_gsd_runtime(config_dir: pathlib.Path, dest_root: pathlib.Path):
+    """Copy gsd-core plus its sibling scripts into the data directory."""
+    target = dest_root.parent / "gsd"
+    target.mkdir(parents=True, exist_ok=True)
+
+    for name in ("gsd-core", "scripts"):
+        source = config_dir / name
+        if not source.is_dir():
+            raise SystemExit(f"missing GSD runtime part: {source}")
+        out = target / name
+        if out.exists():
+            shutil.rmtree(out)
+        shutil.copytree(source, out, ignore=shutil.ignore_patterns(*SKIP_DIRS))
+
+    changed = 0
+    for path in target.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        updated = text
+        for old, new in GSD_RUNTIME_REPLACEMENTS:
+            updated = updated.replace(old, new)
+        if updated != text:
+            path.write_text(updated, encoding="utf-8")
+            changed += 1
+
+    print(f"GSD runtime installed into {target} (patched {changed} files)")
+    return target
 
 
 def copy_skill(source: pathlib.Path, dest_root: pathlib.Path):
@@ -160,6 +225,8 @@ def copy_skill(source: pathlib.Path, dest_root: pathlib.Path):
             shutil.copy2(entry, out)
 
     body = sanitize("\n".join(lines[body_start:]), name).strip()
+    if name.startswith("gsd-"):
+        body = GSD_PREAMBLE.strip() + "\n\n---\n\n" + body
     header = ["---", f"name: {name}", f"description: {description}", f"version: {version}"]
     if license_name:
         header.append(f"license: {license_name}")
@@ -171,6 +238,8 @@ def copy_skill(source: pathlib.Path, dest_root: pathlib.Path):
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dest", default=str(DEFAULT_DEST), help="destination skills directory")
+    parser.add_argument("--include-gsd", action="store_true", help="also install gsd-* skills")
+    parser.add_argument("--gsd-runtime", help="agent config dir containing gsd-core and scripts")
     parser.add_argument("sources", nargs="+", help="skill folders or directories containing them")
     args = parser.parse_args(argv[1:])
 
@@ -187,9 +256,13 @@ def main(argv):
             sources.extend(sorted(p for p in base.iterdir() if p.is_dir()))
 
     dest.mkdir(parents=True, exist_ok=True)
+
+    if args.gsd_runtime:
+        install_gsd_runtime(pathlib.Path(args.gsd_runtime).expanduser(), dest)
+
     imported = []
     for source in sources:
-        if source.name.startswith("gsd-"):
+        if source.name.startswith("gsd-") and not args.include_gsd:
             continue
         if not (source / "SKILL.md").exists():
             continue
