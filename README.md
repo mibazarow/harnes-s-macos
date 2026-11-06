@@ -64,8 +64,8 @@
 
 ### Требования
 
-- macOS 26+ (Apple Silicon)
-- Xcode 26+
+- macOS 27+ (Apple Silicon)
+- Xcode 27+
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) — `brew install xcodegen`
 - Опционально: Node.js для Playwright, `php` для линта PHP-проектов
 
