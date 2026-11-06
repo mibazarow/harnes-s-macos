@@ -292,13 +292,22 @@ struct ProviderEditorView: View {
 
                     HStack(spacing: 10) {
                         Text("Модель эмбеддингов")
-                        TextField("не задана", text: embedBinding)
+                        TextField(Self.hasLocalEmbedder ? "встроенная локальная" : "не задана", text: embedBinding)
                             .font(AppFont.mono(13))
                     }
 
-                    Text("Нужна для семантического поиска по памяти. Если у провайдера её нет, поиск работает по ключевым словам (FTS).")
+                    if Self.hasLocalEmbedder {
+                        Label(
+                            "Уже работает встроенная embeddinggemma-2: 768 измерений, локально, без сети и оплаты. Поле нужно только чтобы переопределить её моделью провайдера.",
+                            systemImage: "checkmark.seal"
+                        )
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    } else {
+                        Text("Локальной модели нет. Задай embedding-модель провайдера для семантического поиска; без неё поиск идёт по ключевым словам (FTS).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
 
                     Picker("Уровень размышлений", selection: $provider.reasoningLevel) {
                         ForEach(ReasoningLevel.allCases) { level in
@@ -362,6 +371,9 @@ struct ProviderEditorView: View {
             set: { provider.embedModel = $0.isEmpty ? nil : $0 }
         )
     }
+
+    /// Checked once per process: the local ONNX bundle either is on disk or is not.
+    private static let hasLocalEmbedder = LocalEmbedder().isAvailableOnDisk
 
     private var modelBinding: Binding<String> {
         Binding(

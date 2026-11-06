@@ -34,7 +34,9 @@ actor EmbeddingsService {
     func embedModel() async -> (provider: ProviderModel, model: String)? {
         guard let list = try? await providers.list() else { return nil }
         guard let provider = list.first(where: \.isDefault) ?? list.first else { return nil }
-        let model = provider.embedModel ?? provider.defaultModel ?? provider.models.first ?? ""
+        // Only the explicitly configured embedding model. Falling back to the chat
+        // model would send a completion model to /embeddings and fail obscurely.
+        let model = provider.embedModel ?? ""
         guard !model.isEmpty else { return nil }
         return (provider, model)
     }
