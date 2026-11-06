@@ -574,6 +574,9 @@ final class ChatStore {
         for var message in queuedMessages {
             message.state = .cancelled
             messages.append(message)
+            // Kept in storage too: the text must survive a restart even though it was
+            // never sent to the model.
+            persistUser(message.text, attachments: message.attachments)
         }
         queuedMessages.removeAll()
         queuedCount = 0
