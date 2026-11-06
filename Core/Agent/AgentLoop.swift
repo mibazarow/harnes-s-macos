@@ -7,9 +7,11 @@ struct AgentLoop: Sendable {
     let registry: ToolRegistry
     let client = ProviderClient()
 
-    /// Unbounded by default: the loop runs until the model stops calling tools
-    /// or the user cancels with Esc. No artificial step ceiling.
-    var maxSteps: Int? = nil
+    /// Soft ceiling. LoopGuard catches an identical repeat, but a model that varies
+    /// each call slightly would slip past it and burn tokens forever. 100 steps is far
+    /// beyond any real task; hitting it means something is wrong, and the user can
+    /// simply continue. Pass nil to remove the ceiling entirely.
+    var maxSteps: Int? = 100
 
     enum Event: Sendable {
         /// One model request begins. Everything after it belongs to a new step, which the
@@ -125,7 +127,10 @@ struct AgentLoop: Sendable {
                         }
 
                         if let maxSteps, step >= maxSteps - 1 {
-                            continuation.yield(.delta("\n\n_Остановлено: достигнут явный лимит шагов._"))
+                            continuation.yield(.delta(
+                                "\n\n_Остановился на \(maxSteps) шагах: похоже, задача идёт по кругу. "
+                                + "Напиши, что делать дальше, и я продолжу._"
+                            ))
                             break
                         }
                         assistant.content = streamedText

@@ -4,7 +4,7 @@
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-black?style=flat-square)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange?style=flat-square)](https://swift.org)
-[![Tests](https://img.shields.io/badge/tests-94%20green-brightgreen?style=flat-square)](#тесты)
+[![Tests](https://img.shields.io/badge/tests-103%20green-brightgreen?style=flat-square)](#тесты)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
 ---
@@ -122,7 +122,7 @@ Services/     хранилище, провайдеры, память, эмбед
               планировщик, безопасность файлов, история
 Storage/      схема SQLite и миграции (GRDB)
 Models/       доменные модели и ChatStore
-Tests/        94 теста, включая живой SSE-сервер и MCP
+Tests/        103 теста, включая живой SSE-сервер и MCP
 ```
 
 ### Модель данных
@@ -217,7 +217,7 @@ HARNES_S_DATA/
 
 ### Тесты
 
-94 теста: SSE-клиент на локальном сервере (дельты, reasoning, tool_calls, ошибки), применение патчей, определение проекта, рендер дерева, защиты агента, профиль стиля, консолидация памяти, планировщик, MCP handshake с живыми серверами, локальный ONNX-эмбеддер, скиллы (парсер frontmatter, установка, чтение, индекс промпта, группировка).
+103 теста: SSE-клиент на локальном сервере (дельты, reasoning, tool_calls, ошибки), применение патчей, определение проекта, рендер дерева, защиты агента, профиль стиля, консолидация памяти, планировщик, MCP handshake с живыми серверами, локальный ONNX-эмбеддер, скиллы (парсер frontmatter, установка, чтение, индекс промпта, группировка).
 
 ```bash
 xcodebuild -project Harness.xcodeproj -scheme Harness -destination 'platform=macOS' test

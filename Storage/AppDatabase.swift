@@ -186,6 +186,29 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v7_recovery_tables") { db in
+            // These used to be created lazily inside FileSafetyService, on every write.
+            // Schema lives in one place now.
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS file_versions (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    path       TEXT NOT NULL,
+                    stored_at  TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                """)
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS trash (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    original_path TEXT NOT NULL,
+                    stored_path   TEXT NOT NULL,
+                    created_at    TEXT NOT NULL,
+                    restored      INTEGER NOT NULL DEFAULT 0
+                );
+                """)
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_trash_restored ON trash(restored);")
+        }
+
         return migrator
     }
 }

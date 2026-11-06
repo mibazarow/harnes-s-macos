@@ -63,6 +63,9 @@ struct TranscriptView: View {
                 .padding(.horizontal, 0)
                 .padding(.vertical, 20)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // One switch for the whole transcript: every label, trace, paragraph
+                // and code block becomes selectable, including the user's own message.
+                .textSelection(.enabled)
             }
             .background(palette.background)
             .onScrollGeometryChange(for: CGFloat.self) { geometry in

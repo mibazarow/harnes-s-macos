@@ -40,8 +40,9 @@ extension ToolRegistry {
             description: "Apply a unified diff to one or more files. Preferred over full rewrites for multi-line edits.",
             parameters: schema([
                 "path": ["type": "string", "description": "File the patch applies to"],
-                "patch": ["type": "string", "description": "Unified diff with @@ hunks"]
-            ], required: ["path", "patch"])
+                "patch": ["type": "string", "description": "Unified diff with @@ hunks"],
+                "patch_file": ["type": "string", "description": "Read the diff from this file instead of patch"]
+            ], required: ["path"])
         ),
         ToolDefinition(
             name: "read_many",
@@ -118,7 +119,8 @@ extension ToolRegistry {
             description: "Delegate a self-contained job to a fresh subagent with its own context. Returns only its final answer. Use for long searches or parallel investigation.",
             parameters: schema([
                 "prompt": ["type": "string", "description": "Full self-contained instruction"],
-                "read_only": ["type": "boolean", "description": "true = investigation only, no edits"]
+                "read_only": ["type": "boolean", "description": "true = investigation only, no edits"],
+                "paths": ["type": "array", "items": ["type": "string"], "description": "Files or folders to include verbatim so the subagent does not search again"]
             ], required: ["prompt"])
         ),
         ToolDefinition(
@@ -165,7 +167,9 @@ extension ToolRegistry {
             parameters: schema([
                 "pattern": ["type": "string"],
                 "path": ["type": "string", "description": "Directory, default '.'"],
-                "glob": ["type": "string", "description": "Optional file glob, e.g. '*.swift'"]
+                "glob": ["type": "string", "description": "Optional file glob, e.g. '*.swift'"],
+                "before": ["type": "integer", "description": "Context lines before a match (0-10)"],
+                "after": ["type": "integer", "description": "Context lines after a match (0-20)"]
             ], required: ["pattern"])
         ),
         ToolDefinition(

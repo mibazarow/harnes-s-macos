@@ -43,14 +43,6 @@ actor FileSafetyService {
 
         try database.queue.write { db in
             try db.execute(sql: """
-                CREATE TABLE IF NOT EXISTS file_versions (
-                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                    path       TEXT NOT NULL,
-                    stored_at  TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-                """)
-            try db.execute(sql: """
                 INSERT INTO file_versions (path, stored_at, created_at)
                 VALUES (?, ?, ?)
                 """, arguments: [url.path, target.path, Timestamps.now()])
@@ -67,20 +59,14 @@ actor FileSafetyService {
         }
 
         try AppPaths.ensureDirectory(trashDirectory)
-        let id = Int(Date().timeIntervalSince1970 * 1000)
-        let stored = trashDirectory.appendingPathComponent("\(id)-\(url.lastPathComponent)")
+        // Two deletes in the same millisecond would otherwise target the same path and
+        // the second move would fail.
+        let stamp = Int(Date().timeIntervalSince1970 * 1000)
+        let unique = UUID().uuidString.prefix(8)
+        let stored = trashDirectory.appendingPathComponent("\(stamp)-\(unique)-\(url.lastPathComponent)")
         try fileManager.moveItem(at: url, to: stored)
 
         let entryID: Int64 = try database.queue.write { db in
-            try db.execute(sql: """
-                CREATE TABLE IF NOT EXISTS trash (
-                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                    original_path TEXT NOT NULL,
-                    stored_path   TEXT NOT NULL,
-                    created_at    TEXT NOT NULL,
-                    restored      INTEGER NOT NULL DEFAULT 0
-                );
-                """)
             try db.execute(sql: """
                 INSERT INTO trash (original_path, stored_path, created_at)
                 VALUES (?, ?, ?)

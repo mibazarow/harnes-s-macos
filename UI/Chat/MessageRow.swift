@@ -109,8 +109,26 @@ struct MessageRow: View {
                 .frame(width: isUser ? 3 : 2)
         }
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .contextMenu {
+            Button("Копировать сообщение") { copyToPasteboard() }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(isUser ? "Сообщение пользователя" : "Ответ Харнеса")
+    }
+
+    /// Whole-message copy for cases where dragging across several paragraphs is awkward.
+    /// Selection inside the transcript still works for arbitrary pieces.
+    private func copyToPasteboard() {
+        var parts: [String] = []
+        if let reasoning = message.reasoning, !reasoning.isEmpty {
+            parts.append(reasoning)
+        }
+        if !message.text.isEmpty {
+            parts.append(message.text)
+        }
+        guard !parts.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(parts.joined(separator: "\n\n"), forType: .string)
     }
 
     private var bubbleBackground: Color {

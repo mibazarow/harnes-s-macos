@@ -1,0 +1,107 @@
+import Foundation
+
+extension ToolRegistry {
+// MARK: - Files
+    func listFiles(_ args: [String: Any]) throws -> ToolResult {
+        let url = resolve(args["path"] as? String ?? ".")
+        let entries = try FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        )
+        .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+
+        var lines = ["\(display(url)) — \(entries.count) записей"]
+        for entry in entries.prefix(400) {
+            let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            let size = (try? entry.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            lines.append(isDir ? "  \(entry.lastPathComponent)/" : "  \(entry.lastPathComponent)  \(size) B")
+        }
+        return .ok(lines.joined(separator: "\n"))
+    }
+
+    func readFile(_ args: [String: Any]) throws -> ToolResult {
+        guard let path = args["path"] as? String else { return .fail("path обязателен") }
+        let url = resolve(path)
+        let offset = max((args["offset"] as? Int) ?? 1, 1)
+        let limit = min(max((args["limit"] as? Int) ?? 400, 1), 2_000)
+        let content = try String(contentsOf: url, encoding: .utf8)
+        let lines = content.components(separatedBy: "\n")
+        let slice = lines.dropFirst(offset - 1).prefix(limit)
+        var out = slice.enumerated().map { "\(offset + $0.offset): \($0.element)" }.joined(separator: "\n")
+        if lines.count > offset - 1 + limit {
+            out += "\n… (всего \(lines.count) строк)"
+        }
+        return .ok(out.isEmpty ? "(пусто)" : out)
+    }
+
+    func writeFile(_ args: [String: Any]) async throws -> ToolResult {
+        guard let path = args["path"] as? String, let content = args["content"] as? String else {
+            return .fail("path и content обязательны")
+        }
+        let url = resolve(path)
+        if let refusal = writeGuard(url) { return refusal }
+        try AppPaths.ensureDirectory(url.deletingLastPathComponent())
+        _ = try? await fileSafety?.snapshot(url)
+        try content.write(to: url, atomically: true, encoding: .utf8)
+        return .ok("Записано: \(display(url)) (\(content.count) симв.)")
+    }
+
+    func editFile(_ args: [String: Any]) async throws -> ToolResult {
+        guard let path = args["path"] as? String,
+              let old = args["old_text"] as? String,
+              let new = args["new_text"] as? String else {
+            return .fail("path, old_text и new_text обязательны")
+        }
+        let url = resolve(path)
+        if let refusal = writeGuard(url) { return refusal }
+        var content = try String(contentsOf: url, encoding: .utf8)
+        guard content.contains(old) else {
+            return .fail("Фрагмент не найден в \(display(url))")
+        }
+        _ = try? await fileSafety?.snapshot(url)
+        content = content.replacingOccurrences(of: old, with: new, options: .literal, range: content.range(of: old))
+        try content.write(to: url, atomically: true, encoding: .utf8)
+        return .ok("Изменено: \(display(url))")
+    }
+
+    func grep(_ args: [String: Any]) throws -> ToolResult {
+        guard let pattern = args["pattern"] as? String else { return .fail("pattern обязателен") }
+        let before = max(0, min((args["before"] as? Int) ?? 0, 10))
+        let after = max(0, min((args["after"] as? Int) ?? 0, 20))
+        let glob = (args["glob"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let target = Self.shellQuote(display(resolve(args["path"] as? String ?? ".")))
+
+        let command: String
+        if let rg = Self.ripgrepPath {
+            var parts = [rg, "--line-number", "--no-heading", "--color", "never", "-e", Self.shellQuote(pattern)]
+            if before > 0 { parts.append("-B \(before)") }
+            if after > 0 { parts.append("-A \(after)") }
+            if let glob { parts.append("-g \(Self.shellQuote(glob))") }
+            parts.append(target)
+            command = parts.joined(separator: " ")
+        } else {
+            // ripgrep is not on every machine; grep is everywhere.
+            var parts = ["grep", "-rn", "--color=never"]
+            if before > 0 { parts.append("-B\(before)") }
+            if after > 0 { parts.append("-A\(after)") }
+            if let glob { parts.append("--include=\(Self.shellQuote(glob))") }
+            parts.append("-e \(Self.shellQuote(pattern))")
+            parts.append(target)
+            command = parts.joined(separator: " ")
+        }
+
+        let result = try Self.runSync(command, cwd: workspace, timeout: 30)
+        let body = result.replacingOccurrences(of: "exit 1\n", with: "")
+        return .ok(body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Совпадений нет."
+            : String(body.prefix(20_000)))
+    }
+
+    func glob(_ args: [String: Any]) throws -> ToolResult {
+        guard let pattern = args["pattern"] as? String else { return .fail("pattern обязателен") }
+        let command = "find . -type f -name \(Self.shellQuote(pattern)) -not -path '*/.git/*' | head -200"
+        let result = try Self.runSync(command, cwd: workspace, timeout: 30)
+        return .ok(result.isEmpty ? "Файлов не найдено." : result)
+    }
+}

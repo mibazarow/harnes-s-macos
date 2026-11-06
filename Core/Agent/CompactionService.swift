@@ -5,10 +5,18 @@ import Foundation
 actor CompactionService {
     private let client = ProviderClient()
 
-    struct Checkpoint: Sendable {
-        let summary: String
-        let coveredMessageCount: Int
-        let createdAt: String
+    /// One serialization format for the checkpoint: Codable, the same shape the rest of
+    /// the app uses. Hand-built dictionaries drifted whenever a field was added.
+    struct Checkpoint: Codable, Sendable {
+        var summary: String
+        var coveredMessageCount: Int
+        var createdAt: String
+
+        enum CodingKeys: String, CodingKey {
+            case summary
+            case coveredMessageCount = "covered"
+            case createdAt
+        }
     }
 
     private static let key = "compaction.checkpoint"
@@ -19,29 +27,16 @@ actor CompactionService {
                 db,
                 sql: "SELECT value FROM app_state WHERE key = ?",
                 arguments: [Self.key]
-            ), let data = raw.data(using: .utf8),
-               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let summary = object["summary"] as? String else {
+            ), let data = raw.data(using: .utf8) else {
                 return nil
             }
-            return Checkpoint(
-                summary: summary,
-                coveredMessageCount: object["covered"] as? Int ?? 0,
-                createdAt: object["createdAt"] as? String ?? ""
-            )
+            return try? JSONDecoder().decode(Checkpoint.self, from: data)
         }
     }
 
     func saveCheckpoint(_ checkpoint: Checkpoint, database: AppDatabase) throws {
-        let payload: [String: Any] = [
-            "summary": checkpoint.summary,
-            "covered": checkpoint.coveredMessageCount,
-            "createdAt": checkpoint.createdAt
-        ]
-        let raw = String(
-            data: try JSONSerialization.data(withJSONObject: payload),
-            encoding: .utf8
-        ) ?? "{}"
+        let data = try JSONEncoder().encode(checkpoint)
+        let raw = String(data: data, encoding: .utf8) ?? "{}"
 
         try database.queue.write { db in
             try db.execute(sql: """
