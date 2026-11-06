@@ -26,7 +26,7 @@ struct AppServices: Sendable {
         self.providers = providers
         self.secrets = SecretsService(database: database)
         self.memory = MemoryService(database: database)
-        self.embeddings = EmbeddingsService(database: database, providers: providers)
+        self.embeddings = EmbeddingsService(database: database)
         self.history = ChatHistoryService(database: database)
         self.compaction = CompactionService()
         self.indexer = WorkspaceIndexer(

@@ -202,7 +202,7 @@ final class StorageTests: XCTestCase {
     func testMemoryHashDedupAndVectorCleanup() async throws {
         let database = try AppDatabase()
         let memory = MemoryService(database: database)
-        let embeddings = EmbeddingsService(database: database, providers: ProvidersService(database: database))
+        let embeddings = EmbeddingsService(database: database)
 
         let hash = MemoryService.hash("Один и тот же факт")
         let first = try await memory.add("Один и тот же факт", contentHash: hash)
@@ -222,7 +222,7 @@ final class StorageTests: XCTestCase {
 
     func testBestMatchesRanksBySimilarity() async throws {
         let database = try AppDatabase()
-        let embeddings = EmbeddingsService(database: database, providers: ProvidersService(database: database))
+        let embeddings = EmbeddingsService(database: database)
 
         try await embeddings.store(refKind: "memory", refID: "1", vector: .init(values: [1, 0, 0], model: "t"))
         try await embeddings.store(refKind: "memory", refID: "2", vector: .init(values: [0.6, 0.8, 0], model: "t"))

@@ -37,7 +37,6 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
     var apiKey: String
     var models: [String]
     var defaultModel: String?
-    var embedModel: String?
     var contextWindow: Int
     var reasoningLevel: ReasoningLevel
     /// Sampling temperature for this provider. Individual per provider: a chatty
@@ -56,7 +55,6 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
         apiKey: String = "",
         models: [String] = [],
         defaultModel: String? = nil,
-        embedModel: String? = nil,
         contextWindow: Int = 128_000,
         reasoningLevel: ReasoningLevel = .off,
         temperature: Double = ProviderModel.defaultTemperature,
@@ -72,7 +70,6 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
         self.apiKey = apiKey
         self.models = models
         self.defaultModel = defaultModel
-        self.embedModel = embedModel
         self.contextWindow = contextWindow
         self.reasoningLevel = reasoningLevel
         self.temperature = temperature

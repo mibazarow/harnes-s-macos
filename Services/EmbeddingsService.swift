@@ -3,11 +3,10 @@ import Foundation
 import GRDB
 
 /// Embeddings for memory items, stored as L2-normalized float32 BLOBs.
-/// Uses the local ONNX model when it is on disk, otherwise an OpenAI-compatible
-/// `/embeddings` endpoint of the active provider.
+/// One backend only: the bundled EmbeddingGemma 2 ONNX model. There is no
+/// provider-side `/embeddings` fallback and nothing to configure per provider.
 actor EmbeddingsService {
     private let database: AppDatabase
-    private let providers: ProvidersService
     private let local: LocalEmbedder
 
     /// Last few query vectors. Repeating a search — or re-running the same command —
@@ -15,9 +14,8 @@ actor EmbeddingsService {
     private var queryCache: [(text: String, vector: Vector)] = []
     private let queryCacheLimit = 8
 
-    init(database: AppDatabase, providers: ProvidersService, local: LocalEmbedder = LocalEmbedder()) {
+    init(database: AppDatabase, local: LocalEmbedder = LocalEmbedder()) {
         self.database = database
-        self.providers = providers
         self.local = local
     }
 
@@ -31,61 +29,10 @@ actor EmbeddingsService {
         let model: String
     }
 
-    func embedModel() async -> (provider: ProviderModel, model: String)? {
-        guard let list = try? await providers.list() else { return nil }
-        guard let provider = list.first(where: \.isDefault) ?? list.first else { return nil }
-        // Only the explicitly configured embedding model. Falling back to the chat
-        // model would send a completion model to /embeddings and fail obscurely.
-        let model = provider.embedModel ?? ""
-        guard !model.isEmpty else { return nil }
-        return (provider, model)
-    }
-
     func embed(_ texts: [String]) async throws -> [Vector] {
         guard !texts.isEmpty else { return [] }
-
-        // Local model first: no network, no cost, deterministic.
-        if local.isAvailableOnDisk {
-            do {
-                try await local.prepare()
-                return try await local.embed(texts).map { Vector(values: $0, model: "embeddinggemma-2") }
-            } catch {
-                // fall through to the provider
-            }
-        }
-
-        guard let (provider, model) = await embedModel() else {
-            throw ProviderError.badURL("нет ни локальной модели, ни embedding-модели у провайдера")
-        }
-
-        var trimmed = provider.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        while trimmed.hasSuffix("/") { trimmed.removeLast() }
-        guard let url = URL(string: trimmed + "/embeddings") else {
-            throw ProviderError.badURL(provider.baseURL)
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 60
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if !provider.apiKey.isEmpty {
-            request.setValue("Bearer \(provider.apiKey)", forHTTPHeaderField: "Authorization")
-        }
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "model": model,
-            "input": texts
-        ])
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw ProviderError.http(status: http.statusCode, body: String(body.prefix(300)))
-        }
-
-        let payload = try JSONDecoder().decode(EmbeddingResponse.self, from: data)
-        return payload.data
-            .sorted { $0.index < $1.index }
-            .map { Vector(values: normalize($0.embedding), model: model) }
+        try await local.prepare()
+        return try await local.embed(texts).map { Vector(values: $0, model: "embeddinggemma-2") }
     }
 
     /// Vector for a search query, cached for repeated searches.
@@ -193,13 +140,4 @@ actor EmbeddingsService {
         vDSP_dotpr(a, 1, b, 1, &result, vDSP_Length(a.count))
         return result
     }
-}
-
-private struct EmbeddingResponse: Decodable {
-    struct Item: Decodable {
-        let index: Int
-        let embedding: [Float]
-    }
-
-    let data: [Item]
 }
