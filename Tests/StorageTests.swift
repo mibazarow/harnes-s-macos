@@ -107,6 +107,33 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(released.byteCount, attachment.byteCount)
     }
 
+    func testHistoryPagination() async throws {
+        let database = try AppDatabase()
+        let history = ChatHistoryService(database: database)
+
+        for index in 0..<250 {
+            try await history.append(role: index.isMultiple(of: 2) ? .user : .assistant, text: "msg \(index)", reasoning: nil)
+        }
+
+        let page = try await history.recent(limit: 100)
+        XCTAssertEqual(page.count, 100)
+        XCTAssertEqual(page.last?.text, "msg 249")
+        XCTAssertEqual(page.first?.text, "msg 150")
+
+        let older = try await history.older(than: page[0].id, limit: 100)
+        XCTAssertEqual(older.count, 100)
+        XCTAssertEqual(older.last?.text, "msg 149")
+        XCTAssertEqual(older.first?.text, "msg 50")
+
+        let hasMore = try await history.hasOlder(than: older[0].id)
+        XCTAssertTrue(hasMore)
+
+        let oldest = try await history.older(than: older[0].id, limit: 100)
+        XCTAssertEqual(oldest.count, 50)
+        let nothingLeft = try await history.hasOlder(than: oldest[0].id)
+        XCTAssertFalse(nothingLeft)
+    }
+
     @MainActor
     func testMessageQueueing() async throws {
         let chat = ChatStore(services: nil)

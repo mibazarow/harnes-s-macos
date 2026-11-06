@@ -21,6 +21,9 @@ final class ChatStore {
     private var checkpointCovered: Int = 0
     private var registry: ToolRegistry?
     private var memoryTouchedThisTurn = false
+    private var oldestStoredID: Int64?
+    private(set) var hasMoreHistory = false
+    private(set) var isLoadingOlder = false
     /// Threshold used for compaction and for the outgoing window. Set from settings.
     var compactionThreshold: Double = 80
     /// Last assembled system prompt, reused for the footer budget so the numbers match.
@@ -585,7 +588,7 @@ final class ChatStore {
 
         // Keep the in-memory view bounded. Storage keeps everything; a restart restores
         // the tail, so nothing is actually lost.
-        let cap = 400
+        let cap = 2_000
         if messages.count > cap {
             messages.removeFirst(messages.count - cap)
         }
@@ -621,7 +624,7 @@ final class ChatStore {
 
         let stored: [StoredMessage]
         do {
-            stored = try await services.history.recent(limit: 60)
+            stored = try await services.history.recent(limit: 100)
         } catch {
             messages.append(ChatMessage(role: .system, text: "История не загрузилась: \(error.localizedDescription)"))
             return
@@ -629,22 +632,42 @@ final class ChatStore {
         guard !stored.isEmpty else { return }
         guard messages.count <= 1 else { return }
 
-        var restored: [ChatMessage] = []
-        for entry in stored {
-            guard let role = ChatMessage.Role(rawValue: entry.role), role != .system else { continue }
-            if let date = ISO8601DateFormatter().date(from: entry.createdAt) {
-                restored.append(ChatMessage(
-                    role: role,
-                    text: entry.text,
-                    reasoning: entry.reasoning,
-                    date: date
-                ))
-            } else {
-                restored.append(ChatMessage(role: role, text: entry.text, reasoning: entry.reasoning))
-            }
-        }
+        let restored = Self.restore(stored)
         guard !restored.isEmpty else { return }
         messages = restored
+        oldestStoredID = stored.first?.id
+        hasMoreHistory = (try? await services.history.hasOlder(than: stored[0].id)) ?? false
+    }
+
+    /// Scroll-up pagination: one older page per call, nothing is removed.
+    func loadOlder() async {
+        guard let services, let oldestStoredID, !isLoadingOlder else { return }
+        isLoadingOlder = true
+        defer { isLoadingOlder = false }
+
+        do {
+            let stored = try await services.history.older(than: oldestStoredID, limit: 100)
+            guard !stored.isEmpty else {
+                hasMoreHistory = false
+                return
+            }
+            let restored = Self.restore(stored)
+            messages.insert(contentsOf: restored, at: 0)
+            self.oldestStoredID = stored.first?.id
+            hasMoreHistory = (try? await services.history.hasOlder(than: stored[0].id)) ?? false
+        } catch {
+            hasMoreHistory = false
+        }
+    }
+
+    private static func restore(_ stored: [StoredMessage]) -> [ChatMessage] {
+        stored.compactMap { entry in
+            guard let role = ChatMessage.Role(rawValue: entry.role), role != .system else { return nil }
+            if let date = ISO8601DateFormatter().date(from: entry.createdAt) {
+                return ChatMessage(role: role, text: entry.text, reasoning: entry.reasoning, date: date)
+            }
+            return ChatMessage(role: role, text: entry.text, reasoning: entry.reasoning)
+        }
     }
 
     private func persist(_ role: ChatMessage.Role, text: String, reasoning: String?) {
@@ -706,6 +729,8 @@ final class ChatStore {
 
     func clearView() {
         stop()
+        oldestStoredID = nil
+        hasMoreHistory = false
         messages.removeAll()
         messages.append(ChatMessage(
             role: .system,

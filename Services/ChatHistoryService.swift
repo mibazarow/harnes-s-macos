@@ -2,6 +2,7 @@ import Foundation
 import GRDB
 
 struct StoredMessage: Sendable {
+    let id: Int64
     let role: String
     let text: String
     let reasoning: String?
@@ -27,16 +28,47 @@ actor ChatHistoryService {
         }
     }
 
-    func recent(limit: Int = 60) throws -> [StoredMessage] {
+    func recent(limit: Int = 100) throws -> [StoredMessage] {
+        try page(before: nil, limit: limit)
+    }
+
+    /// A page older than `id`, oldest last. Used for scroll-up pagination.
+    func older(than id: Int64, limit: Int = 100) throws -> [StoredMessage] {
+        try page(before: id, limit: limit)
+    }
+
+    func hasOlder(than id: Int64) throws -> Bool {
         try database.queue.read { db in
-            try Row.fetchAll(db, sql: """
-                SELECT role, text, reasoning, created_at
-                FROM messages
-                ORDER BY id DESC
-                LIMIT ?
-                """, arguments: [limit])
-            .map {
+            try Int.fetchOne(
+                db,
+                sql: "SELECT 1 FROM messages WHERE id < ? LIMIT 1",
+                arguments: [id]
+            ) != nil
+        }
+    }
+
+    private func page(before id: Int64?, limit: Int) throws -> [StoredMessage] {
+        try database.queue.read { db in
+            let rows: [Row]
+            if let id {
+                rows = try Row.fetchAll(db, sql: """
+                    SELECT id, role, text, reasoning, created_at
+                    FROM messages
+                    WHERE id < ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """, arguments: [id, limit])
+            } else {
+                rows = try Row.fetchAll(db, sql: """
+                    SELECT id, role, text, reasoning, created_at
+                    FROM messages
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """, arguments: [limit])
+            }
+            return rows.map {
                 StoredMessage(
+                    id: $0["id"],
                     role: $0["role"],
                     text: $0["text"],
                     reasoning: $0["reasoning"],

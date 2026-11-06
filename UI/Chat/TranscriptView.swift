@@ -8,6 +8,7 @@ struct TranscriptView: View {
     @Environment(ChatStore.self) private var chat
 
     @State private var atBottom = true
+    @State private var loadingOlder = false
 
     private let bottomID = "transcript-bottom"
 
@@ -15,6 +16,18 @@ struct TranscriptView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
+                    if chat.isLoadingOlder || loadingOlder {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("загружаю историю…")
+                                .font(AppFont.mono(max(fontSize - 2, 9)))
+                                .foregroundStyle(palette.dim)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 4)
+                    }
+
                     ForEach(chat.messages) { message in
                         MessageRow(
                             message: message,
@@ -40,6 +53,14 @@ struct TranscriptView: View {
                 return offset >= geometry.contentSize.height - visible - 120
             } action: { _, isAtBottom in
                 atBottom = isAtBottom
+            }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                let offset = geometry.contentOffset.y + geometry.contentInsets.top
+                let scrollable = geometry.contentSize.height > geometry.containerSize.height + 1
+                return scrollable && offset < 160
+            } action: { _, nearTop in
+                guard nearTop, chat.hasMoreHistory, !loadingOlder else { return }
+                Task { await loadOlder(proxy: proxy) }
             }
             .overlay(alignment: .bottomTrailing) {
                 if !atBottom {
@@ -69,6 +90,17 @@ struct TranscriptView: View {
             .onAppear {
                 proxy.scrollTo(bottomID, anchor: .bottom)
             }
+        }
+    }
+
+    private func loadOlder(proxy: ScrollViewProxy) async {
+        guard chat.hasMoreHistory, !loadingOlder else { return }
+        loadingOlder = true
+        let anchor = chat.messages.first?.id
+        await chat.loadOlder()
+        loadingOlder = false
+        if let anchor {
+            proxy.scrollTo(anchor, anchor: .top)
         }
     }
 }
