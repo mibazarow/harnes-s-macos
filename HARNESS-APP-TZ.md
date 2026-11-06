@@ -1,6 +1,6 @@
 # HARNES-S — техническое задание
 
-**Версия:** 3.1 (описывает реализованное состояние)
+**Версия:** 3.2 (описывает реализованное состояние)
 **Назначение:** по этому документу приложение воспроизводится с нуля другой командой или моделью.
 **Статус:** всё, что описано ниже без пометки «план», реализовано и покрыто тестами.
 
@@ -45,7 +45,7 @@
 - macOS 26+, Apple Silicon.
 - Xcode 26+.
 - XcodeGen (`brew install xcodegen`).
-- Опционально: Node.js — для Playwright, `php` — для линта PHP.
+- Опционально: Node.js — для Playwright и GSD; `php` — для линта PHP; ImageMagick (`brew install imagemagick`) — только если пересобираешь иконку.
 
 ```bash
 xcodegen generate
@@ -71,6 +71,8 @@ xattr -dr com.apple.quarantine /Applications/Harness.app
 
 Проект генерируется из `project.yml`. Пакеты: GRDB (SQLite), swift-markdown, swift-transformers (токенизатор), onnxruntime-swift-package-manager, шрифт Nordwand Mono (MIT) в бандле.
 
+Иконка: исходник `Resources/AppIconSource.png` (1024×1024), `Scripts/make_icons.sh` генерирует все 10 размеров в `Resources/Assets.xcassets/AppIcon.appiconset`. Артворк вписывается в сетку Apple: 824 px контента на канвасе 1024, отступ 100, радиус 185, маска по альфе. Скрипт нужен только при замене иконки; в сборке участвует уже готовый `Assets.xcassets`.
+
 Bundle ID: `app.project-s.swift`. Display name: `HARNES-S`.
 
 ---
@@ -95,7 +97,8 @@ Services/     провайдеры, память, эмбеддинги, инде
 Storage/      схема SQLite и миграции
 Models/       доменные модели, ChatStore
 Tests/        unit- и интеграционные тесты
-Resources/    скиллы, шрифты, иконки
+Resources/    скиллы, шрифты, иконки, исходник иконки
+Scripts/      make_icons.sh, install_skills.py
 ```
 
 Правила слоёв:
@@ -131,7 +134,7 @@ HARNES_S_DATA/
 
 - Перенос на другую машину = копирование папки.
 - Модель эмбеддингов кладётся вручную в `models/embeddinggemma-2/` (`model_quantized.onnx`, `model_quantized.onnx_data`, `tokenizer.json`, `tokenizer_config.json`). Без неё семантика отключается, FTS продолжает работать.
-- Playwright ставится в `tools/` при необходимости: `cd ~/HARNES_S_DATA/tools && npm i playwright && npx playwright install chromium`.
+- Playwright ставится в `tools/` при необходимости: `cd ~/HARNES_S_DATA/tools && npm i playwright@1.63.0 && npx playwright install chromium`. Без него инструмент `browser` честно сообщает, чего не хватает.
 
 ### 3.1 Схема базы
 
@@ -171,6 +174,9 @@ HARNES_S_DATA/
 | `tags` | JSON-массив |
 | `source` | откуда пришло |
 | `workspace_root` | для `scope=workspace` |
+| `pinned` | 1 — пользователь сказал запомнить, запись неприкосновенна |
+| `hits` | сколько раз запись попадала в промпт |
+| `last_used_at` | последнее обращение; по нему идёт вытеснение |
 
 `memory_fts` — FTS5 по `content`, `tokenize='unicode61 remove_diacritics 2'`, синхронизируется триггерами на INSERT/UPDATE/DELETE.
 
@@ -184,7 +190,7 @@ HARNES_S_DATA/
 
 ### 3.2 Миграции
 
-`DatabaseMigrator` с версиями: `v1` (базовая схема), `v2_reasoning_level`, `v3_embed_model`, `v4_messages`. Каждая проверяет наличие колонки перед `ALTER`, поэтому применяется к любой существующей базе без ошибок.
+`DatabaseMigrator` с версиями: `v1` (базовая схема), `v2_reasoning_level`, `v3_embed_model`, `v4_messages`, `v5_memory_lifecycle` (`pinned`, `hits`, `last_used_at`). Каждая проверяет наличие колонки перед `ALTER`, поэтому применяется к любой существующей базе без ошибок.
 
 ---
 
@@ -201,6 +207,8 @@ HARNES_S_DATA/
 | `compactionThresholdPercent` | 80 | порог компакции |
 | `autopilot` | false | работа без подтверждений |
 
+Ключи гарнитуры и интервала живут в `AppFont` (`AppFont.familyKey`, `AppFont.lineSpacingKey`), остальные — в `AppSettings`.
+
 ---
 
 ## 5. Чат
@@ -213,6 +221,7 @@ HARNES_S_DATA/
 - `Esc` — остановить ответ и очистить очередь. Остановленное сообщение помечается, черновик не теряется.
 - `⌘⇧K` — очистить вид (база не трогается).
 - `⌘⇧P` — режим плана: все мутирующие инструменты отключены на уровне исполнения.
+- `⌘↓` — прыжок в конец чата; кнопка появляется только когда прокрутка не внизу.
 - `⌘,` — настройки.
 
 ### 5.2 Вложения
@@ -221,6 +230,7 @@ HARNES_S_DATA/
 - Изображения показываются превью, уходят в модель как `image_url` base64.
 - Текст читается и подставляется в контекст как `<file name="..." path="...">…</file>`.
 - Прочие файлы передаются путём.
+- Вложить можно и целую папку: диалог выбора папки кладёт в контекст путь и дерево, а не содержимое.
 - Лимит на файл — 64 МБ.
 
 ### 5.3 Размышления
@@ -367,11 +377,15 @@ HARNES_S_DATA/
 
 `memory_add`, `memory_search`, `memory_forget`, `memory_list`, `secret_save`, `secret_get`, `secret_search`, `skill_list`, `skill_read`, `skill_install`, `mcp_list`, `mcp_tools`, `todowrite`, `todo_read`, `schedule_add`, `schedule_list`, `schedule_remove`, `task` (изолированный подагент), плюс все инструменты MCP как `mcp__<server>__<tool>`.
 
+Всего встроенных инструментов 46; MCP-инструменты подмешиваются к ним динамически под именами `mcp__<server>__<tool>`. Схема отправляется каждый запрос, поэтому описания короткие, а подробности (`mcp_tools`, `skill_read`) загружаются вызовом.
+
+`memory_add` принимает `text`, `kind` и `pinned`; `pinned: true` ставится, когда пользователь сказал «запомни», и делает запись неприкосновенной. `memory_forget` удаляет по id или по формулировке. `memory_list` даёт id для точечных операций.
+
 `task` запускает отдельный цикл со своим контекстом, без доступа к секретам и планировщику, и возвращает только итог.
 
 ### 9.5 Режим плана
 
-Белый список наоборот: при включённом режиме из схемы удаляются и блокируются `fs_write`, `edit_file`, `apply_patch`, `trash_paths`, `restore_trashed`, `restore_version`, `git_commit`, `git_stash`, `bash`, `schedule_add`, `schedule_remove`, `memory_add`, `secret_save`, `skill_install`, `index_workspace`, `todowrite` и все MCP-инструменты. Проверка выполняется в момент вызова, а не только при формировании списка.
+Белый список наоборот: при включённом режиме из схемы удаляются и блокируются `fs_write`, `edit_file`, `apply_patch`, `trash_paths`, `restore_trashed`, `restore_version`, `git_commit`, `git_stash`, `bash`, `schedule_add`, `schedule_remove`, `memory_add`, `memory_forget`, `secret_save`, `skill_install`, `index_workspace`, `todowrite` и все MCP-инструменты. Проверка выполняется в момент вызова, а не только при формировании списка.
 
 ---
 
@@ -509,15 +523,23 @@ python3 Scripts/install_skills.py --include-gsd --gsd-runtime ~/.config/kilo ~/.
 
 ## 14. MCP
 
-- Конфиг: `config/mcp.json`.
-- Транспорт: stdio.
+- Конфиг: `config/mcp.json`, список `servers`.
+- Поля сервера: `name`, `transport` (`stdio` / `http` / `sse`), `command`, `args`, `url`, `env`, `enabled`, `exposure`, `scope`. Работает только stdio; http и sse объявлены в модели, но клиент их не поднимает.
 - Порядок: `initialize` → `notifications/initialized` → `tools/list` → `tools/call`.
 - Таймаут запроса 60 с, логи в `logs/mcp-<name>.log`.
-- Инструменты подмешиваются как `mcp__<server>__<tool>` с сохранением исходной JSON-схемы.
-- Прогрев выполняется при старте приложения.
+- Инструменты подмешиваются как `mcp__<server>__<tool>`.
+- `exposure: "deferred"` (по умолчанию) отдаёт в схему только имя, короткое описание (≤ 600 символов) и список аргументов с пометкой обязательных, а сама схема — `{"type":"object","additionalProperties":true}`. Полную JSON-схему агент получает инструментом `mcp_tools`. `exposure: "full"` отправляет исходную схему целиком.
+- Сессии поднимаются лениво, при первом запросе схем инструментов, а не при старте приложения.
 - Версии пакетов фиксируются явно, чтобы поведение не менялось между запусками.
 
 Команды: `/mcp`, `/mcp add <имя> <команда…>`, `/mcp add <имя> --url <адрес>`, `/mcp remove|enable|disable`.
+
+Пример `mcp.json`:
+
+```json
+{"servers": [{"name": "scrapling", "transport": "stdio", "command": "/path/to/scrapling-mcp",
+  "args": [], "env": {}, "enabled": true, "exposure": "deferred", "scope": "global"}]}
+```
 
 ---
 
@@ -639,7 +661,9 @@ python3 Scripts/install_skills.py --include-gsd --gsd-runtime ~/.config/kilo ~/.
 10. Стиль накапливает счётчики, активируется не раньше второго дня, ручная карточка меняет ответ.
 11. MCP-сервер подключается и его инструменты вызываются.
 12. Скиллы видны в индексе промпта, `skill_read` отдаёт тело, путь и файлы; выключенный скилл исчезает из индекса.
-13. Все тесты зелёные.
+13. Память: явное «запомни» помечает запись закреплённой, `/memory forget` её удаляет, невостребованные записи старше 90 дней исчезают при запуске.
+14. MCP-сервер с `exposure: deferred` не раздувает схему, а `mcp_tools` отдаёт полную схему инструмента.
+15. Все тесты зелёные.
 
 ---
 
@@ -649,7 +673,9 @@ python3 Scripts/install_skills.py --include-gsd --gsd-runtime ~/.config/kilo ~/.
 
 - LSP-диагностика прямо в транскрипте;
 - плагины с собственным рантаймом;
-- HTTP/SSE-транспорт для MCP;
+- HTTP/SSE-транспорт для MCP (поля в конфиге есть, клиент поднимает только stdio);
+- закрытие MCP-сессий при выходе из приложения;
+- подтверждение записи за пределами рабочей папки (пока только предупреждение в промпте);
 - онбординг при первом запуске;
 - экран управления расписаниями;
 - экспорт и импорт профиля стиля;
@@ -678,7 +704,7 @@ python3 Scripts/install_skills.py --include-gsd --gsd-runtime ~/.config/kilo ~/.
    rm -rf /Applications/Harness.app && cp -R .build/Build/Products/Release/Harness.app /Applications/
    xattr -dr com.apple.quarantine /Applications/Harness.app
    ```
-4. **Первый запуск.** Создаётся `~/HARNES_S_DATA/` с `database/`, `config/`, `workspace/`, `models/`, `artifacts/`, `versions/`, `trash/`, `logs/`, `backups/`.
+4. **Первый запуск.** Создаётся `~/HARNES_S_DATA/` с `database/`, `config/`, `workspace/`, `models/`, `artifacts/`, `versions/`, `trash/`, `logs/`, `backups/`. База прогоняет миграции до `v5`.
 5. **Провайдер.** `⌘,` → Провайдеры → Base URL `…/v1`, токен, «Проверить и загрузить модели», выбрать модель и окно контекста, уровень размышлений. Токен в репозиторий не попадает.
 6. **Скиллы (опционально).** Базовые пять уже в бандле. Свой набор:
    ```bash
@@ -691,6 +717,9 @@ python3 Scripts/install_skills.py --include-gsd --gsd-runtime ~/.config/kilo ~/.
    ```json
    {"servers": [{"name": "scrapling", "transport": "stdio", "command": "/path/to/scrapling-mcp", "args": [], "enabled": true, "exposure": "deferred", "scope": "global"}]}
    ```
-9. **Приёмка.** Отправить сообщение → стримится текст и размышления; попросить прочитать файл → виден вызов инструмента; `Esc` останавливает; перезапуск восстанавливает историю; `/remember` и `/search` находят запись; `skill_read` отдаёт скилл.
+9. **Память.** Сказать «запомни: собираем через xcodebuild» → в `/memory` запись с 📌. Сказать «запомни, что совещание в четверг» → запись есть, но не закреплена и исчезнет, если её не использовать. Сказать «забудь про совещание» → запись удалена. Проверить, что в промпт попадают закреплённые первыми.
+10. **Приёмка.** Отправить сообщение → стримится текст и размышления; попросить прочитать файл → виден вызов инструмента; `Esc` останавливает; перезапуск восстанавливает историю; `/remember` и `/search` находят запись; `skill_read` отдаёт скилл; `mcp_tools` возвращает схему MCP-инструмента.
 
-Не переносится автоматически: токен провайдера, модель эмбеддингов, бинарь scrapling и его venv, исходный каталог скиллов и рантайм GSD. Всё остальное — код и `project.yml`.
+Не переносится автоматически: токен провайдера, модель эмбеддингов, бинарь scrapling и его venv, исходный каталог скиллов и рантайм GSD, накопленная память и история чата. Всё остальное — код, `project.yml`, `Resources/` и `Scripts/`.
+
+Что проверить после сборки, если что-то ведёт себя не так, как описано: `~/.kilocode/skills`, `~/.config/kilo/skills` и `~/.config/kilo/gsd-core` — это исходники автора, не части приложения. Приложение читает только `~/HARNES_S_DATA/config/skills` и `~/HARNES_S_DATA/config/gsd`.
