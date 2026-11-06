@@ -64,7 +64,8 @@ enum StyleBlockBuilder {
             case .vy: return "Обращайся на «вы», вежливо и без панибратства."
             }
         case .brevity:
-            return "Пиши коротко: 1–3 предложения, без длинных вступлений."
+            // Length is governed by sampling temperature, not by prompt instructions.
+            return nil
         case .profanity:
             return "Пользователь сам крепко выражается — можно изредка и к месту."
         case .slang:

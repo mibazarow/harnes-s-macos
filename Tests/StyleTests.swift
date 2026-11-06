@@ -99,7 +99,7 @@ final class StyleProfileTests: XCTestCase {
 
         let auto = StyleBlockBuilder.render(profile)
         XCTAssertTrue(auto.contains("«ты»"))
-        XCTAssertTrue(auto.contains("коротко"))
+        XCTAssertFalse(auto.contains("коротко"), "краткость задаётся температурой, а не промптом")
         XCTAssertLessThanOrEqual(auto.count, StyleBlockBuilder.maxBlockChars)
 
         var neutral = profile

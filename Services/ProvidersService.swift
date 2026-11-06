@@ -56,11 +56,12 @@ actor ProvidersService {
                     UPDATE providers SET
                         name = ?, base_url = ?, api_key = ?, models_json = ?,
                         default_model = ?, embed_model = ?, context_window = ?, reasoning_level = ?,
-                        is_default = ?, health = ?, last_check_at = ?, updated_at = ?
+                        temperature = ?, is_default = ?, health = ?, last_check_at = ?, updated_at = ?
                     WHERE id = ?
                     """, arguments: [
                     provider.name, provider.baseURL, provider.apiKey, modelsJSON,
                     provider.defaultModel, provider.embedModel, provider.contextWindow, provider.reasoningLevel.rawValue,
+                    provider.temperature,
                     provider.isDefault ? 1 : 0,
                     provider.health, provider.lastCheckAt, provider.updatedAt, provider.id
                 ])
@@ -68,12 +69,13 @@ actor ProvidersService {
                 try db.execute(sql: """
                     INSERT INTO providers (
                         id, name, base_url, api_key, models_json, default_model, embed_model,
-                        context_window, reasoning_level, is_default, health,
+                        context_window, reasoning_level, temperature, is_default, health,
                         last_check_at, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, arguments: [
                     provider.id, provider.name, provider.baseURL, provider.apiKey, modelsJSON,
                     provider.defaultModel, provider.embedModel, provider.contextWindow, provider.reasoningLevel.rawValue,
+                    provider.temperature,
                     provider.isDefault ? 1 : 0,
                     provider.health, provider.lastCheckAt, provider.createdAt, provider.updatedAt
                 ])
@@ -188,6 +190,7 @@ actor ProvidersService {
             embedModel: row["embed_model"],
             contextWindow: row["context_window"],
             reasoningLevel: ReasoningLevel(rawValue: row["reasoning_level"] ?? "off") ?? .off,
+            temperature: row["temperature"] ?? ProviderModel.defaultTemperature,
             isDefault: (row["is_default"] as Int) == 1,
             health: row["health"],
             lastCheckAt: row["last_check_at"],

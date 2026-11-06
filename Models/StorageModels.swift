@@ -28,6 +28,9 @@ enum ReasoningLevel: String, Codable, CaseIterable, Identifiable, Sendable {
 }
 
 struct ProviderModel: Identifiable, Sendable, Equatable {
+    static let defaultTemperature: Double = 0.2
+    static let temperatureRange: ClosedRange<Double> = 0...2
+
     var id: String
     var name: String
     var baseURL: String
@@ -37,6 +40,9 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
     var embedModel: String?
     var contextWindow: Int
     var reasoningLevel: ReasoningLevel
+    /// Sampling temperature for this provider. Individual per provider: a chatty
+    /// model and a terse one rarely want the same value.
+    var temperature: Double
     var isDefault: Bool
     var health: String
     var lastCheckAt: String?
@@ -53,6 +59,7 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
         embedModel: String? = nil,
         contextWindow: Int = 128_000,
         reasoningLevel: ReasoningLevel = .off,
+        temperature: Double = ProviderModel.defaultTemperature,
         isDefault: Bool = false,
         health: String = "unknown",
         lastCheckAt: String? = nil,
@@ -68,6 +75,7 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
         self.embedModel = embedModel
         self.contextWindow = contextWindow
         self.reasoningLevel = reasoningLevel
+        self.temperature = temperature
         self.isDefault = isDefault
         self.health = health
         self.lastCheckAt = lastCheckAt

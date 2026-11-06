@@ -306,7 +306,8 @@ final class StorageTests: XCTestCase {
             models: ["model-a", "model-b"],
             defaultModel: "model-a",
             contextWindow: 128_000,
-            reasoningLevel: .maximum
+            reasoningLevel: .maximum,
+            temperature: 0.7
         ))
         XCTAssertFalse(second.isDefault)
 
@@ -314,6 +315,8 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(list.count, 2)
         XCTAssertEqual(list.first?.name, "Local")
         XCTAssertEqual(list.first(where: { $0.id == second.id })?.reasoningLevel, .maximum)
+        XCTAssertEqual(list.first(where: { $0.id == second.id })?.temperature, 0.7)
+        XCTAssertEqual(list.first(where: { $0.id == first.id })?.temperature, ProviderModel.defaultTemperature)
 
         try await providers.setDefault(id: second.id)
         list = try await providers.list()

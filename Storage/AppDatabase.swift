@@ -209,6 +209,15 @@ final class AppDatabase: Sendable {
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_trash_restored ON trash(restored);")
         }
 
+        migrator.registerMigration("v8_provider_temperature") { db in
+            if try !db.columns(in: "providers").contains(where: { $0.name == "temperature" }) {
+                try db.execute(sql: """
+                    ALTER TABLE providers
+                    ADD COLUMN temperature REAL NOT NULL DEFAULT 0.2;
+                    """)
+            }
+        }
+
         return migrator
     }
 }

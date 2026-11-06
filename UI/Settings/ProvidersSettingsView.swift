@@ -311,6 +311,22 @@ struct ProviderEditorView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    HStack(spacing: 10) {
+                        Text("Температура")
+                        Slider(
+                            value: $provider.temperature,
+                            in: ProviderModel.temperatureRange,
+                            step: 0.05
+                        )
+                        Text(provider.temperature.formatted(.number.precision(.fractionLength(2))))
+                            .font(AppFont.mono(13))
+                            .frame(width: 42, alignment: .trailing)
+                    }
+
+                    Text("Насколько свободно модель выбирает слова. 0.2 — собранно и по делу; выше — живее, но многословнее. У каждого провайдера своя.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     Text("Автокомпактация: \(Int(settings.compactionThresholdPercent))% окна (меняется в «Основных»)")
                         .font(.caption)
                         .foregroundStyle(.secondary)

@@ -28,12 +28,24 @@ final class ProviderClientTests: XCTestCase {
 
         XCTAssertEqual(json["model"] as? String, "test-model")
         XCTAssertEqual(json["stream"] as? Bool, true)
+        XCTAssertEqual(json["temperature"] as? Double, 0.2)
         XCTAssertEqual(json["reasoning_effort"] as? String, "medium")
 
         let messages = try XCTUnwrap(json["messages"] as? [[String: Any]])
         XCTAssertEqual(messages.count, 1)
         XCTAssertEqual(messages[0]["role"] as? String, "user")
         XCTAssertEqual(messages[0]["content"] as? String, "привет")
+    }
+
+    func testEncodeRequestUsesProviderTemperature() throws {
+        let data = try ProviderClient.encodeRequest(
+            model: "m",
+            messages: [ProviderMessage(role: .user, content: "x")],
+            reasoning: .off,
+            temperature: 0.9
+        )
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(json["temperature"] as? Double, 0.9)
     }
 
     func testEncodeRequestOmitsReasoningWhenOff() throws {

@@ -129,7 +129,8 @@ struct ProviderClient: Sendable {
                         model: model,
                         messages: messages,
                         reasoning: provider.reasoningLevel,
-                        tools: tools
+                        tools: tools,
+                        temperature: provider.temperature
                     )
 
                     let (bytes, response) = try await Self.session.bytes(for: request)
@@ -235,15 +236,21 @@ struct ProviderClient: Sendable {
         return URL(string: trimmed + "/chat/completions")
     }
 
+    /// Default sampling temperature when a provider has none stored. Each provider
+    /// carries its own value; this is only the fallback and the value for new ones.
+    static let temperature: Double = ProviderModel.defaultTemperature
+
     static func encodeRequest(
         model: String,
         messages: [ProviderMessage],
         reasoning: ReasoningLevel,
-        tools: [ProviderToolSchema] = []
+        tools: [ProviderToolSchema] = [],
+        temperature: Double = ProviderModel.defaultTemperature
     ) throws -> Data {
         var payload: [String: Any] = [
             "model": model,
             "stream": true,
+            "temperature": temperature,
             "messages": messages.map(encodeMessage)
         ]
         if reasoning != .off {
