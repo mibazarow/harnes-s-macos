@@ -9,6 +9,10 @@ actor StyleStore {
     private static let cardCooldownMillis: Int64 = 6 * 60 * 60 * 1000
 
     private var cached: StyleProfile?
+    /// The rendered prompt block is frozen between refreshes on purpose: it sits in the
+    /// system prompt, and a block that shifts every message invalidates the provider's
+    /// prefix cache for the whole conversation behind it.
+    private var promptCache: (block: String, turns: Int)?
 
     init(database: AppDatabase) {
         self.database = database
@@ -111,9 +115,15 @@ actor StyleStore {
         return nowMillis - profile.cardUpdatedAt >= Self.cardCooldownMillis
     }
 
-    /// Prompt block for the volatile tail. Empty when the style is neutral.
-    func promptBlock() -> String {
-        StyleBlockBuilder.render(current())
+    /// Prompt block, refreshed once every `refreshEvery` turns. Empty when neutral.
+    func promptBlock(refreshEvery: Int = 20) -> String {
+        if let cache = promptCache, cache.turns < refreshEvery {
+            promptCache = (cache.block, cache.turns + 1)
+            return cache.block
+        }
+        let block = StyleBlockBuilder.render(current())
+        promptCache = (block, 0)
+        return block
     }
 
     /// Human-readable summary for the settings screen.

@@ -124,6 +124,27 @@ final class StyleProfileTests: XCTestCase {
         XCTAssertTrue(insult.isHostile)
     }
 
+    func testPromptBlockStaysFrozenBetweenRefreshes() async throws {
+        let database = try AppDatabase()
+        let store = StyleStore(database: database)
+        await store.setMode(.manual)
+        await store.setManualCard("Коротко и по делу")
+
+        let first = await store.promptBlock(refreshEvery: 2)
+        XCTAssertTrue(first.contains("Коротко и по делу"))
+
+        // A change under the frozen block must not reach the prompt yet: shifting it
+        // would invalidate the provider's cached prefix.
+        await store.setManualCard("Совсем другой тон")
+        let second = await store.promptBlock(refreshEvery: 2)
+        XCTAssertEqual(second, first)
+
+        _ = await store.promptBlock(refreshEvery: 2)
+        let refreshed = await store.promptBlock(refreshEvery: 2)
+        XCTAssertTrue(refreshed.contains("Совсем другой тон"))
+        XCTAssertNotEqual(refreshed, first)
+    }
+
     func testStoreObservesAndPersists() async throws {
         let database = try AppDatabase()
         let store = StyleStore(database: database)
