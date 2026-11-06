@@ -1,3 +1,4 @@
+import Markdown
 import XCTest
 @testable import Harness
 
@@ -175,30 +176,73 @@ final class StyleProfileTests: XCTestCase {
     }
 }
 
-final class MarkdownHeadingTests: XCTestCase {
+final class MarkdownMetricsTests: XCTestCase {
+    @MainActor
     func testHeadingLadderIsFlatAndAbsolute() {
-        // At a 14 pt body this is 17 / 15 / 14 — the same ladder OpenCode uses.
+        // At a 14 pt body this is 17 / 15 / 14 — the same ladder the reference UI uses.
         XCTAssertEqual(MarkdownBlockView.headingSize(level: 1, fontSize: 14), 17)
         XCTAssertEqual(MarkdownBlockView.headingSize(level: 2, fontSize: 14), 15)
         XCTAssertEqual(MarkdownBlockView.headingSize(level: 3, fontSize: 14), 14)
         XCTAssertEqual(MarkdownBlockView.headingSize(level: 6, fontSize: 14), 14)
     }
 
-    func testHeadingGapDoesNotGrowWithFontSize() {
-        // The step between h1 and body stays 3 pt at any size, so a bigger font does
-        // not turn headings into posters.
+    @MainActor
+    func testHeadingStepDoesNotGrowWithFontSize() {
         for size in [11.0, 14.0, 20.0] as [CGFloat] {
-            XCTAssertEqual(
-                MarkdownBlockView.headingSize(level: 1, fontSize: size) - size,
-                3,
-                accuracy: 0.001
-            )
+            XCTAssertEqual(MarkdownBlockView.headingSize(level: 1, fontSize: size) - size, 3, accuracy: 0.001)
         }
     }
 
-    func testHeadingPaddingGrowsWithLevel() {
-        XCTAssertGreaterThan(MarkdownBlockView.headingPadding(level: 1), MarkdownBlockView.headingPadding(level: 2))
-        XCTAssertGreaterThan(MarkdownBlockView.headingPadding(level: 2), MarkdownBlockView.headingPadding(level: 3))
-        XCTAssertEqual(MarkdownBlockView.headingPadding(level: 4), 6)
+    @MainActor
+    func testHeadingWeights() {
+        XCTAssertEqual(MarkdownBlockView.headingWeight(level: 1), .semibold)
+        XCTAssertEqual(MarkdownBlockView.headingWeight(level: 3), .semibold)
+        XCTAssertEqual(MarkdownBlockView.headingWeight(level: 4), .regular)
+    }
+
+    @MainActor
+    func testLineBoxIsOneSixtyPercent() {
+        // 160% of the body size minus the font's own line height is the extra leading.
+        for size in [11.0, 14.0, 20.0] as [CGFloat] {
+            let total = size * 1.32 + AppFont.lineSpacing(for: size)
+            XCTAssertEqual(total / size, 1.6, accuracy: 0.06, "size \(size)")
+        }
+    }
+
+    @MainActor
+    func testBlockRhythm() throws {
+        let markdown = """
+        # Title
+
+        Some paragraph.
+
+        - one
+        - two
+
+        > quote
+
+        ```swift
+        let x = 1
+        ```
+
+        | a | b |
+        |---|---|
+        | 1 | 2 |
+        """
+        let document = Document(parsing: markdown)
+        let blocks = Array(document.children)
+
+        // Paragraphs are 12 apart, code gets 24 below, headings 28 above and 12 below.
+        XCTAssertEqual(MarkdownBlockView.marginBottom(blocks[1]), 12)
+        XCTAssertEqual(MarkdownBlockView.marginTop(blocks[2]), 8)
+        XCTAssertEqual(MarkdownBlockView.marginTop(blocks[3]), 16)
+        XCTAssertEqual(MarkdownBlockView.marginBottom(blocks[4]), 24)
+
+        // Collapse: the larger of the two adjacent margins wins, they never sum.
+        XCTAssertEqual(
+            MarkdownBlockView.gap(after: blocks[1], before: blocks[2]),
+            max(MarkdownBlockView.marginBottom(blocks[1]), MarkdownBlockView.marginTop(blocks[2]))
+        )
+        XCTAssertEqual(MarkdownBlockView.gap(after: blocks[2], before: blocks[3]), 16)
     }
 }

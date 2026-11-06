@@ -32,9 +32,12 @@ enum AppFont {
         return stored
     }
 
-    /// Fixed spacing in points. Not user-configurable on purpose: an absolute value
-    /// reads inconsistently across font sizes, so it stays one calm default.
-    static let lineSpacing: CGFloat = 3
+    /// Extra leading that brings the block to a 160% line box, the rhythm the reference
+    /// UI uses. Nordwand Mono's natural line height is ~1.32 em, so the remainder is
+    /// ~0.28 em; it is computed rather than fixed so the ratio holds at every size.
+    static func lineSpacing(for size: CGFloat) -> CGFloat {
+        max((size * 0.28).rounded(), 1)
+    }
 
     static func isAvailable(_ family: String) -> Bool {
         NSFont(name: family, size: 13) != nil

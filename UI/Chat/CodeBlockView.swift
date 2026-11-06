@@ -1,6 +1,8 @@
 import AppKit
 import SwiftUI
 
+/// Code block. The reference UI has no header bar: the block is a plain raised plate,
+/// and a small copy button fades in on hover in the top-right corner.
 struct CodeBlockView: View {
     let code: String
     let language: String?
@@ -8,52 +10,56 @@ struct CodeBlockView: View {
     let fontSize: CGFloat
 
     @State private var copied = false
+    @State private var hovering = false
     @State private var resetTask: Task<Void, Never>?
 
     private var resolvedLanguage: CodeLanguage {
         CodeLanguage.detect(language)
     }
 
+    private var showsButton: Bool {
+        hovering || copied
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text(language?.lowercased() ?? "code")
-                    .font(AppFont.mono(max(fontSize - 2, 9)))
-                    .foregroundStyle(palette.faint)
-
-                Spacer()
-
+        Text(highlighted)
+            .font(AppFont.mono(fontSize))
+            .lineSpacing(AppFont.lineSpacing(for: fontSize))
+            .textSelection(.enabled)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(palette.codeBackground)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(palette.border, lineWidth: 1)
+            )
+            .overlay(alignment: .topTrailing) {
                 Button {
                     copy()
                 } label: {
                     Image(systemName: copied ? "checkmark" : "doc.on.doc")
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(copied ? palette.accent : palette.faint)
-                        .frame(width: 20, height: 18)
+                        .foregroundStyle(copied ? palette.accent : palette.dim)
+                        .frame(width: 24, height: 24)
+                        .background(palette.panel)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(palette.border, lineWidth: 1)
+                        )
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
+                .padding(4)
+                .opacity(showsButton ? 1 : 0)
+                .animation(.easeOut(duration: 0.15), value: showsButton)
                 .help(copied ? "Скопировано" : "Скопировать код")
                 .accessibilityLabel(copied ? "Скопировано" : "Скопировать код")
             }
-            .padding(.horizontal, 10)
-            .padding(.top, 6)
-            .padding(.bottom, 2)
-
-            Text(highlighted)
-                .font(AppFont.mono(fontSize))
-                .lineSpacing(AppFont.lineSpacing)
-                .textSelection(.enabled)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .background(palette.codeBackground)
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(palette.border, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .onHover { hovering = $0 }
+            .accessibilityElement(children: .contain)
     }
 
     private var highlighted: AttributedString {
