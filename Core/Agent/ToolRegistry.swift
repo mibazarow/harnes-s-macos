@@ -146,6 +146,7 @@ actor ToolRegistry {
             case "secret_get": return try await secretGet(args)
             case "secret_search": return try await secretSearch(args)
             case "skill_list": return await skillList()
+            case "skill_read": return await skillRead(args)
             case "skill_install": return await skillInstall(args)
             case "mcp_list": return await mcpList()
             default:
@@ -852,6 +853,16 @@ actor ToolRegistry {
         let records = await skills.list()
         guard !records.isEmpty else { return .ok("Скиллов нет.") }
         return .ok(records.map { "\($0.name) [\($0.scope.rawValue), \($0.enabled ? "вкл" : "выкл")] — \($0.summary)" }.joined(separator: "\n"))
+    }
+
+    private func skillRead(_ args: [String: Any]) async -> ToolResult {
+        guard let skills else { return .fail("Скиллы недоступны") }
+        guard let name = args["name"] as? String, !name.isEmpty else { return .fail("name обязателен") }
+        do {
+            return .ok(try await skills.read(name: name))
+        } catch {
+            return .fail(error.localizedDescription)
+        }
     }
 
     private func skillInstall(_ args: [String: Any]) async -> ToolResult {

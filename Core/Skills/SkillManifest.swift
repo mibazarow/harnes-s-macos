@@ -52,8 +52,30 @@ struct SkillManifest: Sendable, Equatable {
         lists: inout [String: [String]]
     ) {
         var currentListKey: String?
+        var blockKey: String?
+        var blockLines: [String] = []
+
+        func flushBlock() {
+            guard let key = blockKey else { return }
+            let joined = blockLines
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+            if !joined.isEmpty {
+                metadata[key] = joined
+            }
+            blockKey = nil
+            blockLines = []
+        }
 
         for rawLine in lines {
+            if blockKey != nil,
+               rawLine.hasPrefix(" ") || rawLine.hasPrefix("\t") || rawLine.isEmpty {
+                blockLines.append(rawLine)
+                continue
+            }
+            flushBlock()
+
             let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty { continue }
 
@@ -67,6 +89,12 @@ struct SkillManifest: Sendable, Equatable {
             let key = String(trimmed[..<colon]).trimmingCharacters(in: .whitespaces).lowercased()
             var value = String(trimmed[trimmed.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
             currentListKey = nil
+
+            if value == ">" || value == "|" || value == ">-" || value == "|-" {
+                blockKey = key
+                blockLines = []
+                continue
+            }
 
             if value.isEmpty {
                 currentListKey = key
@@ -85,6 +113,8 @@ struct SkillManifest: Sendable, Equatable {
                 metadata[key] = value
             }
         }
+
+        flushBlock()
     }
 
     private static func unquote(_ value: String) -> String {

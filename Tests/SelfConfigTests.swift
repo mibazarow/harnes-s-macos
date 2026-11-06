@@ -54,6 +54,21 @@ final class SelfConfigTests: XCTestCase {
         XCTAssertEqual(manifest.body, "# Body")
     }
 
+    func testSkillManifestParsesFoldedDescription() throws {
+        let text = """
+        ---
+        name: folded
+        description: >
+          First line of the summary
+          and the second line.
+        version: 2.0.0
+        ---
+        # Body
+        """
+        let manifest = try SkillManifest.parse(text, fallbackName: "fallback")
+        XCTAssertEqual(manifest.summary, "First line of the summary and the second line.")
+    }
+
     func testSkillInstallDisableRemove() async throws {
         let root = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -113,6 +128,80 @@ final class SelfConfigTests: XCTestCase {
                 return XCTFail("Ожидалась builtinReadOnly, получено \(error)")
             }
         }
+    }
+
+    func testSkillReadReturnsBodyAndFiles() async throws {
+        let root = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let builtin = root.appendingPathComponent("builtin", isDirectory: true)
+        let skillDir = builtin.appendingPathComponent("demo-read", isDirectory: true)
+        try writeSkill(to: skillDir, name: "demo-read")
+        try FileManager.default.createDirectory(
+            at: skillDir.appendingPathComponent("scripts"),
+            withIntermediateDirectories: true
+        )
+        try "print('hi')".write(
+            to: skillDir.appendingPathComponent("scripts/run.py"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let service = SkillsService(
+            userDirectory: root.appendingPathComponent("user", isDirectory: true),
+            builtinDirectory: builtin
+        )
+
+        let text = try await service.read(name: "demo-read")
+        let records = await service.list()
+        let record = try XCTUnwrap(records.first)
+        XCTAssertTrue(text.contains("# Skill: demo-read"))
+        XCTAssertTrue(text.contains("Path: \(record.directory.path)"))
+        XCTAssertTrue(text.contains("scripts/run.py"))
+        XCTAssertTrue(text.contains("Do the thing."))
+
+        do {
+            _ = try await service.read(name: "missing")
+            XCTFail("Неизвестный скилл должен падать")
+        } catch {
+            XCTAssertTrue(error is ConfigurationError)
+        }
+    }
+
+    func testPromptIndexSkipsDisabledSkills() async throws {
+        let root = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let builtin = root.appendingPathComponent("builtin", isDirectory: true)
+        try writeSkill(to: builtin.appendingPathComponent("alpha", isDirectory: true), name: "alpha")
+        let user = root.appendingPathComponent("user", isDirectory: true)
+        try writeSkill(to: user.appendingPathComponent("beta", isDirectory: true), name: "beta")
+
+        let service = SkillsService(userDirectory: user, builtinDirectory: builtin)
+        try await service.setEnabled(name: "beta", enabled: false)
+
+        let index = await service.promptIndex()
+        XCTAssertTrue(index.contains("- alpha: Demo skill for tests"))
+        XCTAssertFalse(index.contains("beta"))
+    }
+
+    func testBundledSkillsAreLoadable() async throws {
+        let root = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let service = SkillsService(userDirectory: root.appendingPathComponent("user", isDirectory: true))
+        let records = await service.list()
+        let builtin = records.filter { $0.scope == .builtin }
+        XCTAssertGreaterThanOrEqual(builtin.count, 5, "В бандл должны попасть базовые скиллы")
+
+        let index = await service.promptIndex()
+        XCTAssertFalse(index.isEmpty)
+        XCTAssertLessThanOrEqual(index.count, 7000)
+        XCTAssertTrue(index.contains("- coding:"))
+
+        let body = try await service.read(name: "coding")
+        XCTAssertTrue(body.contains("Path: "))
+        XCTAssertTrue(body.contains("Scope: builtin"))
     }
 
     func testMCPAddDisableRemove() async throws {

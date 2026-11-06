@@ -354,7 +354,7 @@ HARNES_S_DATA/
 
 ### 9.4 Знания и агент
 
-`memory_add`, `memory_search`, `secret_save`, `secret_get`, `secret_search`, `skill_list`, `skill_install`, `mcp_list`, `todowrite`, `todo_read`, `schedule_add`, `schedule_list`, `schedule_remove`, `task` (изолированный подагент), плюс все инструменты MCP как `mcp__<server>__<tool>`.
+`memory_add`, `memory_search`, `secret_save`, `secret_get`, `secret_search`, `skill_list`, `skill_read`, `skill_install`, `mcp_list`, `todowrite`, `todo_read`, `schedule_add`, `schedule_list`, `schedule_remove`, `task` (изолированный подагент), плюс все инструменты MCP как `mcp__<server>__<tool>`.
 
 `task` запускает отдельный цикл со своим контекстом, без доступа к секретам и планировщику, и возвращает только итог.
 
@@ -478,7 +478,9 @@ HARNES_S_DATA/
 - Включение и выключение — маркер `.disabled`, файлы не удаляются.
 - Пользовательский скилл с тем же именем перекрывает встроенный.
 
-Встроенные скиллы: `self-config`, `passwords`, `memory`, `coding`, `web-browser`.
+Встроенные скиллы (`self-config`, `passwords`, `memory`, `coding`, `web-browser`) лежат в бандле и доступны только для чтения. Остальные скиллы живут в `config/skills` и не вшиваются в приложение: их можно ставить по одному или залить набором. Утилита `Scripts/install_skills.py` раскладывает внешние папки в `~/HARNES_S_DATA/config/skills`, нормализует frontmatter (в том числе свёрнутые `description: >`) и заменяет личные пути на плейсхолдеры. GSD-скиллы (`gsd-*`) не переносятся: они требуют внешнего рантайма `gsd-core`, которого в приложении нет.
+
+В системный промпт попадает только индекс включённых скиллов — имя и сокращённое описание, не более 7000 символов. Тело загружается по требованию инструментом `skill_read`, который возвращает инструкции, абсолютный путь каталога и список вложенных файлов. Плейсхолдер `<skill-dir>` в тексте скилла означает этот путь. Записи в индексе сортируются по имени; выключенные скиллы в индекс не попадают.
 
 ---
 

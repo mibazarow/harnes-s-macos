@@ -276,6 +276,11 @@ extension ToolRegistry {
             parameters: schema([:], required: [])
         ),
         ToolDefinition(
+            name: "skill_read",
+            description: "Load the full instructions of an installed skill by name. Read the skill before starting a task it covers.",
+            parameters: schema(["name": ["type": "string"]], required: ["name"])
+        ),
+        ToolDefinition(
             name: "skill_install",
             description: "Install a skill from a local folder, a SKILL.md path, or a direct URL.",
             parameters: schema([

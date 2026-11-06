@@ -34,7 +34,7 @@
 
 **Работает по расписанию.** «Каждый час проверяй сайт» — создаётся задача, которая сама отправляет промпт в чат по интервалу.
 
-**Расширяется.** Скиллы — обычные `SKILL.md` с frontmatter. Он умеет устанавливать их себе сам: «установи скилл из этой папки» или «подключи вот этот MCP-сервер». Встроенные скиллы рассказывают ему, как управлять собственной конфигурацией, хранить пароли, работать с памятью, кодить и ходить в интернет.
+**Расширяется.** Скиллы — обычные `SKILL.md` с frontmatter. Они лежат в `~/HARNES_S_DATA/config/skills` и не вшиты в бинарник: он умеет устанавливать их себе сам — «установи скилл из этой папки» или «подключи вот этот MCP-сервер». В промпт попадает только индекс включённых скиллов, а инструкции подгружаются по требованию через `skill_read`.
 
 ### Как это выглядит
 
@@ -142,7 +142,7 @@ HARNES_S_DATA/
 
 **Код и проект:** `project_overview` (определяет Битрикс/PHP/Swift/Node/Python и команды), `search_code`, `index_workspace`, `bash`, `git_status`, `git_diff`, `git_log`, `git_commit`, `git_stash`.
 
-**Агент:** `task` (изолированный подагент), `todowrite`, `todo_read`, `schedule_add`, `schedule_list`, `schedule_remove`, `skill_list`, `skill_install`, `mcp_list`.
+**Агент:** `task` (изолированный подагент), `todowrite`, `todo_read`, `schedule_add`, `schedule_list`, `schedule_remove`, `skill_list`, `skill_read`, `skill_install`, `mcp_list`.
 
 **Знания:** `memory_add`, `memory_search`, `secret_save`, `secret_get`, `secret_search`.
 

@@ -25,6 +25,36 @@ struct SkillLoader: Sendable {
         return loadAll().first { $0.name.lowercased() == normalized }
     }
 
+    func manifest(for record: SkillRecord) throws -> SkillManifest {
+        let url = record.directory.appendingPathComponent("SKILL.md")
+        let text = try String(contentsOf: url, encoding: .utf8)
+        return try SkillManifest.parse(text, fallbackName: record.name)
+    }
+
+    func files(in directory: URL, limit: Int = 40) -> [String] {
+        let fileManager = FileManager.default
+        guard let enumerator = fileManager.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return []
+        }
+
+        var result: [String] = []
+        for case let url as URL in enumerator {
+            guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey]),
+                  values.isDirectory != true else {
+                continue
+            }
+            let relative = url.path.replacingOccurrences(of: directory.path + "/", with: "")
+            guard relative != "SKILL.md" else { continue }
+            result.append(relative)
+            if result.count >= limit { break }
+        }
+        return result.sorted()
+    }
+
     private func scan(_ directory: URL, scope: SkillScope) -> [SkillRecord] {
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(

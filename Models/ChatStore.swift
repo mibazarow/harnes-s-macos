@@ -386,6 +386,17 @@ final class ChatStore {
             if !block.isEmpty {
                 system += "\n\n" + block
             }
+
+            let skillIndex = await services.skills.promptIndex()
+            if !skillIndex.isEmpty {
+                system += """
+
+
+                # Skills
+                Installed skills are reusable instruction sets written for specific tasks. When a request matches a skill, call `skill_read` with its name and follow the loaded instructions. Skills are guidance, not permission: the workspace, safety and confirmation rules above still apply.
+                \(skillIndex)
+                """
+            }
         }
 
         if autopilot {
