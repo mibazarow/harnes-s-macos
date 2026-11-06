@@ -93,12 +93,14 @@ actor MemoryService {
         }
     }
 
-    /// Memories injected into the prompt: pinned first, then the most recently used.
+    /// Memories injected into the prompt. Order is stable — pinned first, then by id —
+    /// so the prefix stays byte-identical between turns and the provider can reuse its
+    /// prompt cache. Recency is not part of the order; `last_used_at` only drives pruning.
     func forPrompt(limit: Int = 40) throws -> [MemoryItem] {
         try database.queue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT * FROM memory
-                ORDER BY pinned DESC, COALESCE(last_used_at, updated_at) DESC
+                ORDER BY pinned DESC, id ASC
                 LIMIT ?
                 """, arguments: [limit])
             .map(Self.item(from:))

@@ -16,6 +16,7 @@ struct AgentLoop: Sendable {
         case reasoning(String)
         case toolStarted(name: String, summary: String)
         case toolFinished(name: String, summary: String, isError: Bool, imagePath: String?)
+        case usage(promptTokens: Int, cacheHit: Int, cacheMiss: Int)
         case completed
     }
 
@@ -53,6 +54,12 @@ struct AgentLoop: Sendable {
                                 continuation.yield(.reasoning(text))
                             case .toolCall(let call):
                                 calls.append(call)
+                            case .usage(let promptTokens, let cacheHit, let cacheMiss):
+                                continuation.yield(.usage(
+                                    promptTokens: promptTokens,
+                                    cacheHit: cacheHit,
+                                    cacheMiss: cacheMiss
+                                ))
                             case .finished:
                                 break
                             }

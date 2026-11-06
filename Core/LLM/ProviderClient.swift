@@ -33,6 +33,9 @@ enum ProviderEvent: Sendable {
     case delta(String)
     case reasoning(String)
     case toolCall(ToolCall)
+    /// Token accounting from the final chunk. `cacheHit` is the part of the prompt the
+    /// provider served from its prefix cache; zero means the cache was missed.
+    case usage(promptTokens: Int, cacheHit: Int, cacheMiss: Int)
     case finished(reason: String)
 }
 
@@ -127,6 +130,7 @@ struct ProviderClient: Sendable {
                     var sawAnything = false
                     var pending: [Int: (id: String, name: String, arguments: String)] = [:]
                     var finishReason: String?
+                    var usage: ProviderChunk.Usage?
 
                     for try await line in bytes.lines {
                         if Task.isCancelled { break }
@@ -143,6 +147,9 @@ struct ProviderClient: Sendable {
 
                         if let reason = choice.finishReason, !reason.isEmpty {
                             finishReason = reason
+                        }
+                        if let reported = chunk.usage {
+                            usage = reported
                         }
 
                         if let delta = choice.delta {
@@ -173,6 +180,14 @@ struct ProviderClient: Sendable {
                             name: entry.name,
                             arguments: entry.arguments
                         )))
+                    }
+
+                    if let usage {
+                        continuation.yield(.usage(
+                            promptTokens: usage.promptTokens ?? 0,
+                            cacheHit: usage.cacheHit,
+                            cacheMiss: usage.cacheMiss
+                        ))
                     }
 
                     if sawAnything {
@@ -327,5 +342,37 @@ struct ProviderChunk: Decodable, Sendable {
         let function: Function?
     }
 
+    struct Usage: Decodable, Sendable {
+        let promptTokens: Int?
+        let promptCacheHitTokens: Int?
+        let promptCacheMissTokens: Int?
+        let promptTokensDetails: Details?
+
+        struct Details: Decodable, Sendable {
+            let cachedTokens: Int?
+
+            enum CodingKeys: String, CodingKey {
+                case cachedTokens = "cached_tokens"
+            }
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case promptTokens = "prompt_tokens"
+            case promptCacheHitTokens = "prompt_cache_hit_tokens"
+            case promptCacheMissTokens = "prompt_cache_miss_tokens"
+            case promptTokensDetails = "prompt_tokens_details"
+        }
+
+        /// Providers report the hit either directly (DeepSeek) or under details (OpenAI).
+        var cacheHit: Int { promptCacheHitTokens ?? promptTokensDetails?.cachedTokens ?? 0 }
+
+        var cacheMiss: Int {
+            if let promptCacheMissTokens { return promptCacheMissTokens }
+            guard let promptTokens else { return 0 }
+            return max(promptTokens - cacheHit, 0)
+        }
+    }
+
     let choices: [Choice]?
+    let usage: Usage?
 }

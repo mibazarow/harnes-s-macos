@@ -134,6 +134,23 @@ final class StorageTests: XCTestCase {
         XCTAssertFalse(nothingLeft)
     }
 
+    func testMemoryOrderIsStableAcrossUse() async throws {
+        let database = try AppDatabase()
+        let memory = MemoryService(database: database)
+
+        let first = try await memory.add("Первая заметка")
+        let second = try await memory.add("Вторая заметка")
+
+        let before = try await memory.forPrompt(limit: 10).map(\.id)
+        XCTAssertEqual(before, [first.id, second.id])
+
+        // Using the older one must not reorder the prompt block: a shifting prefix
+        // would invalidate the provider cache on every turn.
+        try await memory.touch(ids: [first.id])
+        let after = try await memory.forPrompt(limit: 10).map(\.id)
+        XCTAssertEqual(after, before)
+    }
+
     @MainActor
     func testMessageQueueing() async throws {
         let chat = ChatStore(services: nil)

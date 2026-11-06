@@ -312,23 +312,13 @@ actor MCPManager {
     private var cachedDescriptors: [MCPToolDescriptor]?
     private var cachedRevision = -1
 
-    /// Non-blocking view for the request path: never starts a server, never waits for
-    /// one. Empty until the background refresh has finished once.
-    func cachedTools() -> [MCPToolDescriptor] {
-        cachedDescriptors ?? []
+    /// Stable view for the request path. The first call may wait for the servers so the
+    /// tool list never changes mid-session — a changing tool list invalidates the whole
+    /// provider prompt cache. Startup warms this, so in practice it does not block.
+    func toolsForRequest() async -> [MCPToolDescriptor] {
+        if let cachedDescriptors { return cachedDescriptors }
+        return await tools()
     }
-
-    /// Warms the cache without blocking the caller.
-    func refreshInBackground() {
-        guard !isRefreshing else { return }
-        isRefreshing = true
-        Task {
-            _ = await tools()
-            isRefreshing = false
-        }
-    }
-
-    private var isRefreshing = false
 
     /// Cached after the first successful call: the descriptors only change when the
     /// configuration changes or a server is restarted.

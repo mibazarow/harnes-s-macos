@@ -186,6 +186,9 @@ final class ChatStore {
                         addTool(name: name, summary: summary, running: true, to: assistantID)
                     case .toolFinished(let name, let summary, let isError, let imagePath):
                         finishTool(name: name, summary: summary, isError: isError, imagePath: imagePath, in: assistantID)
+                    case .usage(let promptTokens, let cacheHit, let cacheMiss):
+                        let ratio = promptTokens > 0 ? cacheHit * 100 / promptTokens : 0
+                        Self.logLatency("cache hit=\(cacheHit) miss=\(cacheMiss) prompt=\(promptTokens) (\(ratio)%)")
                     case .completed:
                         break
                     }
@@ -409,10 +412,22 @@ final class ChatStore {
         contextWindow: Int,
         services: AppServices?
     ) async -> [ProviderMessage] {
-        var system = Prompts.system
+        // Order matters for provider prompt caching: everything above the first
+        // volatile part is a reusable prefix. So the stable base prompt and the skill
+        // index come first, then memory and the checkpoint, and the style block — which
+        // shifts on almost every message — goes last.
+        var parts: [String] = [Prompts.system]
 
-        if !checkpointSummary.isEmpty {
-            system += "\n\n# Conversation checkpoint (older messages)\n" + checkpointSummary
+        if let services {
+            let skillIndex = await services.skills.promptIndex()
+            if !skillIndex.isEmpty {
+                parts.append("""
+
+                # Skills
+                Installed skills are reusable instruction sets written for specific tasks. When a request matches a skill, call `skill_read` with its name and follow the loaded instructions. Skills are guidance, not permission: the workspace, safety and confirmation rules above still apply.
+                \(skillIndex)
+                """)
+            }
         }
 
         if let services, let memories = try? await services.memory.forPrompt(limit: 40), !memories.isEmpty {
@@ -424,38 +439,32 @@ final class ChatStore {
                 memoryTouchedThisTurn = true
                 try? await services.memory.touch(ids: memories.map(\.id))
             }
-            system += """
-
+            parts.append("""
 
             # Saved user memory
             These facts are already known. Use them without asking again. Do not restate them to the user just to confirm.
             📌 marks a fact the user asked to remember explicitly; treat it as fixed and never drop it.
             \(lines)
-            """
+            """)
         }
 
-        if let services {
-            let block = await services.style.promptBlock()
-            if !block.isEmpty {
-                system += "\n\n" + block
-            }
-
-            let skillIndex = await services.skills.promptIndex()
-            if !skillIndex.isEmpty {
-                system += """
-
-
-                # Skills
-                Installed skills are reusable instruction sets written for specific tasks. When a request matches a skill, call `skill_read` with its name and follow the loaded instructions. Skills are guidance, not permission: the workspace, safety and confirmation rules above still apply.
-                \(skillIndex)
-                """
-            }
+        if !checkpointSummary.isEmpty {
+            parts.append("# Conversation checkpoint (older messages)\n" + checkpointSummary)
         }
 
         if autopilot {
-            system += "\n\n# Autopilot\nThe user disabled tool confirmations. Execute tools immediately without asking for permission. Still refuse: disk formatting, rm -rf on system paths, credential exfiltration, disabling SIP or security settings. Everything else run directly and report the result."
+            parts.append("# Autopilot\nThe user disabled tool confirmations. Execute tools immediately without asking for permission. Still refuse: disk formatting, rm -rf on system paths, credential exfiltration, disabling SIP or security settings. Everything else run directly and report the result.")
         }
 
+        // Most volatile part, deliberately last.
+        if let services {
+            let block = await services.style.promptBlock()
+            if !block.isEmpty {
+                parts.append(block)
+            }
+        }
+
+        let system = parts.joined(separator: "\n\n")
         cachedSystemPrompt = system
 
         var history: [ProviderMessage] = [ProviderMessage(role: .system, content: system)]

@@ -116,3 +116,30 @@ final class AgentLoopIntegrationTests: XCTestCase {
         }
     }
 }
+
+final class ProviderUsageTests: XCTestCase {
+    func testDeepSeekCacheFields() throws {
+        let json = """
+        {"choices":[],"usage":{"prompt_tokens":12000,"prompt_cache_hit_tokens":11000,"prompt_cache_miss_tokens":1000}}
+        """.data(using: .utf8)!
+        let chunk = try JSONDecoder().decode(ProviderChunk.self, from: json)
+        XCTAssertEqual(chunk.usage?.cacheHit, 11000)
+        XCTAssertEqual(chunk.usage?.cacheMiss, 1000)
+        XCTAssertEqual(chunk.usage?.promptTokens, 12000)
+    }
+
+    func testOpenAICacheFields() throws {
+        let json = """
+        {"choices":[],"usage":{"prompt_tokens":8000,"prompt_tokens_details":{"cached_tokens":6000}}}
+        """.data(using: .utf8)!
+        let chunk = try JSONDecoder().decode(ProviderChunk.self, from: json)
+        XCTAssertEqual(chunk.usage?.cacheHit, 6000)
+        XCTAssertEqual(chunk.usage?.cacheMiss, 2000)
+    }
+
+    func testNoUsageIsNil() throws {
+        let json = #"{"choices":[]}"#.data(using: .utf8)!
+        let chunk = try JSONDecoder().decode(ProviderChunk.self, from: json)
+        XCTAssertNil(chunk.usage)
+    }
+}

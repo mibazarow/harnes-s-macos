@@ -82,13 +82,9 @@ actor ToolRegistry {
         }
 
         if let mcpManager, !readOnly {
-            // Never wait for an MCP server here: a cold scrapling start would add
-            // seconds to the first token. Use what is cached, warm the rest in the
-            // background, and let the next turn pick it up.
-            let remote = await mcpManager.cachedTools()
-            if remote.isEmpty {
-                await mcpManager.refreshInBackground()
-            }
+            // The tool list must stay identical between turns: a tool appearing or
+            // disappearing changes the cached prefix and costs a full re-prefill.
+            let remote = await mcpManager.toolsForRequest()
             for tool in remote {
                 if tool.exposure == "deferred" {
                     result.append(ProviderToolSchema(
