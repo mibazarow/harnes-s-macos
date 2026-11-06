@@ -5,8 +5,32 @@ struct MCPToolDescriptor: Sendable {
     let name: String
     let description: String
     let inputSchema: [String: AnySendable]
+    var exposure: String = "full"
 
     var qualifiedName: String { "mcp__\(server)__\(name)" }
+
+    var argumentNames: [String] {
+        guard let properties = inputSchema["properties"]?.value as? [String: Any] else { return [] }
+        return properties.keys.sorted()
+    }
+
+    var requiredArguments: Set<String> {
+        guard let required = inputSchema["required"]?.value as? [String] else { return [] }
+        return Set(required)
+    }
+
+    /// A permissive schema for deferred servers: tool names stay callable, nested detail is loaded on demand.
+    var compactParameters: [String: AnySendable] {
+        ["type": AnySendable("object"), "additionalProperties": AnySendable(true)]
+    }
+
+    var compactDescription: String {
+        let names = argumentNames
+        guard !names.isEmpty else { return description }
+        let required = requiredArguments
+        let rendered = names.map { required.contains($0) ? "\($0)*" : $0 }
+        return description + " Args (* = required): " + rendered.joined(separator: ", ")
+    }
 }
 
 enum MCPError: LocalizedError {
@@ -210,7 +234,8 @@ actor MCPSession {
                     server: config.name,
                     name: name,
                     description: (tool["description"] as? String) ?? "",
-                    inputSchema: schema.mapValues { AnySendable($0) }
+                    inputSchema: schema.mapValues { AnySendable($0) },
+                    exposure: config.exposure
                 ))
             }
             cursor = result["nextCursor"] as? String

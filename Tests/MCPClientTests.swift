@@ -51,3 +51,44 @@ final class MCPClientTests: XCTestCase {
         }
     }
 }
+final class MCPDescriptorTests: XCTestCase {
+    private func descriptor(exposure: String = "deferred") -> MCPToolDescriptor {
+        MCPToolDescriptor(
+            server: "scrapling",
+            name: "fetch",
+            description: "Fetch a page and return clean text.",
+            inputSchema: [
+                "type": AnySendable("object"),
+                "properties": AnySendable([
+                    "url": AnySendable(["type": "string"]),
+                    "timeout": AnySendable(["type": "number"])
+                ]),
+                "required": AnySendable(["url"])
+            ],
+            exposure: exposure
+        )
+    }
+
+    func testArgumentNamesAndRequired() {
+        let tool = descriptor()
+        XCTAssertEqual(tool.argumentNames, ["timeout", "url"])
+        XCTAssertEqual(tool.requiredArguments, ["url"])
+        XCTAssertEqual(
+            tool.compactDescription,
+            "Fetch a page and return clean text. Args (* = required): timeout, url*"
+        )
+    }
+
+    func testCompactSchemaIsPermissive() {
+        let parameters = descriptor().compactParameters
+        XCTAssertEqual(parameters["type"]?.value as? String, "object")
+        XCTAssertEqual(parameters["additionalProperties"]?.value as? Bool, true)
+        XCTAssertNil(parameters["properties"])
+    }
+
+    func testFullExposureKeepsSchema() {
+        let tool = descriptor(exposure: "full")
+        XCTAssertEqual(tool.exposure, "full")
+        XCTAssertNotNil(tool.inputSchema["properties"])
+    }
+}

@@ -365,7 +365,7 @@ HARNES_S_DATA/
 
 ### 9.4 Знания и агент
 
-`memory_add`, `memory_search`, `secret_save`, `secret_get`, `secret_search`, `skill_list`, `skill_read`, `skill_install`, `mcp_list`, `todowrite`, `todo_read`, `schedule_add`, `schedule_list`, `schedule_remove`, `task` (изолированный подагент), плюс все инструменты MCP как `mcp__<server>__<tool>`.
+`memory_add`, `memory_search`, `secret_save`, `secret_get`, `secret_search`, `skill_list`, `skill_read`, `skill_install`, `mcp_list`, `mcp_tools`, `todowrite`, `todo_read`, `schedule_add`, `schedule_list`, `schedule_remove`, `task` (изолированный подагент), плюс все инструменты MCP как `mcp__<server>__<tool>`.
 
 `task` запускает отдельный цикл со своим контекстом, без доступа к секретам и планировщику, и возвращает только итог.
 
@@ -597,7 +597,7 @@ python3 Scripts/install_skills.py --include-gsd --gsd-runtime ~/.config/kilo ~/.
 
 ## 19. Тестирование
 
-Обязательный минимум (реализовано 69 тестов):
+Обязательный минимум (реализовано 72 теста):
 
 - клиент провайдера: сборка URL, кодирование запроса, reasoning, инструменты, изображения;
 - интеграция с локальным SSE-сервером: текст, размышления, вызовы инструментов, ошибки;
@@ -666,7 +666,7 @@ python3 Scripts/install_skills.py --include-gsd --gsd-runtime ~/.config/kilo ~/.
    xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Debug -derivedDataPath .build build
    xcodebuild -project Harness.xcodeproj -scheme Harness -derivedDataPath .build -destination 'platform=macOS' test
    ```
-   Ожидаемо: сборка без ошибок, 69 тестов, 1 пропущен (живой scrapling), 0 падений.
+   Ожидаемо: сборка без ошибок, 72 теста, 1 пропущен (живой scrapling), 0 падений.
 3. **Релиз.**
    ```bash
    xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Release -derivedDataPath .build build

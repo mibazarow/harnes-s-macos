@@ -292,6 +292,14 @@ extension ToolRegistry {
             name: "mcp_list",
             description: "List configured MCP servers.",
             parameters: schema([:], required: [])
+        ),
+        ToolDefinition(
+            name: "mcp_tools",
+            description: "Inspect MCP tools. Omit arguments to list all servers and tools; pass server to list one server; pass server and tool to get the full JSON schema.",
+            parameters: schema([
+                "server": ["type": "string", "description": "Server name; omit for all servers"],
+                "tool": ["type": "string", "description": "Tool name; requires server"]
+            ], required: [])
         )
     ]
 
