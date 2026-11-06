@@ -58,6 +58,8 @@ struct MCPConfigFile: Codable, Sendable {
 
 actor MCPService {
     private let configURL: URL
+    /// Bumped on every write so readers can tell whether their cache is stale.
+    private(set) var revision = 0
 
     init(configURL: URL = AppPaths.mcpConfigURL) {
         self.configURL = configURL
@@ -112,5 +114,6 @@ actor MCPService {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let data = try encoder.encode(MCPConfigFile(servers: servers))
         try data.write(to: configURL, options: .atomic)
+        revision += 1
     }
 }

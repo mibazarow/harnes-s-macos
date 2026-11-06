@@ -222,6 +222,31 @@ final class SelfConfigTests: XCTestCase {
         XCTAssertFalse(index.contains("- grp-a:"))
     }
 
+    func testSkillIndexIsCachedUntilChange() async throws {
+        let root = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let user = root.appendingPathComponent("user", isDirectory: true)
+        try writeSkill(to: user.appendingPathComponent("cached", isDirectory: true), name: "cached")
+        let service = SkillsService(
+            userDirectory: user,
+            builtinDirectory: root.appendingPathComponent("builtin", isDirectory: true)
+        )
+
+        let first = await service.promptIndex()
+        XCTAssertTrue(first.contains("- cached:"))
+
+        // Added behind the cache's back: the cached index must not change.
+        try writeSkill(to: user.appendingPathComponent("late", isDirectory: true), name: "late")
+        let second = await service.promptIndex()
+        XCTAssertEqual(first, second)
+
+        // An explicit change through the service invalidates it.
+        try await service.setEnabled(name: "cached", enabled: false)
+        let third = await service.promptIndex()
+        XCTAssertFalse(third.contains("- cached:"))
+    }
+
     func testMCPAddDisableRemove() async throws {
         let root = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: root) }

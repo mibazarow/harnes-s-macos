@@ -309,7 +309,27 @@ actor MCPManager {
         return snapshot
     }
 
+    private var cachedDescriptors: [MCPToolDescriptor]?
+    private var cachedRevision = -1
+
+    /// Cached after the first successful call: the descriptors only change when the
+    /// configuration changes or a server is restarted.
     func tools() async -> [MCPToolDescriptor] {
+        let revision = await configService.revision
+        if let cachedDescriptors, revision == cachedRevision { return cachedDescriptors }
+        let descriptors = await fetchTools()
+        cachedRevision = revision
+        if !descriptors.isEmpty {
+            cachedDescriptors = descriptors
+        }
+        return descriptors
+    }
+
+    func invalidateTools() {
+        cachedDescriptors = nil
+    }
+
+    private func fetchTools() async -> [MCPToolDescriptor] {
         guard let servers = try? await configService.list() else { return [] }
         var result: [MCPToolDescriptor] = []
 

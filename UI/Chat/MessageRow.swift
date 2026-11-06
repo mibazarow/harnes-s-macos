@@ -70,9 +70,7 @@ struct MessageRow: View {
                         isStreaming: message.state == .streaming
                     )
                 } else if message.state == .streaming, message.tools.isEmpty {
-                    Text("думает…")
-                        .font(AppFont.mono(fontSize))
-                        .foregroundStyle(palette.faint)
+                    ThinkingIndicator(palette: palette, fontSize: fontSize, started: message.date)
                 }
             }
         }
@@ -286,5 +284,27 @@ struct BubbleContainer<Content: View>: View {
         content
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 15)
+    }
+}
+
+/// Time to the first token is provider prefill, not local work. Showing the elapsed
+/// seconds makes that visible instead of looking like a freeze.
+private struct ThinkingIndicator: View {
+    let palette: Palette
+    let fontSize: CGFloat
+    let started: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let seconds = Int(context.date.timeIntervalSince(started))
+            HStack(spacing: 6) {
+                Text(seconds < 2 ? "думает…" : "думает… \(seconds) с")
+                    .font(AppFont.mono(fontSize))
+                    .foregroundStyle(palette.faint)
+                Text(seconds < 2 ? "" : "модель читает контекст")
+                    .font(AppFont.mono(max(fontSize - 3, 9)))
+                    .foregroundStyle(palette.faint.opacity(0.7))
+            }
+        }
     }
 }

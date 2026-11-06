@@ -5,6 +5,10 @@ actor SkillsService {
     private let builtinDirectory: URL?
     private let loader: SkillLoader
     private let importer: SkillImporter
+    /// The index is rebuilt only when the skill set changes; scanning ~120 manifests
+    /// on every request was pure latency before the first token.
+    private var cachedIndex: String?
+    private var cachedRecords: [SkillRecord]?
 
     init(userDirectory: URL = AppPaths.userSkillsDirectory, builtinDirectory: URL? = SkillsService.defaultBuiltinDirectory) {
         self.userDirectory = userDirectory
@@ -18,11 +22,21 @@ actor SkillsService {
     }
 
     func list() -> [SkillRecord] {
-        loader.loadAll()
+        if let cachedRecords { return cachedRecords }
+        let records = loader.loadAll()
+        cachedRecords = records
+        return records
+    }
+
+    private func invalidate() {
+        cachedIndex = nil
+        cachedRecords = nil
     }
 
     func install(from source: String, force: Bool = false) async throws -> SkillRecord {
-        try await importer.install(source: source, force: force)
+        let record = try await importer.install(source: source, force: force)
+        invalidate()
+        return record
     }
 
     func remove(name: String) throws {
@@ -33,6 +47,7 @@ actor SkillsService {
             throw ConfigurationError.builtinReadOnly(record.name)
         }
         try importer.remove(name: record.name)
+        invalidate()
     }
 
     func setEnabled(name: String, enabled: Bool) throws {
@@ -43,6 +58,7 @@ actor SkillsService {
             throw ConfigurationError.builtinReadOnly(record.name)
         }
         try importer.setEnabled(name: record.name, enabled: enabled)
+        invalidate()
     }
 
     func read(name: String) throws -> String {
@@ -70,7 +86,14 @@ actor SkillsService {
     }
 
     func promptIndex(characterLimit: Int = 8000) -> String {
-        let records = loader.loadAll().filter(\.enabled)
+        if let cachedIndex { return cachedIndex }
+        let index = buildIndex(characterLimit: characterLimit)
+        cachedIndex = index
+        return index
+    }
+
+    private func buildIndex(characterLimit: Int) -> String {
+        let records = list().filter(\.enabled)
         guard !records.isEmpty else { return "" }
 
         var byPrefix: [String: [SkillRecord]] = [:]
