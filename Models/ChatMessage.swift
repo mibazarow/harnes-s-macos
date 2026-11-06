@@ -161,6 +161,8 @@ struct ChatMessage: Identifiable, Sendable {
     }
 
     enum State: String, Sendable {
+        /// Waiting for the current turn to finish. Not sent to the model yet.
+        case queued
         case streaming
         case complete
     }

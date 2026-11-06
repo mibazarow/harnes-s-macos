@@ -10,7 +10,7 @@ final class ChatStore {
 
     private var streamTask: Task<Void, Never>?
     private var commandTask: Task<Void, Never>?
-    private var pending: [(text: String, attachments: [ChatAttachment])] = []
+    private var pending: [(id: UUID, text: String, attachments: [ChatAttachment])] = []
     private var replyIndex = 0
     private let services: AppServices?
     private let commands: SlashCommandRouter?
@@ -66,7 +66,13 @@ final class ChatStore {
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
 
         memoryTouchedThisTurn = false
-        messages.append(ChatMessage(role: .user, text: trimmed, attachments: attachments))
+        let message = ChatMessage(
+            role: .user,
+            text: trimmed,
+            attachments: attachments,
+            state: isStreaming ? .queued : .complete
+        )
+        messages.append(message)
 
         if let services {
             Task { await services.style.observe(trimmed) }
@@ -74,7 +80,7 @@ final class ChatStore {
         persist(.user, text: trimmed + attachments.map { "\n[файл: \($0.name)]" }.joined(), reasoning: nil)
 
         if isStreaming {
-            pending.append((trimmed, attachments))
+            pending.append((message.id, trimmed, attachments))
             queuedCount = pending.count
             return
         }
@@ -561,9 +567,17 @@ final class ChatStore {
         commandTask?.cancel()
         streamTask = nil
         commandTask = nil
+        let dropped = pending.count
         pending.removeAll()
         queuedCount = 0
         isStreaming = false
+
+        for index in messages.indices where messages[index].state == .queued {
+            messages[index].state = .complete
+        }
+        if dropped > 0 {
+            notice("Очередь очищена: \(dropped) сообщений не отправлено.")
+        }
 
         for index in messages.indices where messages[index].state == .streaming {
             messages[index].state = .complete
@@ -580,6 +594,9 @@ final class ChatStore {
         guard !isStreaming, !pending.isEmpty else { return }
         let next = pending.removeFirst()
         queuedCount = pending.count
+        if let index = messages.firstIndex(where: { $0.id == next.id }) {
+            messages[index].state = .complete
+        }
         start(next.text, attachments: next.attachments)
     }
 

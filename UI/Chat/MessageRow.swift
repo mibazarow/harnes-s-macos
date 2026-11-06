@@ -32,6 +32,19 @@ struct MessageRow: View {
                         .foregroundStyle(palette.accent)
                 }
 
+                if message.state == .queued {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.system(size: max(fontSize - 4, 8)))
+                        Text("в очереди")
+                    }
+                    .foregroundStyle(palette.reasoning)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(palette.reasoning.opacity(0.12))
+                    .clipShape(Capsule())
+                }
+
                 Spacer(minLength: 0)
             }
             .font(AppFont.mono(max(fontSize - 2, 9)))

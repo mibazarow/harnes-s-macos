@@ -160,9 +160,27 @@ final class StorageTests: XCTestCase {
         chat.send("второе")
         XCTAssertEqual(chat.queuedCount, 1)
 
+        // The queued message is visible and marked as such, so the user can tell
+        // "sent but waiting" apart from "the model is slow".
+        let queued = try XCTUnwrap(chat.messages.last { $0.text == "второе" })
+        XCTAssertEqual(queued.state, .queued)
+        XCTAssertEqual(queued.role, .user)
+
         chat.stop()
         XCTAssertEqual(chat.queuedCount, 0)
         XCTAssertFalse(chat.isStreaming)
+        XCTAssertEqual(chat.messages.last { $0.text == "второе" }?.state, .complete)
+    }
+
+    @MainActor
+    func testQueuedMessageIsNotSentToTheModel() async throws {
+        let chat = ChatStore(services: nil)
+        chat.send("первое")
+        chat.send("второе")
+
+        // Only completed messages are part of the request; a queued one must wait.
+        let sent = chat.messages.filter { $0.role == .user && $0.state == .complete }
+        XCTAssertEqual(sent.map(\.text), ["первое"])
     }
 
     func testChatHistoryPersists() async throws {
