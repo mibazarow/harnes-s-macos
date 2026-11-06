@@ -17,20 +17,16 @@ struct HybridSearch {
         let lexical = (try? await memory.search(query, limit: limit * 2)) ?? []
 
         var semantic: [(id: Int64, score: Double)] = []
-        if let stored = try? await embeddings.storedVectors(refKind: "memory"), !stored.isEmpty,
-           let vectors = try? await embeddings.embed([query]), let queryVector = vectors.first {
-            let byID = Dictionary(
-                stored.compactMap { entry -> (Int64, [Float])? in
-                    guard let id = Int64(entry.refID) else { return nil }
-                    return (id, entry.values)
-                },
-                uniquingKeysWith: { first, _ in first }
-            )
-            semantic = byID
-                .map { (id: $0.key, score: EmbeddingsService.cosine(queryVector.values, $0.value)) }
-                .sorted { $0.score > $1.score }
-                .prefix(limit * 2)
-                .map { $0 }
+        if let queryVector = await embeddings.queryVector(query) {
+            let matches = (try? await embeddings.bestMatches(
+                refKind: "memory",
+                query: queryVector.values,
+                limit: limit * 2
+            )) ?? []
+            semantic = matches.compactMap { match in
+                guard let id = Int64(match.refID) else { return nil }
+                return (id, match.score)
+            }
         }
 
         let semanticRank = Dictionary(uniqueKeysWithValues: semantic.enumerated().map { ($1.id, $0) })
@@ -45,10 +41,9 @@ struct HybridSearch {
         var results: [HybridHit] = []
 
         var resolved: [Int64: MemoryItem] = lexicalByID
-        for id in ids where resolved[id] == nil {
-            if let item = try? await memory.item(id: id) {
-                resolved[id] = item
-            }
+        let missing = Array(ids).filter { resolved[$0] == nil }
+        if !missing.isEmpty {
+            resolved.merge(await memory.items(ids: missing)) { first, _ in first }
         }
 
         for id in ids {

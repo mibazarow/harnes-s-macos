@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import os
@@ -45,6 +46,12 @@ struct AppServices: Sendable {
 
     static func live() -> AppServices? {
         do {
+            // The test bundle launches this app as its host, so without this guard a
+            // plain `xcodebuild test` would migrate and write to the user's real
+            // database.
+            if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+                return AppServices(database: try AppDatabase(inMemory: true))
+            }
             try AppPaths.bootstrap()
             let database = try AppDatabase(path: AppPaths.databaseURL)
             let services = AppServices(database: database)
@@ -53,6 +60,7 @@ struct AppServices: Sendable {
                     Logger(subsystem: "app.project-s.swift", category: "memory")
                         .info("Память: удалено \(pruned, privacy: .public) неиспользуемых записей")
                 }
+                try? await services.memory.pruneOrphanEmbeddings()
             }
             return services
         } catch {
@@ -78,5 +86,21 @@ final class AppModel {
         self.services = services
         self.chat = ChatStore(services: services)
         self.providerDirectory = ProviderDirectory(service: services?.providers)
+
+        if let services {
+            // MCP servers are child processes; without this they survive the app.
+            NotificationCenter.default.addObserver(
+                forName: NSApplication.willTerminateNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                let done = DispatchSemaphore(value: 0)
+                Task.detached(priority: .userInitiated) {
+                    await services.mcpManager.shutdownAll()
+                    done.signal()
+                }
+                _ = done.wait(timeout: .now() + 2)
+            }
+        }
     }
 }

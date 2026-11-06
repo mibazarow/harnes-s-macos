@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import GRDB
 
@@ -15,23 +16,27 @@ actor MemoryService {
         scope: String = "user",
         tags: [String] = [],
         source: String = "chat",
-        pinned: Bool = false
+        pinned: Bool = false,
+        contentHash: String? = nil
     ) throws -> MemoryItem {
         let content = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else {
             throw ConfigurationError.invalidArguments("Текст памяти не может быть пустым.")
         }
 
-        // Consolidation: a near-duplicate is an update, not a new row.
-        if let duplicate = try nearDuplicate(of: content, scope: scope) {
+        // Exact content is the cheapest duplicate check; the fuzzy pass below still
+        // catches paraphrases and is what the memory rules rely on.
+        let hash = contentHash ?? Self.hash(content)
+        if let duplicate = try item(hash: hash) ?? nearDuplicate(of: content, scope: scope) {
             let now = Timestamps.now()
             let mergedTags = tags.isEmpty ? duplicate.tags : Array(Set(duplicate.tags + tags)).sorted()
             let mergedPin = pinned || duplicate.pinned
             let tagsJSON = String(data: try JSONEncoder().encode(mergedTags), encoding: .utf8) ?? "[]"
             try database.queue.write { db in
                 try db.execute(sql: """
-                    UPDATE memory SET content = ?, kind = ?, tags = ?, pinned = ?, updated_at = ? WHERE id = ?
-                    """, arguments: [content, kind, tagsJSON, mergedPin ? 1 : 0, now, duplicate.id])
+                    UPDATE memory SET content = ?, kind = ?, tags = ?, pinned = ?, content_hash = ?, updated_at = ?
+                    WHERE id = ?
+                    """, arguments: [content, kind, tagsJSON, mergedPin ? 1 : 0, hash, now, duplicate.id])
             }
 
             return MemoryItem(
@@ -55,9 +60,9 @@ actor MemoryService {
 
         let id: Int64 = try database.queue.write { db in
             try db.execute(sql: """
-                INSERT INTO memory (scope, content, kind, tags, source, pinned, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, arguments: [scope, content, kind, tagsJSON, source, pinned ? 1 : 0, now, now])
+                INSERT INTO memory (scope, content, kind, tags, source, pinned, content_hash, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, arguments: [scope, content, kind, tagsJSON, source, pinned ? 1 : 0, hash, now, now])
             return db.lastInsertedRowID
         }
 
@@ -146,12 +151,62 @@ actor MemoryService {
         let cutoff = ISO8601DateFormatter().string(
             from: Date().addingTimeInterval(-Double(days) * 86_400)
         )
-        return try database.queue.write { db in
+        let removed = try database.queue.write { db in
             try db.execute(sql: """
                 DELETE FROM memory
                 WHERE pinned = 0 AND hits = 0 AND COALESCE(last_used_at, updated_at) < ?
                 """, arguments: [cutoff])
             return db.changesCount
+        }
+        if removed > 0 {
+            try pruneOrphanEmbeddings()
+        }
+        return removed
+    }
+
+    /// Stable content hash used for deduplication and for reusing embeddings.
+    /// Swift's `Hasher` is randomly seeded per process, so it cannot be persisted.
+    nonisolated static func hash(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    func item(hash: String) throws -> MemoryItem? {
+        try database.queue.read { db in
+            try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM memory WHERE content_hash = ? ORDER BY id LIMIT 1",
+                arguments: [hash]
+            ).map(Self.item(from:))
+        }
+    }
+
+    /// Batch lookup for search results: one query instead of one per hit.
+    func items(ids: [Int64]) -> [Int64: MemoryItem] {
+        guard !ids.isEmpty else { return [:] }
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        return (try? database.queue.read { db in
+            try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM memory WHERE id IN (\(placeholders))",
+                arguments: StatementArguments(ids)
+            )
+            .reduce(into: [Int64: MemoryItem]()) { result, row in
+                let item = Self.item(from: row)
+                result[item.id] = item
+            }
+        }) ?? [:]
+    }
+
+    /// Removes index rows pointing at memories that no longer exist.
+    func pruneOrphanEmbeddings() throws {
+        try database.queue.write { db in
+            try db.execute(sql: """
+                DELETE FROM embeddings
+                WHERE ref_kind = 'memory'
+                  AND ref_id NOT IN (SELECT CAST(id AS TEXT) FROM memory)
+                """)
         }
     }
 
@@ -254,6 +309,11 @@ actor MemoryService {
     func delete(id: Int64) throws {
         try database.queue.write { db in
             try db.execute(sql: "DELETE FROM memory WHERE id = ?", arguments: [id])
+            // The vector is useless without its row; leaving it would pollute search.
+            try db.execute(
+                sql: "DELETE FROM embeddings WHERE ref_kind = 'memory' AND ref_id = ?",
+                arguments: [String(id)]
+            )
         }
     }
 

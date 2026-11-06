@@ -168,6 +168,24 @@ final class AppDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("v6_index_reuse") { db in
+            let memoryColumns = try db.columns(in: "memory").map(\.name)
+            if !memoryColumns.contains("content_hash") {
+                try db.execute(sql: "ALTER TABLE memory ADD COLUMN content_hash TEXT;")
+            }
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_memory_hash ON memory(content_hash);")
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_memory_source ON memory(source);")
+
+            // One row per indexed file: lets a re-index skip what did not change.
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS indexed_files (
+                    path       TEXT PRIMARY KEY,
+                    hash       TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                """)
+        }
+
         return migrator
     }
 }

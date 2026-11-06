@@ -74,6 +74,7 @@ actor StyleStore {
         var profile = current()
         profile.mode = mode
         save(profile)
+        promptCache = nil
     }
 
     func setManualCard(_ card: String?) {
@@ -85,6 +86,7 @@ actor StyleStore {
             profile.manualCard = clean?.isEmpty == true ? nil : clean
         }
         save(profile)
+        promptCache = nil
     }
 
     func setProfanityEnabled(_ enabled: Bool) {
@@ -98,10 +100,12 @@ actor StyleStore {
         profile.card = card
         profile.cardUpdatedAt = Int64(Date().timeIntervalSince1970 * 1000)
         save(profile)
+        promptCache = nil
     }
 
     func reset() {
         save(StyleProfile())
+        promptCache = nil
     }
 
     /// Whether an LLM style-card pass is due. Mirrors Mecha's gates: enough
@@ -117,7 +121,9 @@ actor StyleStore {
 
     /// Prompt block, refreshed once every `refreshEvery` turns. Empty when neutral.
     func promptBlock(refreshEvery: Int = 20) -> String {
-        if let cache = promptCache, cache.turns < refreshEvery {
+        // An empty block must not be frozen: the profile can become non-neutral a few
+        // turns later, and then the style would stay invisible for a whole refresh cycle.
+        if let cache = promptCache, !cache.block.isEmpty, cache.turns < refreshEvery {
             promptCache = (cache.block, cache.turns + 1)
             return cache.block
         }

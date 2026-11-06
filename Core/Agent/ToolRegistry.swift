@@ -298,10 +298,24 @@ actor ToolRegistry {
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-lc", command]
         process.currentDirectoryURL = cwd
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
+
+        // Output goes to files, not pipes: a command that prints more than the pipe
+        // buffer holds would block on write, never exit, and die on the timeout with
+        // its output lost.
+        let directory = FileManager.default.temporaryDirectory
+        let outURL = directory.appendingPathComponent("harness-out-\(UUID().uuidString)")
+        let errURL = directory.appendingPathComponent("harness-err-\(UUID().uuidString)")
+        FileManager.default.createFile(atPath: outURL.path, contents: nil)
+        FileManager.default.createFile(atPath: errURL.path, contents: nil)
+        defer {
+            try? FileManager.default.removeItem(at: outURL)
+            try? FileManager.default.removeItem(at: errURL)
+        }
+
+        let outHandle = try FileHandle(forWritingTo: outURL)
+        let errHandle = try FileHandle(forWritingTo: errURL)
+        process.standardOutput = outHandle
+        process.standardError = errHandle
 
         try process.run()
 
@@ -316,8 +330,11 @@ actor ToolRegistry {
             ])
         }
 
-        let out = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        try? outHandle.close()
+        try? errHandle.close()
+
+        let out = String(data: (try? Data(contentsOf: outURL)) ?? Data(), encoding: .utf8) ?? ""
+        let err = String(data: (try? Data(contentsOf: errURL)) ?? Data(), encoding: .utf8) ?? ""
         let merged = [out, err].filter { !$0.isEmpty }.joined(separator: "\n")
         return "exit \(process.terminationStatus)\n" + merged
     }
@@ -812,9 +829,13 @@ actor ToolRegistry {
             pinned: pinned
         )
 
-        if let embeddings, let vectors = try? await embeddings.embed([item.content]),
-           let vector = vectors.first {
-            try? await embeddings.store(refKind: "memory", refID: String(item.id), vector: vector)
+        if let embeddings {
+            let hash = MemoryService.hash(item.content)
+            if let existing = try? await embeddings.vector(refKind: "memory", textHash: hash) {
+                try? await embeddings.store(refKind: "memory", refID: String(item.id), vector: existing, textHash: hash)
+            } else if let vector = try? await embeddings.embed([item.content]).first {
+                try? await embeddings.store(refKind: "memory", refID: String(item.id), vector: vector, textHash: hash)
+            }
         }
 
         let mark = item.pinned ? " (закреплено)" : ""
@@ -826,7 +847,8 @@ actor ToolRegistry {
         guard let query = args["query"] as? String, !query.isEmpty else {
             return .fail("query обязателен: id записи или текст")
         }
-        let removed = try await memory.forget(query: query)
+        // The user asked to forget this, so a pinned record goes too.
+        let removed = try await memory.forget(query: query, force: true)
         guard !removed.isEmpty else { return .ok("Ничего не найдено — забывать нечего.") }
         return .ok("Забыто:\n" + removed.map { "#\($0.id) \($0.content)" }.joined(separator: "\n"))
     }

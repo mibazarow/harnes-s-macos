@@ -15,6 +15,7 @@ struct SlashCommandRouter: Sendable {
     let mcp: MCPService
     let secrets: SecretsService
     let memory: MemoryService
+    let embeddings: EmbeddingsService?
 
     func handle(_ input: String) async -> SlashCommandResult {
         let tokens = Self.tokenize(input)
@@ -346,7 +347,8 @@ struct SlashCommandRouter: Sendable {
                 return SlashCommandResult("Нужно: `/remember <текст>`", isError: true)
             }
             do {
-                let item = try await memory.add(text)
+                let item = try await memory.add(text, pinned: true)
+                await index(item)
                 return SlashCommandResult("Запомнил `#\(item.id)`: \(Self.truncate(item.content, to: 140))")
             } catch {
                 return SlashCommandResult(error.localizedDescription, isError: true)
@@ -378,7 +380,7 @@ struct SlashCommandRouter: Sendable {
                 return SlashCommandResult("Нужно: `/memory forget <текст|id>`", isError: true)
             }
             do {
-                let removed = try await memory.forget(query: query)
+                let removed = try await memory.forget(query: query, force: true)
                 guard !removed.isEmpty else {
                     return SlashCommandResult("По запросу «\(query)» ничего не найдено.")
                 }
@@ -402,6 +404,19 @@ struct SlashCommandRouter: Sendable {
         default:
             return SlashCommandResult("Неизвестное действие `\(subcommand)`. `/memory list|search|delete`", isError: true)
         }
+    }
+
+    /// Vectors are what makes a memory findable semantically; without this a `/remember`
+    /// entry only ever matched by full text.
+    private func index(_ item: MemoryItem) async {
+        guard let embeddings,
+              let vector = try? await embeddings.embed([item.content]).first else { return }
+        try? await embeddings.store(
+            refKind: "memory",
+            refID: String(item.id),
+            vector: vector,
+            textHash: MemoryService.hash(item.content)
+        )
     }
 
     private func listMemory() async -> SlashCommandResult {

@@ -299,6 +299,17 @@ actor MCPManager {
         self.configService = configService
     }
 
+    /// Terminates every server process. Without this the child processes outlive the
+    /// app and keep their memory until the session ends.
+    func shutdownAll() async {
+        for (_, session) in sessions {
+            await session.shutdown()
+        }
+        sessions.removeAll()
+        cachedDescriptors = nil
+        cachedRevision = -1
+    }
+
     func sessionsSnapshot() async -> [(name: String, running: Bool, tools: Int)] {
         var snapshot: [(name: String, running: Bool, tools: Int)] = []
         for (name, session) in sessions {

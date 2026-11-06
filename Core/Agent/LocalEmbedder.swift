@@ -20,6 +20,9 @@ actor LocalEmbedder {
     private var tokenizer: TokenizerLoader.Handle?
 
     private let maxSequenceLength = 512
+    /// The model takes a batch, but a big one multiplies peak memory. Eight keeps a
+    /// 512-token window comfortably inside a few hundred megabytes.
+    private let batchSize = 8
 
     init(modelDirectory: URL = AppPaths.modelsDirectory.appendingPathComponent("embeddinggemma-2", isDirectory: true)) {
         self.modelDirectory = modelDirectory
@@ -56,18 +59,7 @@ actor LocalEmbedder {
         }
 
         #if canImport(OnnxRuntimeBindings)
-        let tokenizerURL = modelDirectory.appendingPathComponent("tokenizer.json")
-        let tokenizerData = try Data(contentsOf: tokenizerURL)
-        let tokenizerJSON = try JSONSerialization.jsonObject(with: tokenizerData)
-        _ = tokenizerJSON
-
-        let tokenizerConfigURL = modelDirectory.appendingPathComponent("tokenizer_config.json")
-        let configData = try Data(contentsOf: tokenizerConfigURL)
-        _ = configData
-
-        // swift-transformers loads from a folder; keep it as an opaque handle.
         tokenizer = try await TokenizerLoader.load(folder: modelDirectory)
-        _ = tokenizer
 
         let modelPath = modelDirectory.appendingPathComponent("model_quantized.onnx").path
         let env = try ORTEnv(loggingLevel: .warning)
@@ -87,8 +79,42 @@ actor LocalEmbedder {
     }
 
     func embed(_ text: String) async throws -> [Float] {
-        try await prepare()
+        let batch = try await embed([text])
+        guard let first = batch.first else {
+            throw NSError(domain: "LocalEmbedder", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "Пустой эмбеддинг"
+            ])
+        }
+        return first
+    }
 
+    /// Batched embed. One tokenizer call and one model run per batch instead of per
+    /// chunk: on a large index this is the difference between minutes and seconds.
+    func embed(_ texts: [String]) async throws -> [[Float]] {
+        try await prepare()
+        guard !texts.isEmpty else { return [] }
+
+        var results: [[Float]] = []
+        results.reserveCapacity(texts.count)
+
+        var start = 0
+        while start < texts.count {
+            let end = min(start + batchSize, texts.count)
+            let slice = Array(texts[start..<end])
+            do {
+                results.append(contentsOf: try run(slice))
+            } catch {
+                // A model that rejects batching still works one text at a time.
+                for text in slice {
+                    results.append(try run([text]).first ?? [])
+                }
+            }
+            start = end
+        }
+        return results
+    }
+
+    private func run(_ texts: [String]) throws -> [[Float]] {
         #if canImport(OnnxRuntimeBindings)
         guard let box = session, let tokenizer else {
             throw NSError(domain: "LocalEmbedder", code: 3, userInfo: [
@@ -96,41 +122,45 @@ actor LocalEmbedder {
             ])
         }
 
-        let ids = tokenizer.encode(text, maxLength: maxSequenceLength)
-        let shape: [NSNumber] = [1, NSNumber(value: ids.count)]
+        let encoded = texts.map { tokenizer.encode($0, maxLength: maxSequenceLength) }
+        let length = encoded.map(\.count).max() ?? 0
+        guard length > 0 else { return [] }
 
-        var inputIDs = ids.map { Int64($0) }
-        let inputIDsData = inputIDs.withUnsafeBufferPointer { Data(buffer: $0) }
+        // Right-pad to the longest text; the mask keeps padding out of attention.
+        var inputIDs = [Int64](repeating: 0, count: encoded.count * length)
+        var mask = [Int64](repeating: 0, count: encoded.count * length)
+        for (row, ids) in encoded.enumerated() {
+            for (column, id) in ids.enumerated() {
+                inputIDs[row * length + column] = Int64(id)
+                mask[row * length + column] = 1
+            }
+        }
+
+        let shape: [NSNumber] = [NSNumber(value: encoded.count), NSNumber(value: length)]
         let inputIDsValue = try ORTValue(
-            tensorData: NSMutableData(data: inputIDsData),
+            tensorData: NSMutableData(data: inputIDs.withUnsafeBufferPointer { Data(buffer: $0) }),
             elementType: .int64,
             shape: shape
         )
-
-        var mask = [Int64](repeating: 1, count: ids.count)
-        let maskData = mask.withUnsafeBufferPointer { Data(buffer: $0) }
         let maskValue = try ORTValue(
-            tensorData: NSMutableData(data: maskData),
+            tensorData: NSMutableData(data: mask.withUnsafeBufferPointer { Data(buffer: $0) }),
             elementType: .int64,
             shape: shape
         )
-
         let emptyFeatures = try ORTValue(
             tensorData: NSMutableData(data: Data()),
             elementType: .float,
             shape: [0, 512]
         )
 
-        let inputs: [String: ORTValue] = [
-            "input_ids": inputIDsValue,
-            "attention_mask": maskValue,
-            "image_features": emptyFeatures,
-            "video_features": emptyFeatures,
-            "audio_features": emptyFeatures
-        ]
-
         let outputs = try box.session.run(
-            withInputs: inputs,
+            withInputs: [
+                "input_ids": inputIDsValue,
+                "attention_mask": maskValue,
+                "image_features": emptyFeatures,
+                "video_features": emptyFeatures,
+                "audio_features": emptyFeatures
+            ],
             outputNames: Set(["sentence_embedding"]),
             runOptions: nil
         )
@@ -142,16 +172,20 @@ actor LocalEmbedder {
             ])
         }
 
-        var values = [Float](repeating: 0, count: raw.count / 4)
-        _ = values.withUnsafeMutableBytes { raw.copyBytes(to: $0) }
+        var flat = [Float](repeating: 0, count: raw.count / 4)
+        _ = flat.withUnsafeMutableBytes { raw.copyBytes(to: $0) }
 
-        let norm = sqrt(values.reduce(0) { $0 + $1 * $1 })
-        if norm > 0 {
-            values = values.map { $0 / norm }
+        let dimension = flat.count / max(encoded.count, 1)
+        guard dimension > 0 else { return [] }
+
+        return (0..<encoded.count).map { row in
+            var values = Array(flat[(row * dimension)..<((row + 1) * dimension)])
+            let norm = sqrt(values.reduce(0) { $0 + $1 * $1 })
+            if norm > 0 {
+                for index in values.indices { values[index] /= norm }
+            }
+            return values
         }
-        inputIDs.removeAll()
-        mask.removeAll()
-        return values
         #else
         throw NSError(domain: "LocalEmbedder", code: 2, userInfo: [
             NSLocalizedDescriptionKey: "OnnxRuntimeBindings не подключён"

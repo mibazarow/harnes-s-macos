@@ -125,25 +125,24 @@ final class StyleProfileTests: XCTestCase {
         XCTAssertTrue(insult.isHostile)
     }
 
-    func testPromptBlockStaysFrozenBetweenRefreshes() async throws {
+    func testPromptBlockIsFrozenButExplicitChangesApply() async throws {
         let database = try AppDatabase()
         let store = StyleStore(database: database)
-        await store.setMode(.manual)
-        await store.setManualCard("Коротко и по делу")
+        await store.setMode(.auto)
 
-        let first = await store.promptBlock(refreshEvery: 2)
-        XCTAssertTrue(first.contains("Коротко и по делу"))
+        let first = await store.promptBlock(refreshEvery: 5)
 
-        // A change under the frozen block must not reach the prompt yet: shifting it
-        // would invalidate the provider's cached prefix.
-        await store.setManualCard("Совсем другой тон")
-        let second = await store.promptBlock(refreshEvery: 2)
+        // Automatic learning must not shift the block mid-cycle: it sits in the cached
+        // prompt prefix, and every shift costs a full re-prefill.
+        await store.observe("привет, братан, как дела")
+        let second = await store.promptBlock(refreshEvery: 5)
         XCTAssertEqual(second, first)
 
-        _ = await store.promptBlock(refreshEvery: 2)
-        let refreshed = await store.promptBlock(refreshEvery: 2)
-        XCTAssertTrue(refreshed.contains("Совсем другой тон"))
-        XCTAssertNotEqual(refreshed, first)
+        // An explicit change is different: the user expects it at once.
+        await store.setMode(.manual)
+        await store.setManualCard("Коротко и по делу")
+        let third = await store.promptBlock(refreshEvery: 5)
+        XCTAssertTrue(third.contains("Коротко и по делу"))
     }
 
     func testStoreObservesAndPersists() async throws {

@@ -151,6 +151,88 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(after, before)
     }
 
+    func testChunksOverlapAndBreakOnBoundaries() {
+        let line = String(repeating: "abcdefghij ", count: 40) + "\n"
+        let text = String(repeating: line, count: 6)
+
+        let chunks = WorkspaceIndexer.chunk(text, size: 200, overlap: 40)
+        XCTAssertGreaterThan(chunks.count, 1)
+        for chunk in chunks {
+            XCTAssertLessThanOrEqual(chunk.count, 200)
+            // Every chunk is a real slice of the source, so nothing was invented or cut
+            // into a partial token at the edges.
+            XCTAssertTrue(text.contains(chunk), "кусок должен быть точной выдержкой из текста")
+        }
+
+        // Neighbouring chunks share the overlap window.
+        if chunks.count >= 2 {
+            let tail = String(chunks[0].suffix(20))
+            XCTAssertTrue(chunks[1].contains(tail), "соседние куски должны перекрываться")
+        }
+    }
+
+    func testIndexerSkipsUnchangedFiles() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("index-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let file = root.appendingPathComponent("sample.swift")
+        try String(repeating: "let value = 1\n", count: 40).write(to: file, atomically: true, encoding: .utf8)
+
+        let database = try AppDatabase()
+        let memory = MemoryService(database: database)
+        let indexer = WorkspaceIndexer(database: database, memory: memory, embeddings: nil)
+
+        let first = await indexer.index(root: root)
+        XCTAssertEqual(first.filesIndexed, 1)
+        XCTAssertGreaterThan(first.chunksIndexed, 0)
+
+        let second = await indexer.index(root: root)
+        XCTAssertEqual(second.filesIndexed, 0)
+        XCTAssertEqual(second.skipped, 1)
+        XCTAssertEqual(second.chunksIndexed, 0)
+
+        // Touching the content re-indexes the file.
+        try String(repeating: "let value = 2\n", count: 40).write(to: file, atomically: true, encoding: .utf8)
+        let third = await indexer.index(root: root)
+        XCTAssertEqual(third.filesIndexed, 1)
+    }
+
+    func testMemoryHashDedupAndVectorCleanup() async throws {
+        let database = try AppDatabase()
+        let memory = MemoryService(database: database)
+        let embeddings = EmbeddingsService(database: database, providers: ProvidersService(database: database))
+
+        let hash = MemoryService.hash("Один и тот же факт")
+        let first = try await memory.add("Один и тот же факт", contentHash: hash)
+        let second = try await memory.add("Один и тот же факт", contentHash: hash)
+        XCTAssertEqual(first.id, second.id)
+
+        let vector = EmbeddingsService.Vector(values: [1, 0, 0], model: "test")
+        try await embeddings.store(refKind: "memory", refID: String(first.id), vector: vector, textHash: hash)
+
+        let reused = try await embeddings.vector(refKind: "memory", textHash: hash)
+        XCTAssertEqual(reused?.values, [1, 0, 0])
+
+        try await memory.delete(id: first.id)
+        let afterDelete = try await embeddings.vector(refKind: "memory", textHash: hash)
+        XCTAssertNil(afterDelete, "удаление записи должно убирать её вектор")
+    }
+
+    func testBestMatchesRanksBySimilarity() async throws {
+        let database = try AppDatabase()
+        let embeddings = EmbeddingsService(database: database, providers: ProvidersService(database: database))
+
+        try await embeddings.store(refKind: "memory", refID: "1", vector: .init(values: [1, 0, 0], model: "t"))
+        try await embeddings.store(refKind: "memory", refID: "2", vector: .init(values: [0.6, 0.8, 0], model: "t"))
+        try await embeddings.store(refKind: "memory", refID: "3", vector: .init(values: [0, 1, 0], model: "t"))
+
+        let matches = try await embeddings.bestMatches(refKind: "memory", query: [1, 0, 0], limit: 2)
+        XCTAssertEqual(matches.map(\.refID), ["1", "2"])
+        XCTAssertEqual(matches[0].score, 1, accuracy: 0.001)
+    }
+
     @MainActor
     func testMessageQueueing() async throws {
         let chat = ChatStore(services: nil)

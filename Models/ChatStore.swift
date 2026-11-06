@@ -41,7 +41,8 @@ final class ChatStore {
                 skills: $0.skills,
                 mcp: $0.mcp,
                 secrets: $0.secrets,
-                memory: $0.memory
+                memory: $0.memory,
+                embeddings: $0.embeddings
             )
         }
         self.messages = [
