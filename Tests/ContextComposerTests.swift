@@ -101,3 +101,114 @@ final class CompactionBatchTests: XCTestCase {
         XCTAssertEqual(batches[1].count, 1)
     }
 }
+
+final class ContextTailTests: XCTestCase {
+    private func message(_ id: Int, role: String, tokens: Int) -> ContextMessage {
+        ContextMessage(id: id, role: role, text: String(repeating: "я", count: tokens * 3))
+    }
+
+    func testTailStartsAtUserMessage() {
+        // 150 tokens each: with a 512-token budget only the last three fit, and the
+        // first of them is an assistant reply — it must be dropped from the tail.
+        let history = [
+            message(0, role: "user", tokens: 150),
+            message(1, role: "assistant", tokens: 150),
+            message(2, role: "assistant", tokens: 150),
+            message(3, role: "user", tokens: 150),
+            message(4, role: "assistant", tokens: 150)
+        ]
+
+        let plan = ContextComposer().plan(
+            systemPrompt: "s",
+            messages: history,
+            contextWindow: 300,
+            thresholdPercent: 100
+        )
+
+        XCTAssertTrue(plan.didCompact)
+        XCTAssertEqual(plan.included.first?.role, "user")
+        XCTAssertEqual(plan.included.first?.id, 3)
+    }
+
+    func testTailStartFollowsTokenBudget() {
+        let composer = ContextComposer()
+        let history = (0..<50).map { message($0, role: "user", tokens: 1_000) }
+
+        let start = composer.tailStart(messages: history, budget: 10_000)
+        XCTAssertEqual(history.count - start, 10)
+    }
+
+    func testTailBudgetHasFloorAndShare() {
+        let composer = ContextComposer()
+        XCTAssertEqual(composer.tailBudget(available: 100), composer.minimumTailTokens)
+        XCTAssertGreaterThan(composer.tailBudget(available: 200_000), composer.minimumTailTokens)
+    }
+}
+
+final class OverflowDetectionTests: XCTestCase {
+    func testOpenAIContextLengthIsOverflow() {
+        let error = ProviderError.http(
+            status: 400,
+            body: #"{"error":{"message":"This model's maximum context length is 128000 tokens.","code":"context_length_exceeded"}}"#
+        )
+        XCTAssertTrue(error.isContextOverflow)
+    }
+
+    func testDeepSeekWordingIsOverflow() {
+        XCTAssertTrue(ProviderError.http(
+            status: 400,
+            body: #"{"error":{"message":"Input is too long for requested model."}}"#
+        ).isContextOverflow)
+    }
+
+    func testAnthropicWordingIsOverflow() {
+        XCTAssertTrue(ProviderError.http(
+            status: 400,
+            body: #"{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 210000 tokens > 200000 maximum"}}"#
+        ).isContextOverflow)
+    }
+
+    func testPayloadTooLargeIsOverflow() {
+        XCTAssertTrue(ProviderError.http(status: 413, body: "request too large").isContextOverflow)
+    }
+
+    func testAuthAndRateLimitAreNotOverflow() {
+        XCTAssertFalse(ProviderError.http(status: 401, body: "invalid api key").isContextOverflow)
+        XCTAssertFalse(ProviderError.http(status: 429, body: "rate limit exceeded").isContextOverflow)
+        XCTAssertFalse(ProviderError.http(status: 500, body: "internal error").isContextOverflow)
+        XCTAssertFalse(ProviderError.emptyResponse.isContextOverflow)
+    }
+}
+
+final class SummaryPromptTests: XCTestCase {
+    func testPromptCarriesEverySection() {
+        let prompt = CompactionService.summaryPrompt(transcript: "[user] привет", previous: nil)
+        for heading in ["## Цель", "## Требования", "## Решения", "## Состояние работы",
+                        "### Готово", "### В работе", "### Блокеры", "## Следующий шаг",
+                        "## Важные файлы", "## Важный контекст"] {
+            XCTAssertTrue(prompt.contains(heading), "нет секции \(heading)")
+        }
+        XCTAssertTrue(prompt.contains("[user] привет"))
+    }
+
+    func testPromptMergesPreviousSummary() {
+        let prompt = CompactionService.summaryPrompt(transcript: "фрагмент", previous: "старое саммари")
+        XCTAssertTrue(prompt.contains("старое саммари"))
+        XCTAssertTrue(prompt.contains("Не повторяй обёртки"))
+    }
+
+    func testClipKeepsEdgesAndShortens() {
+        let text = String(repeating: "a", count: 5_000) + "СЕРЕДИНА" + String(repeating: "b", count: 5_000)
+        let clipped = CompactionService.clip(text, limit: 1_000)
+
+        XCTAssertLessThan(clipped.count, text.count)
+        XCTAssertTrue(clipped.hasPrefix("aaa"))
+        XCTAssertTrue(clipped.hasSuffix("bbb"))
+        XCTAssertTrue(clipped.contains("обрезано"))
+        XCTAssertFalse(clipped.contains("СЕРЕДИНА"))
+    }
+
+    func testShortTextIsUntouched() {
+        XCTAssertEqual(CompactionService.clip("короткий текст"), "короткий текст")
+    }
+}

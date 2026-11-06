@@ -32,6 +32,11 @@ final class ChatStore {
     private var registry: ToolRegistry?
     private var memoryTouchedThisTurn = false
     private var compactionTask: Task<Void, Never>?
+    /// Compaction is expensive and can fail for reasons outside our control (provider
+    /// down, summary rejected). Without a cooldown a broken summary would be retried on
+    /// every single turn, doubling the cost of a conversation that is already in trouble.
+    private var compactionFailures = 0
+    private var compactionCooldownUntil: Date?
     private var oldestStoredID: Int64?
     private(set) var hasMoreHistory = false
     private(set) var isLoadingOlder = false
@@ -186,7 +191,9 @@ final class ChatStore {
         )
 
         var corrected = false
+        var overflowRetried = false
 
+        turn: while true {
         do {
             while true {
                 var toolCallsInTurn = 0
@@ -249,9 +256,57 @@ final class ChatStore {
             // answer so it never adds a second model round-trip before the first token.
             scheduleCompaction(provider: provider, model: model, services: services)
             await maybeExtractStyleCard(provider: provider, model: model, services: services)
+            return
         } catch {
+            // The provider rejected the request as too long. Retrying the same body is
+            // pointless, so compact harder and try once more: this is the one case where
+            // the estimate was provably low and only the provider knew the real limit.
+            if !overflowRetried,
+               let providerError = error as? ProviderError,
+               providerError.isContextOverflow,
+               await compactAfterOverflow(provider: provider, model: model, services: services) {
+                overflowRetried = true
+                settle(assistantID)
+                assistantID = appendAssistant()
+                stepIndex = 0
+                notice("Провайдер отклонил запрос по длине контекста. Сжал историю и повторяю.")
+                history = await buildHistory(
+                    text: text,
+                    attachments: attachments,
+                    contextWindow: provider.contextWindow,
+                    provider: provider,
+                    model: model,
+                    services: services
+                )
+                continue turn
+            }
+
             finish(assistantID, notice: "Ошибка: \(error.localizedDescription)")
+            return
         }
+        }
+    }
+
+    /// Aggressive compaction after the provider itself said the prompt is too long.
+    /// The threshold drops so the retry has real headroom, not just a few tokens.
+    private func compactAfterOverflow(
+        provider: ProviderModel,
+        model: String,
+        services: AppServices
+    ) async -> Bool {
+        let system = await buildSystemPrompt(services: services)
+        let plan = composer.plan(
+            systemPrompt: system,
+            messages: promptMessages,
+            contextWindow: provider.contextWindow,
+            thresholdPercent: min(compactionThreshold, 50),
+            summaryTokens: TokenEstimator.tokens(in: checkpointSummary)
+        )
+        guard !plan.compacted.isEmpty else {
+            notice("Сжимать нечего: в истории одно сообщение, и оно само больше окна модели.")
+            return false
+        }
+        return await compact(plan.compacted, provider: provider, model: model, services: services)
     }
 
     /// Isolated one-shot agent. Its context never leaks into the main chat.
@@ -448,10 +503,23 @@ final class ChatStore {
                 ),
                 database: services.database
             )
+            compactionFailures = 0
+            compactionCooldownUntil = nil
             return true
         } catch {
+            compactionFailures += 1
+            // Back off progressively: a second attempt in a minute is reasonable, a
+            // tenth is just burning tokens against a broken provider.
+            let seconds: TimeInterval = compactionFailures >= 3 ? 600 : 120
+            compactionCooldownUntil = Date().addingTimeInterval(seconds)
+            Self.logLatency("compaction failed (\(compactionFailures)x): \(error.localizedDescription)")
             return false
         }
+    }
+
+    private var compactionCoolingDown: Bool {
+        guard let until = compactionCooldownUntil else { return false }
+        return Date() < until
     }
 
     private func compactIfNeeded(provider: ProviderModel, model: String, services: AppServices) async {
@@ -462,6 +530,10 @@ final class ChatStore {
         )
 
         guard plan.didCompact, !plan.compacted.isEmpty else { return }
+
+        // Preflight already handled the case where the request would not fit; a retry
+        // here would be the same request again.
+        if compactionCoolingDown { return }
 
         if await compact(plan.compacted, provider: provider, model: model, services: services) {
             notice("История сжата: \(plan.compacted.count) сообщений свёрнуты в саммари. Из базы ничего не удалено.")
@@ -547,7 +619,11 @@ final class ChatStore {
             summaryTokens: TokenEstimator.tokens(in: checkpointSummary)
         )
 
-        if let services, !plan.compacted.isEmpty {
+        if let services, !plan.compacted.isEmpty, compactionCoolingDown {
+            // A failed summary was already reported. Retrying it on every turn would
+            // double the cost of a conversation that is already in trouble.
+            Self.logLatency("preflight compaction skipped: cooldown")
+        } else if let services, !plan.compacted.isEmpty {
             let dropped = plan.compacted.count
             let compacted = await compact(plan.compacted, provider: provider, model: model, services: services)
 
@@ -979,16 +1055,22 @@ final class ChatStore {
         guard !model.isEmpty else { return "**Ошибка.** У провайдера не выбрана модель." }
 
         let completed = promptMessages
-        // The last few messages stay verbatim: they are the live thread.
-        let keep = 6
-        guard completed.count > keep else {
+        guard completed.count > 2 else {
             return "Сжимать нечего: в истории \(completed.count) сообщений."
         }
 
-        let toCompact = Array(completed.dropLast(keep))
+        // The tail is measured in tokens, not messages: six short replies and six long
+        // ones are very different amounts of live context.
+        let available = Int(Double(provider.contextWindow) * compactionThreshold / 100) - composer.reserveTokens
+        let start = composer.tailStart(messages: completed, budget: composer.tailBudget(available: max(available, 2_000)))
+        let toCompact = Array(completed.prefix(start))
+        guard !toCompact.isEmpty else {
+            return "Сжимать нечего: вся история уже в пределах хвоста."
+        }
+
         if await compact(toCompact, provider: provider, model: model, services: services) {
             return "История сжата: \(toCompact.count) сообщений свёрнуты в саммари (\(checkpointSummary.count) симв.). "
-                + "В базе ничего не удалено, последние \(keep) сообщений остались как есть."
+                + "В базе ничего не удалено, последние \(completed.count - toCompact.count) сообщений остались как есть."
         }
         return "**Ошибка.** Компакция не удалась. Попробуй ещё раз."
     }

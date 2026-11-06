@@ -54,10 +54,15 @@ struct ContextPlan: Sendable {
 /// and nothing is deleted from storage. If even the tail does not fit, the plan
 /// reports `isOverThreshold` so the caller can compact before sending.
 struct ContextComposer: Sendable {
-    /// Never drop below this many messages when compacting.
-    var minimumTailMessages = 6
+    /// Absolute floor: never send a request with nothing in it.
+    var minimumTailMessages = 1
     /// Reserve space for the model's answer.
     var reserveTokens = 4_000
+    /// Share of the budget that must survive verbatim when compacting. Without a floor
+    /// a plan could leave the model with one line of context; without a ceiling the
+    /// tail would be so long that the summary buys nothing.
+    var minimumTailShare = 0.12
+    var minimumTailTokens = 2_000
 
     func plan(
         systemPrompt: String,
@@ -101,17 +106,51 @@ struct ContextComposer: Sendable {
             index -= 1
         }
 
-        let compacted = Array(messages.prefix(index + 1))
+        // A tail that opens with an assistant reply reads as a dangling answer. Move the
+        // cut back to the last user message, which is also where a reader would resume.
+        var aligned = kept
+        var alignedIndex = index
+        while let first = aligned.first, first.role != "user", alignedIndex >= 0 {
+            aligned.removeFirst()
+            alignedIndex -= 1
+        }
+        if aligned.isEmpty { aligned = kept }
+
+        let compacted = Array(messages.prefix(alignedIndex + 1))
         return ContextPlan(
-            included: kept,
+            included: aligned,
             compacted: compacted,
             didCompact: !compacted.isEmpty,
             summaryTokens: summaryTokens,
             systemTokens: systemTokens,
-            usedTokens: used,
+            usedTokens: fixed + aligned.reduce(0) { $0 + $1.tokens },
             contextWindow: window,
             thresholdPercent: threshold
         )
+    }
+
+    /// Index of the first message that stays verbatim for a tail of `budget` tokens,
+    /// aligned forward to a user message. Manual compaction uses it so the split is the
+    /// same one an automatic pass would pick.
+    func tailStart(messages: [ContextMessage], budget: Int) -> Int {
+        var used = 0
+        var index = messages.count
+        while index > 0 {
+            let next = used + messages[index - 1].tokens
+            if next > budget, messages.count - index >= minimumTailMessages { break }
+            used = next
+            index -= 1
+        }
+
+        while index < messages.count, messages[index].role != "user" {
+            index += 1
+        }
+        return min(index, max(messages.count - minimumTailMessages, 0))
+    }
+
+    /// Token budget for the verbatim tail of a window.
+    func tailBudget(available: Int) -> Int {
+        max(minimumTailTokens, Int(Double(available) * minimumTailShare))
     }
 
     private func fitSuffix(_ messages: [ContextMessage], budget: Int) -> [ContextMessage] {

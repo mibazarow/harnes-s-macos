@@ -96,6 +96,89 @@ actor CompactionService {
         return summary
     }
 
+    /// Template the checkpoint must follow. Structure beats prose here: the next agent
+    /// needs to know what is done, what is blocked and where the files are, and a free
+    /// retelling loses exactly that first.
+    static let summaryTemplate = """
+    ## Цель
+    - [одна-две фразы: чего хочет пользователь]
+
+    ## Требования
+    - [ограничения, предпочтения и границы, названные пользователем; иначе «нет»]
+
+    ## Решения
+    - [что уже решено и почему; иначе «нет»]
+
+    ## Состояние работы
+    ### Готово
+    - [завершённое; иначе «нет»]
+    ### В работе
+    - [что делается сейчас; иначе «нет»]
+    ### Блокеры
+    - [что мешает и почему; иначе «нет»]
+
+    ## Следующий шаг
+    1. [упорядоченный список следующих действий; иначе «нет»]
+
+    ## Важные файлы
+    - `[путь]`: [почему важен]. Не больше 15, самые важные первыми.
+
+    ## Важный контекст
+    - [факты, без которых работу не продолжить и которые не восстановить из кода]
+    """
+
+    static let summaryRules = """
+    Правила:
+    - короткие однострочные пункты, без абзацев и вложенных списков;
+    - сохраняй точные пути, имена символов, команды, тексты ошибок, URL и идентификаторы;
+    - переноси только те вопросы и просьбы, которые ещё не закрыты; решённые не повторяй;
+    - фиксируй состояние изменений: не закоммичено, закоммичено, запушено;
+    - не упоминай сам процесс сжатия и не пиши, что контекст был сжат;
+    - не больше 600 слов: это саммари читает агент, а не человек;
+    - ничего не выдумывай; то, чего не было в диалоге, оставляй пустым.
+    """
+
+    /// One message of the summary transcript. Long pastes and code dumps are the bulk
+    /// of an old conversation and the least useful part of it: keep the edges, drop the
+    /// middle. The original stays in the database, so nothing is lost for good.
+    static func clip(_ text: String, limit: Int = 2_000) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > limit * 2 else { return trimmed }
+        let head = String(trimmed.prefix(limit))
+        let tail = String(trimmed.suffix(limit / 2))
+        return head + "\n…[обрезано \(trimmed.count - limit - limit / 2) симв.]…\n" + tail
+    }
+
+    /// Prompt for one summarization request. Pure so the shape is testable without a
+    /// network call.
+    static func summaryPrompt(transcript: String, previous: String?) -> String {
+        var prompt = """
+        Сожми фрагмент диалога в структурированное саммари на русском. Это саммари получит
+        другой агент, чтобы продолжить работу с того же места.
+
+        Верни только секции из шаблона, без вступления и без пояснений.
+
+        \(summaryTemplate)
+
+        \(summaryRules)
+        """
+
+        if let previous, !previous.isEmpty {
+            prompt += """
+
+
+            Уже есть предыдущее саммари. Объедини его с фрагментом: новое важнее старого,
+            но прежние требования и решения сохраняй, пока фрагмент им не противоречит.
+            Не повторяй обёртки вроде <conversation-checkpoint>.
+
+            \(previous)
+            """
+        }
+
+        prompt += "\n\nФрагмент:\n\n\(transcript)"
+        return prompt
+    }
+
     private func summarize(
         batch: [ContextMessage],
         provider: ProviderModel,
@@ -103,32 +186,17 @@ actor CompactionService {
         previousSummary: String?
     ) async throws -> String {
         let transcript = batch.map { message in
-            let text = message.text.count > 4_000 ? String(message.text.prefix(4_000)) + "…" : message.text
-            return "[\(message.role)] \(text)"
+            "[\(message.role)] \(Self.clip(message.text))"
         }.joined(separator: "\n\n")
 
-        var prompt = """
-        Сожми этот фрагмент диалога в компактное саммари на русском.
-
-        Требования:
-        - сохрани факты, решения, имена, пути, числа и договорённости;
-        - сохрани открытые вопросы и что осталось сделать;
-        - убери болтовню, повторы и рассуждения;
-        - не выдумывай ничего;
-        - максимум 400 слов, обычным текстом без markdown-заголовков.
-
-        """
-        if let previousSummary, !previousSummary.isEmpty {
-            prompt += "Уже есть предыдущее саммари, объедини с ним:\n\n\(previousSummary)\n\n"
-        }
-        prompt += "Фрагмент:\n\n\(transcript)"
+        let prompt = Self.summaryPrompt(transcript: transcript, previous: previousSummary)
 
         var summary = ""
         let stream = client.stream(
             provider: provider,
             model: model,
             messages: [
-                ProviderMessage(role: .system, content: "Ты сжимаешь историю диалога. Отвечай только саммари."),
+                ProviderMessage(role: .system, content: "Ты сжимаешь историю диалога в структурированное саммари. Отвечай только секциями шаблона."),
                 ProviderMessage(role: .user, content: prompt)
             ]
         )
@@ -141,6 +209,11 @@ actor CompactionService {
         guard !trimmed.isEmpty else {
             throw ProviderError.emptyResponse
         }
-        return trimmed
+
+        // A summary that grows with every merge eventually costs more than it saves.
+        // Keep the head, where the sections that matter live, and say so honestly.
+        let limit = 16_000
+        guard trimmed.count > limit else { return trimmed }
+        return String(trimmed.prefix(limit)) + "\n\n…[саммари сокращено: было \(trimmed.count) символов]"
     }
 }

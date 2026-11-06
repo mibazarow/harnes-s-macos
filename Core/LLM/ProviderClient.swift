@@ -44,6 +44,22 @@ enum ProviderError: LocalizedError, Sendable {
     case http(status: Int, body: String)
     case emptyResponse
 
+    /// The provider refused the request because the prompt does not fit its window.
+    /// Detected by status and wording: every vendor phrases it differently, but the
+    /// status is always a client error and the body always names the context length.
+    var isContextOverflow: Bool {
+        guard case .http(let status, let body) = self else { return false }
+        guard [400, 413, 422].contains(status) else { return false }
+        let text = body.lowercased()
+        let markers = [
+            "context length", "context_length", "context window", "maximum context",
+            "prompt is too long", "too many tokens", "input is too long", "exceeds the maximum",
+            "request too large", "reduce the length", "maximum number of tokens",
+            "tokens exceed", "context overflow"
+        ]
+        return markers.contains { text.contains($0) }
+    }
+
     var errorDescription: String? {
         switch self {
         case .badURL(let value):
