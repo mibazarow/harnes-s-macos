@@ -143,3 +143,78 @@ final class ProviderUsageTests: XCTestCase {
         XCTAssertNil(chunk.usage)
     }
 }
+
+final class AgentLoopStepTests: XCTestCase {
+    private func provider(baseURL: String) -> ProviderModel {
+        ProviderModel(
+            name: "Stub",
+            baseURL: baseURL,
+            apiKey: "test",
+            models: ["stub-model"],
+            defaultModel: "stub-model",
+            contextWindow: 32_000,
+            reasoningLevel: .off
+        )
+    }
+
+    func testEachModelRequestIsItsOwnStep() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("steps-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "hello".write(to: root.appendingPathComponent("note.txt"), atomically: true, encoding: .utf8)
+
+        let server = try StubSSEServer(responses: [
+            [
+                #"{"choices":[{"delta":{"reasoning_content":"сначала прочитаю"}}]}"#,
+                #"{"choices":[{"delta":{"content":"Читаю файл."}}]}"#,
+                #"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"fs_read","arguments":"{\"path\":\"note.txt\"}"}}]}}]}"#,
+                #"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#
+            ],
+            [
+                #"{"choices":[{"delta":{"reasoning_content":"теперь отвечу"}}]}"#,
+                #"{"choices":[{"delta":{"content":"Файл содержит hello."}}]}"#,
+                #"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#
+            ]
+        ])
+        try server.start()
+        defer { server.stop() }
+
+        let registry = ToolRegistry(
+            workspace: root,
+            memory: nil,
+            embeddings: nil,
+            secrets: nil,
+            skills: nil,
+            mcp: nil
+        )
+
+        let loop = AgentLoop(provider: provider(baseURL: server.baseURL), model: "stub-model", registry: registry)
+        var steps: [Int] = []
+        var textByStep: [Int: String] = [:]
+        var reasoningByStep: [Int: String] = [:]
+        var current = 0
+
+        for try await event in loop.run(history: [ProviderMessage(role: .user, content: "прочитай note.txt")]) {
+            switch event {
+            case .stepStarted(let index):
+                current = index
+                steps.append(index)
+            case .delta(let chunk):
+                textByStep[current, default: ""] += chunk
+            case .reasoning(let chunk):
+                reasoningByStep[current, default: ""] += chunk
+            default:
+                break
+            }
+        }
+
+        // Two model requests, so two steps — the UI turns each into its own message.
+        XCTAssertEqual(steps, [0, 1])
+        XCTAssertEqual(reasoningByStep[0], "сначала прочитаю")
+        XCTAssertEqual(textByStep[0], "Читаю файл.")
+        XCTAssertEqual(reasoningByStep[1], "теперь отвечу")
+        XCTAssertEqual(textByStep[1], "Файл содержит hello.")
+        XCTAssertEqual(server.bodies.count, 2)
+    }
+}

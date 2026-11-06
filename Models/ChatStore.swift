@@ -103,7 +103,12 @@ final class ChatStore {
         return messages[messages.count - 1].id
     }
 
-    private func runTurn(text: String, attachments: [ChatAttachment], assistantID: UUID) async {
+    private func runTurn(text: String, attachments: [ChatAttachment], assistantID initialID: UUID) async {
+        // Each model request gets its own bubble. One long run otherwise piles new
+        // reasoning on top of an answer the user has already read.
+        var assistantID = initialID
+        var stepIndex = 0
+
         guard let services else {
             await mockReply(for: text, assistantID: assistantID)
             return
@@ -177,6 +182,12 @@ final class ChatStore {
                         Self.logLatency("first_token=\(Self.millis(since: requestStart))ms")
                     }
                     switch event {
+                    case .stepStarted:
+                        if stepIndex > 0 {
+                            settle(assistantID)
+                            assistantID = appendAssistant()
+                        }
+                        stepIndex += 1
                     case .delta(let chunk):
                         append(chunk, to: assistantID)
                     case .reasoning(let chunk):
@@ -605,6 +616,30 @@ final class ChatStore {
         }
     }
 
+    /// Closes one step of a run: sanitizes, marks it complete and writes it to storage.
+    /// Returns false when the step produced nothing, in which case its bubble is dropped.
+    @discardableResult
+    private func settle(_ id: UUID) -> Bool {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return false }
+
+        messages[index].text = AssistantTextSanitizer.sanitizeRealtime(messages[index].text)
+        let text = messages[index].text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let reasoning = messages[index].reasoning?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard !text.isEmpty || !reasoning.isEmpty || !messages[index].tools.isEmpty else {
+            messages.remove(at: index)
+            return false
+        }
+
+        messages[index].state = .complete
+        for toolIndex in messages[index].tools.indices {
+            messages[index].tools[toolIndex].isRunning = false
+        }
+        persist(.assistant, text: messages[index].text, reasoning: messages[index].reasoning)
+        messages[index].attachments = messages[index].attachments.map { $0.released() }
+        return true
+    }
+
     private func finish(_ id: UUID, notice: String? = nil, fallback: String? = nil) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else {
             isStreaming = false
@@ -612,10 +647,6 @@ final class ChatStore {
         }
 
         messages[index].text = AssistantTextSanitizer.sanitizeRealtime(messages[index].text)
-        messages[index].state = .complete
-        for toolIndex in messages[index].tools.indices {
-            messages[index].tools[toolIndex].isRunning = false
-        }
 
         if let notice {
             messages[index].text += (messages[index].text.isEmpty ? "" : "\n\n") + "**\(notice)**"
@@ -623,17 +654,12 @@ final class ChatStore {
         if messages[index].text.isEmpty, let fallback {
             messages[index].text = fallback
         }
-        if messages[index].text.isEmpty {
+        if messages[index].text.isEmpty, messages[index].reasoning == nil, messages[index].tools.isEmpty {
             messages[index].text = "_Пустой ответ._"
         }
 
-        persist(.assistant, text: messages[index].text, reasoning: messages[index].reasoning)
-
-        // Payloads were only needed for the request that just finished.
-        messages[index].attachments = messages[index].attachments.map { $0.released() }
-        for userIndex in messages.indices where messages[userIndex].role == .user {
-            messages[userIndex].attachments = messages[userIndex].attachments.map { $0.released() }
-        }
+        settle(id)
+        releaseUserAttachments()
 
         // Keep the in-memory view bounded. Storage keeps everything; a restart restores
         // the tail, so nothing is actually lost.
@@ -645,6 +671,13 @@ final class ChatStore {
         isStreaming = false
         streamTask = nil
         dequeueNext()
+    }
+
+    /// Payloads were only needed for the request that produced them.
+    private func releaseUserAttachments() {
+        for index in messages.indices where messages[index].role == .user {
+            messages[index].attachments = messages[index].attachments.map { $0.released() }
+        }
     }
 
     var isPlanMode: Bool { planMode }

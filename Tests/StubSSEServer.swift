@@ -4,15 +4,20 @@ import Network
 /// Minimal HTTP/1.1 server for integration tests: serves a scripted SSE response.
 final class StubSSEServer: @unchecked Sendable {
     private let listener: NWListener
-    private let responseBody: String
+    /// One entry per request; the last entry is reused once the list runs out.
+    private let responses: [[String]]
+    private var requestCount = 0
     private let queue = DispatchQueue(label: "stub-sse")
     private(set) var port: UInt16 = 0
     private(set) var receivedBodies: [String] = []
     private let lock = NSLock()
 
-    init(chunks: [String]) throws {
-        let payload = chunks.map { "data: \($0)\n\n" }.joined() + "data: [DONE]\n\n"
-        self.responseBody = payload
+    convenience init(chunks: [String]) throws {
+        try self.init(responses: [chunks])
+    }
+
+    init(responses: [[String]]) throws {
+        self.responses = responses
         self.listener = try NWListener(using: .tcp, on: .any)
     }
 
@@ -85,8 +90,16 @@ final class StubSSEServer: @unchecked Sendable {
         head += "Connection: close\r\n"
         head += "\r\n"
 
+        lock.lock()
+        let index = min(requestCount, max(responses.count - 1, 0))
+        requestCount += 1
+        lock.unlock()
+
+        let chunks = responses.isEmpty ? [] : responses[index]
+        let body = chunks.map { "data: \($0)\n\n" }.joined() + "data: [DONE]\n\n"
+
         var payload = Data(head.utf8)
-        payload.append(Data(responseBody.utf8))
+        payload.append(Data(body.utf8))
 
         connection.send(content: payload, isComplete: true, completion: .contentProcessed { _ in
             connection.cancel()

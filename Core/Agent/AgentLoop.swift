@@ -12,6 +12,9 @@ struct AgentLoop: Sendable {
     var maxSteps: Int? = nil
 
     enum Event: Sendable {
+        /// One model request begins. Everything after it belongs to a new step, which the
+        /// UI shows as its own message: reasoning, tools and text per step.
+        case stepStarted(Int)
         case delta(String)
         case reasoning(String)
         case toolStarted(name: String, summary: String)
@@ -31,6 +34,8 @@ struct AgentLoop: Sendable {
                     var loopGuard = LoopGuard()
                     while true {
                         if Task.isCancelled { break }
+
+                        continuation.yield(.stepStarted(step))
 
                         var streamedText = ""
                         var streamedReasoning = ""
@@ -79,10 +84,6 @@ struct AgentLoop: Sendable {
                             toolCalls: calls
                         )
                         messages.append(assistant)
-
-                        if !streamedText.isEmpty {
-                            continuation.yield(.delta("\n\n"))
-                        }
 
                         var outcome: [(name: String, isError: Bool, output: String)] = []
 
