@@ -47,6 +47,7 @@ struct RootView: View {
         .frame(minWidth: 560, minHeight: 420)
         .task {
             chat.autopilot = settings.autopilot
+            chat.compactionThreshold = settings.compactionThresholdPercent
             await chat.loadHistory()
             await providerDirectory.reload()
             await chat.warmUpMCP()
@@ -54,6 +55,9 @@ struct RootView: View {
         }
         .onChange(of: settings.autopilot) { _, newValue in
             chat.autopilot = newValue
+        }
+        .onChange(of: settings.compactionThresholdPercent) { _, newValue in
+            chat.compactionThreshold = newValue
         }
         .onChange(of: providerDirectory.contextWindow) { oldValue, newValue in
             guard let oldValue, let newValue, newValue < oldValue else { return }

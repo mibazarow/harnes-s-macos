@@ -21,6 +21,10 @@ final class ChatStore {
     private var checkpointCovered: Int = 0
     private var registry: ToolRegistry?
     private var memoryTouchedThisTurn = false
+    /// Threshold used for compaction and for the outgoing window. Set from settings.
+    var compactionThreshold: Double = 80
+    /// Last assembled system prompt, reused for the footer budget so the numbers match.
+    private var cachedSystemPrompt = Prompts.system
 
     init(services: AppServices? = nil) {
         self.services = services
@@ -139,11 +143,15 @@ final class ChatStore {
         )
 
         await compactIfNeeded(provider: provider, model: model, services: services)
-        var history = await buildHistory(text: text, attachments: attachments)
+        var history = await buildHistory(
+            text: text,
+            attachments: attachments,
+            contextWindow: provider.contextWindow,
+            services: services
+        )
         let loop = AgentLoop(
             provider: provider,
             model: model,
-            systemPrompt: Prompts.system,
             registry: registry
         )
 
@@ -340,7 +348,7 @@ final class ChatStore {
     private func compactIfNeeded(provider: ProviderModel, model: String, services: AppServices) async {
         let plan = contextPlan(
             contextWindow: provider.contextWindow,
-            thresholdPercent: 80,
+            thresholdPercent: compactionThreshold,
             summaryTokens: TokenEstimator.tokens(in: checkpointSummary)
         )
 
@@ -371,7 +379,12 @@ final class ChatStore {
         }
     }
 
-    private func buildHistory(text: String, attachments: [ChatAttachment]) async -> [ProviderMessage] {
+    private func buildHistory(
+        text: String,
+        attachments: [ChatAttachment],
+        contextWindow: Int,
+        services: AppServices?
+    ) async -> [ProviderMessage] {
         var system = Prompts.system
 
         if !checkpointSummary.isEmpty {
@@ -419,18 +432,33 @@ final class ChatStore {
             system += "\n\n# Autopilot\nThe user disabled tool confirmations. Execute tools immediately without asking for permission. Still refuse: disk formatting, rm -rf on system paths, credential exfiltration, disabling SIP or security settings. Everything else run directly and report the result."
         }
 
+        cachedSystemPrompt = system
+
         var history: [ProviderMessage] = [ProviderMessage(role: .system, content: system)]
 
-        let recent = messages
-            .filter { $0.state == .complete }
-            .suffix(24)
+        // Fit the window by real budget, not by a fixed message count.
+        let completed = messages.enumerated().filter {
+            $0.element.state == .complete && $0.element.role != .system && !$0.element.text.isEmpty
+        }
+        let contextMessages = completed.map { index, message in
+            ContextMessage(id: index, role: message.role.rawValue, text: message.text)
+        }
+        let plan = composer.plan(
+            systemPrompt: system,
+            messages: contextMessages,
+            contextWindow: contextWindow,
+            thresholdPercent: compactionThreshold,
+            summaryTokens: TokenEstimator.tokens(in: checkpointSummary)
+        )
 
-        for message in recent.dropLast() {
-            guard message.role != .system else { continue }
+        var prior = plan.included
+        if let last = prior.last, messages[last.id].role == .user {
+            prior.removeLast()
+        }
+        for item in prior {
+            let message = messages[item.id]
             let role: ProviderMessage.Role = message.role == .user ? .user : .assistant
-            if !message.text.isEmpty {
-                history.append(ProviderMessage(role: role, content: message.text))
-            }
+            history.append(ProviderMessage(role: role, content: message.text))
         }
 
         var userText = text
@@ -549,6 +577,19 @@ final class ChatStore {
 
         persist(.assistant, text: messages[index].text, reasoning: messages[index].reasoning)
 
+        // Payloads were only needed for the request that just finished.
+        messages[index].attachments = messages[index].attachments.map { $0.released() }
+        for userIndex in messages.indices where messages[userIndex].role == .user {
+            messages[userIndex].attachments = messages[userIndex].attachments.map { $0.released() }
+        }
+
+        // Keep the in-memory view bounded. Storage keeps everything; a restart restores
+        // the tail, so nothing is actually lost.
+        let cap = 400
+        if messages.count > cap {
+            messages.removeFirst(messages.count - cap)
+        }
+
         isStreaming = false
         streamTask = nil
         dequeueNext()
@@ -624,7 +665,7 @@ final class ChatStore {
             ContextMessage(id: index, role: message.role.rawValue, text: message.text)
         }
         return composer.plan(
-            systemPrompt: Prompts.system,
+            systemPrompt: cachedSystemPrompt,
             messages: history,
             contextWindow: contextWindow,
             thresholdPercent: thresholdPercent,

@@ -92,6 +92,21 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(prompt.last?.id, loose.id)
     }
 
+    func testReleasedAttachmentKeepsMetadataAndDropsPayload() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("attach.txt")
+        try "hello".write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let attachment = try XCTUnwrap(ChatAttachment(url: url))
+        XCTAssertFalse(attachment.data.isEmpty)
+
+        let released = attachment.released()
+        XCTAssertTrue(released.data.isEmpty)
+        XCTAssertEqual(released.name, attachment.name)
+        XCTAssertEqual(released.path, attachment.path)
+        XCTAssertEqual(released.byteCount, attachment.byteCount)
+    }
+
     @MainActor
     func testMessageQueueing() async throws {
         let chat = ChatStore(services: nil)

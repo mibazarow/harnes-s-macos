@@ -4,7 +4,6 @@ import Foundation
 struct AgentLoop: Sendable {
     let provider: ProviderModel
     let model: String
-    let systemPrompt: String
     let registry: ToolRegistry
     let client = ProviderClient()
 

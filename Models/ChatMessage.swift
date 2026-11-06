@@ -17,6 +17,23 @@ struct ChatAttachment: Identifiable, Sendable, Equatable {
     let data: Data
     let thumbnail: Data?
 
+    private init(id: UUID, name: String, path: String, kind: Kind, byteCount: Int, data: Data, thumbnail: Data?) {
+        self.id = id
+        self.name = name
+        self.path = path
+        self.kind = kind
+        self.byteCount = byteCount
+        self.data = data
+        self.thumbnail = thumbnail
+    }
+
+    /// Drops the payload but keeps the name, path and thumbnail. Used once the turn is
+    /// over: the bytes were only needed to build that one request, and holding them
+    /// keeps whole files in memory for the lifetime of the session.
+    func released() -> ChatAttachment {
+        ChatAttachment(id: id, name: name, path: path, kind: kind, byteCount: byteCount, data: Data(), thumbnail: thumbnail)
+    }
+
     init?(url: URL) {
         let values = try? url.resourceValues(forKeys: [.fileSizeKey])
         let size = values?.fileSize ?? 0
