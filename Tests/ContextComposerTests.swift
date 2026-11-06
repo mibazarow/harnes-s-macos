@@ -70,3 +70,34 @@ final class ContextComposerTests: XCTestCase {
         XCTAssertEqual(plan.contextWindow, 1_000)
     }
 }
+final class CompactionBatchTests: XCTestCase {
+    private func message(_ index: Int, tokens: Int) -> ContextMessage {
+        ContextMessage(id: index, role: "user", text: String(repeating: "a", count: tokens * 3))
+    }
+
+    func testShortHistoryIsOneBatch() {
+        let messages = (0..<5).map { message($0, tokens: 100) }
+        XCTAssertEqual(CompactionService.batches(messages).count, 1)
+    }
+
+    func testLongHistoryIsSplitByBudget() {
+        // 60 messages of 1000 tokens each cannot go into one 24k request.
+        let messages = (0..<60).map { message($0, tokens: 1_000) }
+        let batches = CompactionService.batches(messages)
+
+        XCTAssertGreaterThan(batches.count, 1)
+        XCTAssertEqual(batches.flatMap { $0 }.count, messages.count)
+        // Order is preserved: the summary is built sequentially.
+        XCTAssertEqual(batches.flatMap { $0 }.map(\.id), messages.map(\.id))
+    }
+
+    func testOversizedMessageIsNotMergedWithTheNextOne() {
+        // The transcript clips a message, so its cost is capped; with a budget below
+        // that cap the next message must still start a new batch.
+        let messages = [message(0, tokens: 50_000), message(1, tokens: 10)]
+        let batches = CompactionService.batches(messages, budget: 1_000)
+        XCTAssertEqual(batches.count, 2)
+        XCTAssertEqual(batches[0].count, 1)
+        XCTAssertEqual(batches[1].count, 1)
+    }
+}

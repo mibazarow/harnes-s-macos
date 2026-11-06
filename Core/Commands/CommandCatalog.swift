@@ -29,6 +29,7 @@ enum CommandCatalog {
     static let all: [Command] = [
         Command(name: "/help", summary: "все команды"),
         Command(name: "/clear", summary: "очистить вид, база не трогается"),
+        Command(name: "/compact", summary: "сжать историю в саммари"),
         Command(name: "/skills", summary: "список скиллов"),
         Command(name: "/skill", summary: "управление скиллами", subcommands: [
             Command(name: "list", summary: "список установленных"),
@@ -65,7 +66,7 @@ enum CommandCatalog {
 
     /// Suggestions for the current composer text. Empty unless the text is a single
     /// line that starts with a slash.
-    static func suggestions(for text: String, limit: Int = 9) -> [CommandSuggestion] {
+    static func suggestions(for text: String, limit: Int = 12) -> [CommandSuggestion] {
         guard text.hasPrefix("/"), !text.contains("\n") else { return [] }
 
         let parts = text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)

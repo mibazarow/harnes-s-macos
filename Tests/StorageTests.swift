@@ -326,3 +326,28 @@ final class StorageTests: XCTestCase {
         XCTAssertTrue(list[0].isDefault)
     }
 }
+final class CompactionBoundaryTests: XCTestCase {
+    func testBoundaryWhenEverythingFitsInView() {
+        // 120 stored, 100 covered, all 120 in view: 20 newest are uncovered.
+        XCTAssertEqual(ChatStore.coveredInView(total: 120, covered: 100, inView: 120), 100)
+    }
+
+    func testBoundaryWithTruncatedView() {
+        // Only the last 100 are loaded: the newest 20 are uncovered, 80 covered.
+        XCTAssertEqual(ChatStore.coveredInView(total: 120, covered: 100, inView: 100), 80)
+    }
+
+    func testBoundaryWithNoCheckpoint() {
+        XCTAssertEqual(ChatStore.coveredInView(total: 50, covered: 0, inView: 50), 0)
+    }
+
+    func testBoundaryWhenCheckpointCoversEverything() {
+        XCTAssertEqual(ChatStore.coveredInView(total: 30, covered: 30, inView: 30), 30)
+        // A checkpoint larger than storage (old database) must not produce a negative.
+        XCTAssertEqual(ChatStore.coveredInView(total: 10, covered: 40, inView: 10), 10)
+    }
+
+    func testBoundaryNeverExceedsView() {
+        XCTAssertEqual(ChatStore.coveredInView(total: 5, covered: 2, inView: 3), 0)
+    }
+}

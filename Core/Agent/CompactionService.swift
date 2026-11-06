@@ -46,7 +46,31 @@ actor CompactionService {
         }
     }
 
-    /// Asks the model to fold `messages` into a compact factual summary.
+    /// Groups messages so one summarization request stays well inside the window.
+    /// A long history folded in one prompt would not fit the model it is being sent to.
+    static func batches(_ messages: [ContextMessage], budget: Int = 24_000) -> [[ContextMessage]] {
+        var result: [[ContextMessage]] = []
+        var current: [ContextMessage] = []
+        var used = 0
+
+        for message in messages {
+            // The transcript clips each message, so the cost per item is capped too.
+            let cost = min(message.tokens, 1_400) + 8
+            if !current.isEmpty, used + cost > budget {
+                result.append(current)
+                current = []
+                used = 0
+            }
+            current.append(message)
+            used += cost
+        }
+
+        if !current.isEmpty { result.append(current) }
+        return result
+    }
+
+    /// Asks the model to fold `messages` into a compact factual summary, one batch at a
+    /// time so the request always fits.
     func summarize(
         messages: [ContextMessage],
         provider: ProviderModel,
@@ -55,7 +79,25 @@ actor CompactionService {
     ) async throws -> String {
         guard !messages.isEmpty else { return previousSummary ?? "" }
 
-        let transcript = messages.map { message in
+        var summary = previousSummary ?? ""
+        for batch in Self.batches(messages) {
+            summary = try await summarize(
+                batch: batch,
+                provider: provider,
+                model: model,
+                previousSummary: summary.isEmpty ? nil : summary
+            )
+        }
+        return summary
+    }
+
+    private func summarize(
+        batch: [ContextMessage],
+        provider: ProviderModel,
+        model: String,
+        previousSummary: String?
+    ) async throws -> String {
+        let transcript = batch.map { message in
             let text = message.text.count > 4_000 ? String(message.text.prefix(4_000)) + "…" : message.text
             return "[\(message.role)] \(text)"
         }.joined(separator: "\n\n")

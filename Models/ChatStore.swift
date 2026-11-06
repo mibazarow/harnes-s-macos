@@ -23,6 +23,12 @@ final class ChatStore {
     private var checkpointSummary: String = ""
     private var planMode = false
     private var checkpointCovered: Int = 0
+    /// Last message already folded into the checkpoint: everything up to it is replaced
+    /// by the summary and must not be sent again.
+    private var compactedThroughID: UUID?
+    /// Window of the model used on the previous turn. A drop means the history that fit
+    /// a minute ago no longer fits, and the request must be compacted before sending.
+    private var lastContextWindow: Int?
     private var registry: ToolRegistry?
     private var memoryTouchedThisTurn = false
     private var compactionTask: Task<Void, Never>?
@@ -166,6 +172,8 @@ final class ChatStore {
             text: text,
             attachments: attachments,
             contextWindow: provider.contextWindow,
+            provider: provider,
+            model: model,
             services: services
         )
         let prepMs = Self.millis(since: prepStart)
@@ -393,24 +401,44 @@ final class ChatStore {
         }
     }
 
-    private func compactIfNeeded(provider: ProviderModel, model: String, services: AppServices) async {
-        let plan = contextPlan(
-            contextWindow: provider.contextWindow,
-            thresholdPercent: compactionThreshold,
-            summaryTokens: TokenEstimator.tokens(in: checkpointSummary)
-        )
+    /// Messages that still go to the model: completed, non-system, and not yet folded
+    /// into the checkpoint.
+    private var promptMessages: [ContextMessage] {
+        let compactedIndex = compactedThroughID.flatMap { id in
+            messages.firstIndex(where: { $0.id == id })
+        }
+        return messages.enumerated().compactMap { index, message in
+            guard message.state == .complete,
+                  message.role != .system,
+                  !message.text.isEmpty else { return nil }
+            if let compactedIndex, index <= compactedIndex { return nil }
+            return ContextMessage(id: index, role: message.role.rawValue, text: message.text)
+        }
+    }
 
-        guard plan.didCompact, !plan.compacted.isEmpty else { return }
+    /// Folds messages into the checkpoint. Returns false when the model refused, so the
+    /// caller can tell the user instead of pretending the history was saved.
+    @discardableResult
+    private func compact(
+        _ contextMessages: [ContextMessage],
+        provider: ProviderModel,
+        model: String,
+        services: AppServices
+    ) async -> Bool {
+        guard !contextMessages.isEmpty else { return false }
 
         do {
             let summary = try await services.compaction.summarize(
-                messages: plan.compacted,
+                messages: contextMessages,
                 provider: provider,
                 model: model,
                 previousSummary: checkpointSummary.isEmpty ? nil : checkpointSummary
             )
             checkpointSummary = summary
-            checkpointCovered += plan.compacted.count
+            checkpointCovered += contextMessages.count
+            if let lastCompacted = contextMessages.last {
+                compactedThroughID = messages[lastCompacted.id].id
+            }
 
             try? await services.compaction.saveCheckpoint(
                 CompactionService.Checkpoint(
@@ -420,23 +448,31 @@ final class ChatStore {
                 ),
                 database: services.database
             )
-
-            notice("История сжата: \(plan.compacted.count) сообщений свёрнуты в саммари (\(summary.count) симв.). Из базы ничего не удалено.")
+            return true
         } catch {
-            notice("Компакция не удалась: \(error.localizedDescription). Продолжаю с усечённым окном.")
+            return false
         }
     }
 
-    private func buildHistory(
-        text: String,
-        attachments: [ChatAttachment],
-        contextWindow: Int,
-        services: AppServices?
-    ) async -> [ProviderMessage] {
-        // Order matters for provider prompt caching: everything above the first
-        // volatile part is a reusable prefix. So the stable base prompt and the skill
-        // index come first, then memory and the checkpoint, and the style block — which
-        // shifts on almost every message — goes last.
+    private func compactIfNeeded(provider: ProviderModel, model: String, services: AppServices) async {
+        let plan = contextPlan(
+            contextWindow: provider.contextWindow,
+            thresholdPercent: compactionThreshold,
+            summaryTokens: TokenEstimator.tokens(in: checkpointSummary)
+        )
+
+        guard plan.didCompact, !plan.compacted.isEmpty else { return }
+
+        if await compact(plan.compacted, provider: provider, model: model, services: services) {
+            notice("История сжата: \(plan.compacted.count) сообщений свёрнуты в саммари. Из базы ничего не удалено.")
+        } else {
+            notice("Компакция не удалась. Продолжаю с усечённым окном.")
+        }
+    }
+
+    /// The system prompt, assembled in cache-friendly order: stable parts first, the
+    /// style block — which shifts on almost every message — last.
+    private func buildSystemPrompt(services: AppServices?) async -> String {
         var parts: [String] = [Prompts.system]
 
         if let services {
@@ -485,27 +521,74 @@ final class ChatStore {
             }
         }
 
-        let system = parts.joined(separator: "\n\n")
-        cachedSystemPrompt = system
+        return parts.joined(separator: "\n\n")
+    }
 
-        var history: [ProviderMessage] = [ProviderMessage(role: .system, content: system)]
+    /// Builds the outgoing window and, when the history does not fit, compacts it first.
+    /// This is what makes a switch to a smaller model safe: without it the oldest part
+    /// would be dropped silently and the model would never learn what it missed.
+    private func prepareWindow(
+        contextWindow: Int,
+        provider: ProviderModel,
+        model: String,
+        services: AppServices?
+    ) async -> (system: String, included: [ContextMessage]) {
+        if let lastContextWindow, lastContextWindow > contextWindow {
+            Self.logLatency("window \(lastContextWindow) -> \(contextWindow): preflight compaction")
+        }
+        lastContextWindow = contextWindow
 
-        // Fit the window by real budget, not by a fixed message count.
-        let completed = messages.enumerated().filter {
-            $0.element.state == .complete && $0.element.role != .system && !$0.element.text.isEmpty
-        }
-        let contextMessages = completed.map { index, message in
-            ContextMessage(id: index, role: message.role.rawValue, text: message.text)
-        }
-        let plan = composer.plan(
+        var system = await buildSystemPrompt(services: services)
+        var plan = composer.plan(
             systemPrompt: system,
-            messages: contextMessages,
+            messages: promptMessages,
             contextWindow: contextWindow,
             thresholdPercent: compactionThreshold,
             summaryTokens: TokenEstimator.tokens(in: checkpointSummary)
         )
 
-        var prior = plan.included
+        if let services, !plan.compacted.isEmpty {
+            let dropped = plan.compacted.count
+            let compacted = await compact(plan.compacted, provider: provider, model: model, services: services)
+
+            if compacted {
+                // The checkpoint lives inside the system prompt, so both are rebuilt.
+                system = await buildSystemPrompt(services: services)
+                plan = composer.plan(
+                    systemPrompt: system,
+                    messages: promptMessages,
+                    contextWindow: contextWindow,
+                    thresholdPercent: compactionThreshold,
+                    summaryTokens: TokenEstimator.tokens(in: checkpointSummary)
+                )
+                notice("Сжал историю перед отправкой: \(dropped) сообщений.")
+            } else {
+                notice("Историю сжать не удалось — \(dropped) старых сообщений не попадут в запрос.")
+            }
+        }
+
+        cachedSystemPrompt = system
+        return (system, plan.included)
+    }
+
+    private func buildHistory(
+        text: String,
+        attachments: [ChatAttachment],
+        contextWindow: Int,
+        provider: ProviderModel,
+        model: String,
+        services: AppServices?
+    ) async -> [ProviderMessage] {
+        let prepared = await prepareWindow(
+            contextWindow: contextWindow,
+            provider: provider,
+            model: model,
+            services: services
+        )
+
+        var history: [ProviderMessage] = [ProviderMessage(role: .system, content: prepared.system)]
+
+        var prior = prepared.included
         if let last = prior.last, messages[last.id].role == .user {
             prior.removeLast()
         }
@@ -744,6 +827,17 @@ final class ChatStore {
         messages = restored
         oldestStoredID = stored.first?.id
         hasMoreHistory = (try? await services.history.hasOlder(than: stored[0].id)) ?? false
+
+        // Rebuild the compaction boundary from stored counts. The checkpoint holds how
+        // many messages are already summarized; everything older than the uncovered
+        // tail is one of them, so it must not be sent again on top of the summary.
+        if checkpointCovered > 0 {
+            let total = (try? await services.history.count()) ?? restored.count
+            let coveredInView = Self.coveredInView(total: total, covered: checkpointCovered, inView: restored.count)
+            if coveredInView > 0 {
+                compactedThroughID = restored[coveredInView - 1].id
+            }
+        }
     }
 
     /// Scroll-up pagination: one older page per call, nothing is removed.
@@ -765,6 +859,14 @@ final class ChatStore {
         } catch {
             hasMoreHistory = false
         }
+    }
+
+    /// How many of the restored messages are already inside the checkpoint.
+    /// `uncovered` messages at the end of storage are the ones the checkpoint does not
+    /// cover; everything before them is summarized.
+    nonisolated static func coveredInView(total: Int, covered: Int, inView: Int) -> Int {
+        let uncovered = max(total - covered, 0)
+        return min(max(inView - uncovered, 0), inView)
     }
 
     private static func restore(_ stored: [StoredMessage]) -> [ChatMessage] {
@@ -796,12 +898,9 @@ final class ChatStore {
     var autopilot = false
 
     func contextPlan(contextWindow: Int, thresholdPercent: Double, summaryTokens: Int = 0) -> ContextPlan {
-        let history = messages.enumerated().map { index, message in
-            ContextMessage(id: index, role: message.role.rawValue, text: message.text)
-        }
-        return composer.plan(
+        composer.plan(
             systemPrompt: cachedSystemPrompt,
-            messages: history,
+            messages: promptMessages,
             contextWindow: contextWindow,
             thresholdPercent: thresholdPercent,
             summaryTokens: summaryTokens
@@ -811,6 +910,11 @@ final class ChatStore {
     private func runCommand(_ input: String) {
         if input == "/clear" {
             clearView()
+            return
+        }
+
+        if input == "/compact" {
+            runCompaction()
             return
         }
 
@@ -837,6 +941,56 @@ final class ChatStore {
             self.commandTask = nil
             self.dequeueNext()
         }
+    }
+
+    /// `/compact`: folds everything except the last few messages into the checkpoint
+    /// regardless of the fill level. Same machinery as automatic compaction.
+    private func runCompaction() {
+        messages.append(ChatMessage(role: .assistant, text: "…", state: .streaming))
+        let messageID = messages[messages.count - 1].id
+        isStreaming = true
+
+        commandTask = Task { [weak self] in
+            guard let self else { return }
+            let text = await self.compactNow()
+            guard !Task.isCancelled else { return }
+            guard let index = self.messages.firstIndex(where: { $0.id == messageID }) else { return }
+            self.messages[index].text = text
+            self.messages[index].state = .complete
+            self.isStreaming = false
+            self.commandTask = nil
+            self.dequeueNext()
+        }
+    }
+
+    /// Manual compaction. Returns a line for the transcript.
+    func compactNow() async -> String {
+        guard let services else { return "**Ошибка.** База данных недоступна." }
+
+        let provider: ProviderModel?
+        do {
+            provider = try await activeProvider(services)
+        } catch {
+            return "**Ошибка.** Не удалось прочитать провайдеров: \(error.localizedDescription)"
+        }
+        guard let provider else { return "**Ошибка.** Провайдер не подключён." }
+
+        let model = provider.defaultModel ?? provider.models.first ?? ""
+        guard !model.isEmpty else { return "**Ошибка.** У провайдера не выбрана модель." }
+
+        let completed = promptMessages
+        // The last few messages stay verbatim: they are the live thread.
+        let keep = 6
+        guard completed.count > keep else {
+            return "Сжимать нечего: в истории \(completed.count) сообщений."
+        }
+
+        let toCompact = Array(completed.dropLast(keep))
+        if await compact(toCompact, provider: provider, model: model, services: services) {
+            return "История сжата: \(toCompact.count) сообщений свёрнуты в саммари (\(checkpointSummary.count) симв.). "
+                + "В базе ничего не удалено, последние \(keep) сообщений остались как есть."
+        }
+        return "**Ошибка.** Компакция не удалась. Попробуй ещё раз."
     }
 
     func clearView() {
