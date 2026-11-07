@@ -16,11 +16,15 @@ struct ContextMessage: Sendable, Identifiable {
     let text: String
     let tokens: Int
 
-    init(id: Int, role: String, text: String) {
+    /// `extra` is content that will be sent but is not part of `text` — tool calls and
+    /// their outputs. It has to count against the budget, otherwise a history full of
+    /// tool traces looks cheap in the plan and overflows at the provider.
+    init(id: Int, role: String, text: String, extra: String = "") {
         self.id = id
         self.role = role
         self.text = text
         self.tokens = TokenEstimator.tokens(in: text)
+            + (extra.isEmpty ? 0 : TokenEstimator.tokens(in: extra))
     }
 }
 

@@ -145,6 +145,29 @@ struct ToolTrace: Identifiable, Sendable, Equatable {
     }
 }
 
+/// One completed tool call, as the provider needs to see it on the next request.
+struct ToolExchange: Sendable, Equatable {
+    let callID: String
+    let name: String
+    let arguments: String
+    /// Truncated: history needs the gist, not the whole file. The current turn already
+    /// sends up to 30 000 characters; older turns get less.
+    let output: String
+    let isError: Bool
+
+    static let historyOutputLimit = 4_000
+
+    init(callID: String, name: String, arguments: String, output: String, isError: Bool) {
+        self.callID = callID
+        self.name = name
+        self.arguments = arguments
+        self.output = output.count > Self.historyOutputLimit
+            ? String(output.prefix(Self.historyOutputLimit)) + "\n…[обрезано]"
+            : output
+        self.isError = isError
+    }
+}
+
 struct ChatMessage: Identifiable, Sendable, Equatable {
     enum Role: String, Sendable {
         case user
@@ -175,6 +198,12 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
     var reasoning: String?
     var attachments: [ChatAttachment]
     var tools: [ToolTrace]
+    /// Tool calls and their results, kept so the next request can replay them.
+    ///
+    /// Without this the model saw only its own prose on the next turn: no record of
+    /// what it read, what it changed, or what failed. That is the main reason it kept
+    /// redoing work it had already done, which reads as looping.
+    var exchanges: [ToolExchange] = []
     /// Honesty warning shown under the answer. Deliberately not part of `text`: it
     /// must not be sent back to the model as if the assistant had said it.
     var warning: String?
@@ -187,6 +216,7 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
         reasoning: String? = nil,
         attachments: [ChatAttachment] = [],
         tools: [ToolTrace] = [],
+        exchanges: [ToolExchange] = [],
         warning: String? = nil,
         date: Date = .now,
         state: State = .complete
@@ -197,6 +227,7 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
         self.reasoning = reasoning
         self.attachments = attachments
         self.tools = tools
+        self.exchanges = exchanges
         self.warning = warning
         self.date = date
         self.state = state

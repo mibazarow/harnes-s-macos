@@ -214,7 +214,9 @@ final class ChatStore {
                 var firstTokenLogged = false
                 let requestStart = ContinuousClock.now
                 var repetitionStopped = false
+                var truncatedReason: String?
                 var lastLoopCheck = 0
+                var lastReasoningCheck = 0
                 stream: for try await event in loop.run(history: history) {
                     if Task.isCancelled { break }
                     if !firstTokenLogged {
@@ -244,14 +246,34 @@ final class ChatStore {
                         }
                     case .reasoning(let chunk):
                         appendReasoning(chunk, to: assistantID)
+                        // Reasoning can loop too, and it burns tokens before the first
+                        // visible character ever appears. Same check, different buffer.
+                        let reasoningLength = reasoningText(of: assistantID).utf8.count
+                        if reasoningLength - lastReasoningCheck >= 400 {
+                            lastReasoningCheck = reasoningLength
+                            if RepetitionGuard.isLooping(reasoningText(of: assistantID)) {
+                                repetitionStopped = true
+                                break stream
+                            }
+                        }
                     case .toolStarted(let name, let summary):
                         toolCallsInTurn += 1
                         addTool(name: name, summary: summary, running: true, to: assistantID)
-                    case .toolFinished(let name, let summary, let isError, let imagePath):
+                    case .toolFinished(let callID, let name, let arguments, let summary, let output, let isError, let imagePath):
                         finishTool(name: name, summary: summary, isError: isError, imagePath: imagePath, in: assistantID)
+                        recordExchange(
+                            callID: callID,
+                            name: name,
+                            arguments: arguments,
+                            output: output,
+                            isError: isError,
+                            in: assistantID
+                        )
                     case .usage(let promptTokens, let cacheHit, let cacheMiss):
                         let ratio = promptTokens > 0 ? cacheHit * 100 / promptTokens : 0
                         Self.logLatency("cache hit=\(cacheHit) miss=\(cacheMiss) prompt=\(promptTokens) (\(ratio)%)")
+                    case .truncated(let reason):
+                        truncatedReason = reason
                     case .completed:
                         break
                     }
@@ -262,6 +284,11 @@ final class ChatStore {
                 if repetitionStopped {
                     trimLoop(assistantID)
                     markLoopWarning(assistantID)
+                    break
+                }
+
+                if let truncatedReason {
+                    markTruncationWarning(assistantID, reason: truncatedReason)
                     break
                 }
 
@@ -504,9 +531,19 @@ final class ChatStore {
         return messages.enumerated().compactMap { index, message in
             guard message.state == .complete,
                   message.role != .system,
-                  !message.text.isEmpty else { return nil }
+                  !message.text.isEmpty || !message.exchanges.isEmpty else { return nil }
             if let compactedIndex, index <= compactedIndex { return nil }
-            return ContextMessage(id: index, role: message.role.rawValue, text: message.text)
+            // Tool calls and results travel with the message, so their text has to be
+            // part of the budget too.
+            let extra = message.exchanges
+                .map { "\($0.name)\($0.arguments)\n\($0.output)" }
+                .joined(separator: "\n")
+            return ContextMessage(
+                id: index,
+                role: message.role.rawValue,
+                text: message.text,
+                extra: extra
+            )
         }
     }
 
@@ -709,8 +746,39 @@ final class ChatStore {
         }
         for item in prior {
             let message = messages[item.id]
-            let role: ProviderMessage.Role = message.role == .user ? .user : .assistant
-            history.append(ProviderMessage(role: role, content: message.text))
+            if message.role == .user {
+                history.append(ProviderMessage(role: .user, content: message.text))
+                continue
+            }
+
+            // Replay the work, not just the prose: an assistant turn that called tools
+            // goes back as `assistant(tool_calls)` followed by one `tool` message per
+            // call, exactly as the provider emitted it. Without this the model cannot
+            // tell what it already did and starts the task over.
+            if !message.exchanges.isEmpty {
+                history.append(ProviderMessage(
+                    role: .assistant,
+                    content: message.text,
+                    toolCalls: message.exchanges.map {
+                        ToolCall(id: $0.callID, name: $0.name, arguments: $0.arguments)
+                    }
+                ))
+                for exchange in message.exchanges {
+                    history.append(ProviderMessage(
+                        role: .tool,
+                        content: exchange.output,
+                        toolCallID: exchange.callID
+                    ))
+                }
+                continue
+            }
+
+            // A step with no text and no calls carries nothing; sending an empty
+            // assistant turn is out of distribution and confuses some providers.
+            guard !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                continue
+            }
+            history.append(ProviderMessage(role: .assistant, content: message.text))
         }
 
         var userText = text
@@ -815,10 +883,27 @@ final class ChatStore {
         messages.first(where: { $0.id == id })?.text ?? ""
     }
 
+    private func reasoningText(of id: UUID) -> String {
+        messages.first(where: { $0.id == id })?.reasoning ?? ""
+    }
+
     /// Drops the repeating tail so the user is left with the part that made sense.
     private func trimLoop(_ id: UUID) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         messages[index].text = RepetitionGuard.trimmed(messages[index].text)
+        if let reasoning = messages[index].reasoning {
+            messages[index].reasoning = RepetitionGuard.trimmed(reasoning)
+        }
+    }
+
+    private func markTruncationWarning(_ id: UUID, reason: String) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        let text = reason.lowercased() == "content_filter"
+            ? "Провайдер остановил ответ по своему фильтру содержимого. Продолжение с этого места невозможно."
+            : """
+            Ответ обрезан по лимиту вывода провайдера, а не закончен. Продолжить с этого             места нельзя: следующий запрос начнётся заново. Попроси разбить задачу на части             или скажи «продолжи» — тогда я перескажу сделанное и пойду дальше.
+            """
+        messages[index].warning = text
     }
 
     private func markLoopWarning(_ id: UUID) {
@@ -836,6 +921,24 @@ final class ChatStore {
     private func addTool(name: String, summary: String, running: Bool, to id: UUID) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         messages[index].tools.append(ToolTrace(name: name, summary: summary, isRunning: running))
+    }
+
+    private func recordExchange(
+        callID: String,
+        name: String,
+        arguments: String,
+        output: String,
+        isError: Bool,
+        in id: UUID
+    ) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[index].exchanges.append(ToolExchange(
+            callID: callID,
+            name: name,
+            arguments: arguments,
+            output: output,
+            isError: isError
+        ))
     }
 
     private func finishTool(name: String, summary: String, isError: Bool, imagePath: String?, in id: UUID) {
@@ -875,7 +978,12 @@ final class ChatStore {
         for toolIndex in messages[index].tools.indices {
             messages[index].tools[toolIndex].isRunning = false
         }
-        persist(.assistant, text: messages[index].text, reasoning: messages[index].reasoning)
+        persist(
+            .assistant,
+            text: messages[index].text,
+            reasoning: messages[index].reasoning,
+            exchanges: messages[index].exchanges
+        )
         messages[index].attachments = messages[index].attachments.map { $0.released() }
         return true
     }
@@ -1011,9 +1119,20 @@ final class ChatStore {
         stored.compactMap { entry in
             guard let role = ChatMessage.Role(rawValue: entry.role), role != .system else { return nil }
             if let date = ISO8601DateFormatter().date(from: entry.createdAt) {
-                return ChatMessage(role: role, text: entry.text, reasoning: entry.reasoning, date: date)
+                return ChatMessage(
+                    role: role,
+                    text: entry.text,
+                    reasoning: entry.reasoning,
+                    exchanges: entry.exchanges,
+                    date: date
+                )
             }
-            return ChatMessage(role: role, text: entry.text, reasoning: entry.reasoning)
+            return ChatMessage(
+                role: role,
+                text: entry.text,
+                reasoning: entry.reasoning,
+                exchanges: entry.exchanges
+            )
         }
     }
 
@@ -1022,10 +1141,20 @@ final class ChatStore {
         persist(.user, text: text + files, reasoning: nil)
     }
 
-    private func persist(_ role: ChatMessage.Role, text: String, reasoning: String?) {
+    private func persist(
+        _ role: ChatMessage.Role,
+        text: String,
+        reasoning: String?,
+        exchanges: [ToolExchange] = []
+    ) {
         guard let services else { return }
         Task.detached(priority: .utility) {
-            try? await services.history.append(role: role, text: text, reasoning: reasoning)
+            try? await services.history.append(
+                role: role,
+                text: text,
+                reasoning: reasoning,
+                exchanges: exchanges
+            )
         }
     }
 
@@ -1049,6 +1178,8 @@ final class ChatStore {
             String(last?.text.count ?? 0),
             String(last?.reasoning?.count ?? 0),
             String(last?.tools.count ?? 0),
+            String(last?.exchanges.count ?? 0),
+            String(last?.exchanges.reduce(0) { $0 + $1.output.count } ?? 0),
             String(cachedSystemPrompt.count)
         ].joined(separator: "|")
         if let cache = planCache, cache.signature == signature {

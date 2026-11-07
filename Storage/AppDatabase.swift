@@ -270,6 +270,15 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v10_message_exchanges") { db in
+            // Tool calls and results live next to the message so a restart does not
+            // erase what the agent already did. Without it the model starts over on
+            // every launch, which looks like looping.
+            if try !db.columns(in: "messages").contains(where: { $0.name == "exchanges" }) {
+                try db.execute(sql: "ALTER TABLE messages ADD COLUMN exchanges TEXT;")
+            }
+        }
+
         return migrator
     }
 }

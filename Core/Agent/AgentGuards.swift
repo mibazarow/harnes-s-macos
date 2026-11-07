@@ -2,31 +2,59 @@ import Foundation
 
 /// Progress-aware anti-loop guard.
 ///
-/// Comparing only the tool-call signature kills legitimate repetition whose
-/// result changes (blink on→off→on, a counter, a retry-until-condition loop).
-/// This compares the call signature AND a progress signature (per-tool success
-/// plus a digest of the result text), and only reports a loop when both are
-/// identical again and again.
+/// Comparing only the tool-call signature kills legitimate repetition whose result
+/// changes (blink on→off→on, a counter, a retry-until-condition loop). This compares
+/// the call signature AND a progress signature (per-tool success plus a digest of the
+/// result text).
+///
+/// Two shapes are detected, because models get stuck in both:
+/// - the same step repeated N times in a row (`A A A`), and
+/// - a short cycle of steps with no progress (`A B A B`, `A B C A B C`).
+/// The second shape is the common one on real tasks — read, edit, test, read, edit,
+/// test — and it used to run all the way to the 100-step ceiling.
 struct LoopGuard: Sendable {
-    private var lastCallSignature: String?
-    private var lastProgressSignature: String?
-    private var consecutiveRepeats = 0
-    let maxIdenticalIterations: Int
+    private struct Step: Equatable {
+        let call: String
+        let progress: String
+    }
 
-    init(maxIdenticalIterations: Int = 3) {
+    private var steps: [Step] = []
+    let maxIdenticalIterations: Int
+    /// How many steps are remembered for cycle detection.
+    let window: Int
+    /// Longest cycle considered. Three covers read→edit→test and its variants.
+    let maxPeriod: Int
+
+    init(maxIdenticalIterations: Int = 3, window: Int = 12, maxPeriod: Int = 3) {
         self.maxIdenticalIterations = maxIdenticalIterations
+        self.window = window
+        self.maxPeriod = maxPeriod
     }
 
     /// Returns true when this iteration is a stuck loop and the caller should stop.
     mutating func record(callSignature: String, progressSignature: String) -> Bool {
-        if callSignature == lastCallSignature, progressSignature == lastProgressSignature {
-            consecutiveRepeats += 1
-        } else {
-            lastCallSignature = callSignature
-            lastProgressSignature = progressSignature
-            consecutiveRepeats = 1
+        steps.append(Step(call: callSignature, progress: progressSignature))
+        if steps.count > window {
+            steps.removeFirst(steps.count - window)
         }
-        return consecutiveRepeats >= maxIdenticalIterations
+
+        // Straight repeat: the same step, unchanged, several times running.
+        if steps.count >= maxIdenticalIterations {
+            let tail = Array(steps.suffix(maxIdenticalIterations))
+            if tail.allSatisfy({ $0 == tail[0] }) { return true }
+        }
+
+        // Cycle: the last `period * 2` steps are two identical blocks. Progress has to
+        // be identical too, otherwise the cycle is doing work (a poll that changes).
+        for period in 2...maxPeriod {
+            let needed = period * 2
+            guard steps.count >= needed else { continue }
+            let tail = Array(steps.suffix(needed))
+            let first = Array(tail.prefix(period))
+            let second = Array(tail.suffix(period))
+            if first == second { return true }
+        }
+        return false
     }
 
     static func callSignature(_ calls: [ToolCall]) -> String {

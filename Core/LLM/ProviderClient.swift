@@ -29,6 +29,31 @@ struct ToolCall: Identifiable, Sendable, Equatable {
     var arguments: String
 }
 
+/// Sampling knobs sent with every request.
+///
+/// `temperature` alone is not enough: at 0.2 the model is close to greedy decoding, and
+/// greedy decoding on long outputs walks into a degenerate repeat — pick the most
+/// likely token, which is the one just emitted, forever. The two penalties are what
+/// break that tie. They are deliberately mild: code legitimately repeats indentation,
+/// `self.`, braces and identifiers, and a heavy penalty damages exactly that.
+struct SamplingOptions: Sendable, Equatable {
+    var temperature: Double
+    var presencePenalty: Double? = 0.2
+    var frequencyPenalty: Double? = 0.15
+    var maxTokens: Int?
+
+    /// Temperature and the output ceiling only. Used as the retry after a provider
+    /// rejects the penalty fields — some OpenAI-compatible servers do.
+    var minimal: SamplingOptions {
+        SamplingOptions(
+            temperature: temperature,
+            presencePenalty: nil,
+            frequencyPenalty: nil,
+            maxTokens: maxTokens
+        )
+    }
+}
+
 enum ProviderEvent: Sendable {
     case delta(String)
     case reasoning(String)
@@ -125,22 +150,55 @@ struct ProviderClient: Sendable {
                     if !provider.apiKey.isEmpty {
                         request.setValue("Bearer \(provider.apiKey)", forHTTPHeaderField: "Authorization")
                     }
-                    request.httpBody = try Self.encodeRequest(
+                    // A reasoning model spends its ceiling on thinking, so it gets a
+                    // larger one; a plain model does not need 16k of room.
+                    let ceiling = provider.reasoningLevel == .off ? 8_192 : 16_384
+                    var options = SamplingOptions(
+                        temperature: provider.temperature,
+                        maxTokens: ceiling
+                    )
+
+                    var body = try Self.encodeRequest(
                         model: model,
                         messages: messages,
                         reasoning: provider.reasoningLevel,
                         tools: tools,
-                        temperature: provider.temperature
+                        sampling: options
                     )
+                    request.httpBody = body
 
-                    let (bytes, response) = try await Self.session.bytes(for: request)
-                    if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                        var body = Data()
-                        for try await byte in bytes {
-                            body.append(byte)
-                            if body.count > 2_000 { break }
+                    var bytes: URLSession.AsyncBytes
+                    var response: URLResponse
+
+                    while true {
+                        (bytes, response) = try await Self.session.bytes(for: request)
+                        guard let http = response as? HTTPURLResponse,
+                              !(200..<300).contains(http.statusCode) else {
+                            break
                         }
-                        let text = String(data: body, encoding: .utf8) ?? ""
+
+                        var errorBody = Data()
+                        for try await byte in bytes {
+                            errorBody.append(byte)
+                            if errorBody.count > 2_000 { break }
+                        }
+                        let text = String(data: errorBody, encoding: .utf8) ?? ""
+
+                        // Some OpenAI-compatible servers reject the penalty fields or
+                        // the `max_tokens` name outright. Retrying once without them is
+                        // cheaper and more robust than guessing per vendor.
+                        if options.presencePenalty != nil, Self.rejectsSamplingFields(text) {
+                            options = options.minimal
+                            body = try Self.encodeRequest(
+                                model: model,
+                                messages: messages,
+                                reasoning: provider.reasoningLevel,
+                                tools: tools,
+                                sampling: options
+                            )
+                            request.httpBody = body
+                            continue
+                        }
                         throw ProviderError.http(status: http.statusCode, body: String(text.prefix(400)))
                     }
 
@@ -245,14 +303,25 @@ struct ProviderClient: Sendable {
         messages: [ProviderMessage],
         reasoning: ReasoningLevel,
         tools: [ProviderToolSchema] = [],
-        temperature: Double = ProviderModel.defaultTemperature
+        temperature: Double = ProviderModel.defaultTemperature,
+        sampling: SamplingOptions? = nil
     ) throws -> Data {
+        let options = sampling ?? SamplingOptions(temperature: temperature, maxTokens: nil)
         var payload: [String: Any] = [
             "model": model,
             "stream": true,
-            "temperature": temperature,
+            "temperature": options.temperature,
             "messages": messages.map(encodeMessage)
         ]
+        if let presence = options.presencePenalty {
+            payload["presence_penalty"] = presence
+        }
+        if let frequency = options.frequencyPenalty {
+            payload["frequency_penalty"] = frequency
+        }
+        if let maxTokens = options.maxTokens {
+            payload["max_tokens"] = maxTokens
+        }
         if reasoning != .off {
             payload["reasoning_effort"] = reasoning.apiValue
         }
@@ -289,6 +358,18 @@ struct ProviderClient: Sendable {
             return array.map { unwrap($0) }
         }
         return value
+    }
+
+    /// True when a 400 body complains about one of the sampling fields rather than
+    /// about the request as a whole.
+    static func rejectsSamplingFields(_ body: String) -> Bool {
+        let text = body.lowercased()
+        let markers = [
+            "presence_penalty", "frequency_penalty", "max_tokens",
+            "unrecognized", "unknown parameter", "unsupported parameter",
+            "not supported", "extra fields not permitted", "invalid parameter"
+        ]
+        return markers.contains { text.contains($0) }
     }
 
     private static func encodeMessage(_ message: ProviderMessage) -> [String: Any] {

@@ -13,6 +13,14 @@ struct AgentLoop: Sendable {
     /// simply continue. Pass nil to remove the ceiling entirely.
     var maxSteps: Int? = 100
 
+    /// Ceiling on the tool output kept inside one run, in characters (~40k tokens).
+    ///
+    /// A run can call tools a hundred times; without a ceiling the accumulated tool
+    /// results alone outgrow the window and the next step fails with a context
+    /// overflow. Old results are stubbed rather than dropped, so the model still knows
+    /// a call happened and what it returned at a glance.
+    var runOutputBudget: Int = 160_000
+
     enum Event: Sendable {
         /// One model request begins. Everything after it belongs to a new step, which the
         /// UI shows as its own message: reasoning, tools and text per step.
@@ -20,8 +28,22 @@ struct AgentLoop: Sendable {
         case delta(String)
         case reasoning(String)
         case toolStarted(name: String, summary: String)
-        case toolFinished(name: String, summary: String, isError: Bool, imagePath: String?)
+        /// Carries the call id, arguments and output as well: the transcript stores them
+        /// so the next request can replay the work instead of pretending it never
+        /// happened.
+        case toolFinished(
+            callID: String,
+            name: String,
+            arguments: String,
+            summary: String,
+            output: String,
+            isError: Bool,
+            imagePath: String?
+        )
         case usage(promptTokens: Int, cacheHit: Int, cacheMiss: Int)
+        /// The provider cut the answer off at the output ceiling. Carries the reason so
+        /// the UI can say "truncated" instead of silently showing half a sentence.
+        case truncated(reason: String)
         case completed
     }
 
@@ -34,6 +56,9 @@ struct AgentLoop: Sendable {
 
                     var step = 0
                     var loopGuard = LoopGuard()
+                    /// Every tool message index in this run, oldest first, so the output
+                    /// budget can stub from the front.
+                    var toolMessageIndices: [Int] = []
                     while true {
                         if Task.isCancelled { break }
 
@@ -42,6 +67,7 @@ struct AgentLoop: Sendable {
                         var streamedText = ""
                         var streamedReasoning = ""
                         var calls: [ToolCall] = []
+                        var finishReason: String?
 
                         let stream = client.stream(
                             provider: provider,
@@ -67,12 +93,22 @@ struct AgentLoop: Sendable {
                                     cacheHit: cacheHit,
                                     cacheMiss: cacheMiss
                                 ))
-                            case .finished:
-                                break
+                            case .finished(let reason):
+                                finishReason = reason
                             }
                         }
 
                         if Task.isCancelled { break }
+
+                        // A truncated answer is not a finished answer. Continuing with
+                        // a new step here is exactly how "it starts over from the top"
+                        // happens: the model never saw the end of its own text.
+                        if let finishReason, Self.isTruncation(finishReason) {
+                            continuation.yield(.truncated(reason: finishReason))
+                            continuation.yield(.completed)
+                            continuation.finish()
+                            return
+                        }
 
                         if calls.isEmpty {
                             continuation.yield(.completed)
@@ -99,8 +135,11 @@ struct AgentLoop: Sendable {
                             let imagePath = Self.imagePath(from: result.output)
 
                             continuation.yield(.toolFinished(
+                                callID: call.id,
                                 name: call.name,
+                                arguments: call.arguments,
                                 summary: result.isError ? Self.firstLine(result.output) : summary,
+                                output: result.output,
                                 isError: result.isError,
                                 imagePath: imagePath
                             ))
@@ -111,7 +150,10 @@ struct AgentLoop: Sendable {
                                 toolCallID: call.id
                             )
                             messages.append(toolMessage)
+                            toolMessageIndices.append(messages.count - 1)
                         }
+
+                        Self.trimRunOutput(&messages, toolIndices: toolMessageIndices, budget: runOutputBudget)
 
                         // Progress-aware anti-loop: same calls returning the same
                         // results means we are stuck, not that we are working.
@@ -121,7 +163,9 @@ struct AgentLoop: Sendable {
                         )
                         if stuck {
                             continuation.yield(.delta(
-                                "\n\n_Остановился: одни и те же вызовы дают тот же результат — дальше без изменений не продвинусь._"
+                                "\n\n_Остановился: повторяю одни и те же вызовы и получаю тот же результат — "
+                                + "дальше без изменений не продвинусь. Скажи, что поменять в подходе, "
+                                + "и я продолжу с этого места._"
                             ))
                             break
                         }
@@ -150,6 +194,35 @@ struct AgentLoop: Sendable {
                 task.cancel()
             }
         }
+    }
+
+    /// Stubs the oldest tool results once the run's output exceeds the budget.
+    /// The most recent results are what the model actually needs to continue.
+    static func trimRunOutput(
+        _ messages: inout [ProviderMessage],
+        toolIndices: [Int],
+        budget: Int
+    ) {
+        guard budget > 0 else { return }
+
+        var total = messages.reduce(0) { $0 + ($1.role == .tool ? $1.content.count : 0) }
+        guard total > budget else { return }
+
+        for index in toolIndices {
+            guard index < messages.count, messages[index].role == .tool else { continue }
+            let content = messages[index].content
+            guard content.count > 200 else { continue }
+            let stub = "[ранний вывод этого вызова убран, чтобы уложиться в окно]"
+            total -= content.count - stub.count
+            messages[index].content = stub
+            if total <= budget { break }
+        }
+    }
+
+    /// Reasons that mean "the output was cut", not "the model stopped".
+    static func isTruncation(_ reason: String) -> Bool {
+        let value = reason.lowercased()
+        return value == "length" || value == "max_tokens" || value == "content_filter"
     }
 
     private static func summary(for call: ToolCall) -> String {

@@ -6,6 +6,7 @@ struct StoredMessage: Sendable {
     let role: String
     let text: String
     let reasoning: String?
+    let exchanges: [ToolExchange]
     let createdAt: String
 }
 
@@ -16,15 +17,57 @@ actor ChatHistoryService {
         self.database = database
     }
 
-    func append(role: ChatMessage.Role, text: String, reasoning: String?) throws {
+    func append(
+        role: ChatMessage.Role,
+        text: String,
+        reasoning: String?,
+        exchanges: [ToolExchange] = []
+    ) throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || reasoning != nil else { return }
+        guard !trimmed.isEmpty || reasoning != nil || !exchanges.isEmpty else { return }
 
         try database.queue.write { db in
             try db.execute(sql: """
-                INSERT INTO messages (role, text, reasoning, created_at)
-                VALUES (?, ?, ?, ?)
-                """, arguments: [role.rawValue, text, reasoning, Timestamps.now()])
+                INSERT INTO messages (role, text, reasoning, exchanges, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """, arguments: [
+                role.rawValue,
+                text,
+                reasoning,
+                Self.encodeExchanges(exchanges),
+                Timestamps.now()
+            ])
+        }
+    }
+
+    static func encodeExchanges(_ exchanges: [ToolExchange]) -> String? {
+        guard !exchanges.isEmpty else { return nil }
+        struct Row: Encodable {
+            let callID: String
+            let name: String
+            let arguments: String
+            let output: String
+            let isError: Bool
+        }
+        let rows = exchanges.map {
+            Row(callID: $0.callID, name: $0.name, arguments: $0.arguments, output: $0.output, isError: $0.isError)
+        }
+        guard let data = try? JSONEncoder().encode(rows) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decodeExchanges(_ raw: String?) -> [ToolExchange] {
+        guard let raw, let data = raw.data(using: .utf8) else { return [] }
+        struct Row: Decodable {
+            let callID: String
+            let name: String
+            let arguments: String
+            let output: String
+            let isError: Bool
+        }
+        guard let rows = try? JSONDecoder().decode([Row].self, from: data) else { return [] }
+        return rows.map {
+            ToolExchange(callID: $0.callID, name: $0.name, arguments: $0.arguments, output: $0.output, isError: $0.isError)
         }
     }
 
@@ -52,7 +95,7 @@ actor ChatHistoryService {
             let rows: [Row]
             if let id {
                 rows = try Row.fetchAll(db, sql: """
-                    SELECT id, role, text, reasoning, created_at
+                    SELECT id, role, text, reasoning, exchanges, created_at
                     FROM messages
                     WHERE id < ?
                     ORDER BY id DESC
@@ -60,7 +103,7 @@ actor ChatHistoryService {
                     """, arguments: [id, limit])
             } else {
                 rows = try Row.fetchAll(db, sql: """
-                    SELECT id, role, text, reasoning, created_at
+                    SELECT id, role, text, reasoning, exchanges, created_at
                     FROM messages
                     ORDER BY id DESC
                     LIMIT ?
@@ -72,6 +115,7 @@ actor ChatHistoryService {
                     role: $0["role"],
                     text: $0["text"],
                     reasoning: $0["reasoning"],
+                    exchanges: Self.decodeExchanges($0["exchanges"]),
                     createdAt: $0["created_at"]
                 )
             }

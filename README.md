@@ -18,7 +18,7 @@
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2027%2B-black?style=flat-square)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange?style=flat-square)](https://swift.org)
-[![Tests](https://img.shields.io/badge/tests-148%20green-brightgreen?style=flat-square)](#тесты)
+[![Tests](https://img.shields.io/badge/tests-188%20green-brightgreen?style=flat-square)](#тесты)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
 ![Отладка сборки: нашёл причину, поправил, прогнал тесты](DOCS/screenshots/code.png)
@@ -216,7 +216,7 @@ Services/     хранилище, провайдеры, память, эмбед
               индексатор, планировщик, безопасность файлов, история
 Storage/      схема SQLite и миграции v1–v8 (GRDB)
 Models/       доменные модели и ChatStore
-Tests/        144 теста, включая живой SSE-сервер и MCP
+Tests/        188 тестов, включая живой SSE-сервер и MCP
 ```
 
 ### Модель данных
@@ -330,7 +330,7 @@ HARNES_S_DATA/
 
 ### Тесты
 
-144 теста: SSE-клиент на локальном сервере (дельты, reasoning, tool_calls, ошибки), кодирование запроса с температурой провайдера, применение патчей, определение проекта, рендер дерева, защиты агента, профиль стиля, консолидация памяти, планировщик, MCP handshake с живыми серверами, локальный ONNX-эмбеддер, докачка модели (размеры, частичная загрузка, живой download по флагу), скиллы (парсер frontmatter, установка, чтение, индекс промпта, группировка), компакция (пачки, шаблон саммари, хвост по токенам, распознавание отказа по длине контекста).
+188 тестов: SSE-клиент на локальном сервере (дельты, reasoning, tool_calls, ошибки), кодирование запроса с температурой провайдера, применение патчей, определение проекта, рендер дерева, защиты агента, профиль стиля, консолидация памяти, планировщик, MCP handshake с живыми серверами, локальный ONNX-эмбеддер, докачка модели (размеры, частичная загрузка, живой download по флагу), скиллы (парсер frontmatter, установка, чтение, индекс промпта, группировка), компакция (пачки, шаблон саммари, хвост по токенам, распознавание отказа по длине контекста).
 
 ```bash
 xcodebuild -project Harness.xcodeproj -scheme Harness -destination 'platform=macOS' test

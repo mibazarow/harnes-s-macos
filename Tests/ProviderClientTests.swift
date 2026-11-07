@@ -48,6 +48,51 @@ final class ProviderClientTests: XCTestCase {
         XCTAssertEqual(json["temperature"] as? Double, 0.9)
     }
 
+    func testEncodeRequestCarriesAntiRepetitionPenalties() throws {
+        let sampling = SamplingOptions(temperature: 0.2, maxTokens: 8_192)
+        let data = try ProviderClient.encodeRequest(
+            model: "m",
+            messages: [ProviderMessage(role: .user, content: "x")],
+            reasoning: .off,
+            sampling: sampling
+        )
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(json["presence_penalty"] as? Double, 0.2)
+        XCTAssertEqual(json["frequency_penalty"] as? Double, 0.15)
+        XCTAssertEqual(json["max_tokens"] as? Int, 8_192)
+    }
+
+    func testMinimalSamplingDropsPenaltiesButKeepsTemperature() throws {
+        let full = SamplingOptions(temperature: 0.2, maxTokens: 8_192)
+        let minimal = full.minimal
+        XCTAssertNil(minimal.presencePenalty)
+        XCTAssertNil(minimal.frequencyPenalty)
+        XCTAssertEqual(minimal.temperature, 0.2)
+        XCTAssertEqual(minimal.maxTokens, 8_192)
+
+        let data = try ProviderClient.encodeRequest(
+            model: "m",
+            messages: [ProviderMessage(role: .user, content: "x")],
+            reasoning: .off,
+            sampling: minimal
+        )
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNil(json["presence_penalty"])
+        XCTAssertNil(json["frequency_penalty"])
+    }
+
+    func testUnsupportedParameterDetection() {
+        XCTAssertTrue(ProviderClient.rejectsSamplingFields(
+            "{\"error\":{\"message\":\"Unrecognized request argument supplied: presence_penalty\"}}"
+        ))
+        XCTAssertTrue(ProviderClient.rejectsSamplingFields(
+            "Unsupported parameter: 'max_tokens' is not supported with this model."
+        ))
+        XCTAssertFalse(ProviderClient.rejectsSamplingFields(
+            "{\"error\":{\"message\":\"Incorrect API key provided\"}}"
+        ))
+    }
+
     func testEncodeRequestOmitsReasoningWhenOff() throws {
         let data = try ProviderClient.encodeRequest(
             model: "m",

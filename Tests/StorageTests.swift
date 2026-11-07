@@ -232,6 +232,46 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(mode?.lowercased(), "wal")
     }
 
+    func testToolExchangesSurviveARestart() async throws {
+        let database = try AppDatabase()
+        let history = ChatHistoryService(database: database)
+
+        let exchange = ToolExchange(
+            callID: "call-1",
+            name: "fs_read",
+            arguments: "{\"path\":\"/tmp/a.swift\"}",
+            output: "let x = 1",
+            isError: false
+        )
+        try await history.append(
+            role: .assistant,
+            text: "Прочитал файл.",
+            reasoning: "Сначала посмотрю содержимое",
+            exchanges: [exchange]
+        )
+
+        let stored = try await history.recent()
+        let message = try XCTUnwrap(stored.last)
+        XCTAssertEqual(message.exchanges.count, 1)
+        XCTAssertEqual(message.exchanges[0].callID, "call-1")
+        XCTAssertEqual(message.exchanges[0].name, "fs_read")
+        XCTAssertEqual(message.exchanges[0].output, "let x = 1")
+        XCTAssertFalse(message.exchanges[0].isError)
+    }
+
+    func testLongToolOutputIsClippedInHistory() {
+        let long = String(repeating: "x", count: 20_000)
+        let exchange = ToolExchange(
+            callID: "c",
+            name: "bash",
+            arguments: "{}",
+            output: long,
+            isError: false
+        )
+        XCTAssertLessThan(exchange.output.count, ToolExchange.historyOutputLimit + 100)
+        XCTAssertTrue(exchange.output.contains("обрезано"))
+    }
+
     func testTodosPersistAndClear() async throws {
         let database = try AppDatabase()
         let todos = TodoStore(database: database)
