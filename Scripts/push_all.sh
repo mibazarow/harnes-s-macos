@@ -2,7 +2,7 @@
 # Pushes the current branch to every mirror at once.
 #
 #   origin  — Gitverse (git@gitverse.ru:mibazarow/harnes-s-macos.git)
-#   github  — GitHub   (https://github.com/mibazarow/harbes-s-macos.git)
+#   github  — GitHub   (https://github.com/mibazarow/harnes-s-macos.git)
 #
 # Both run in parallel; the script fails if either side fails, so a half-pushed
 # state is loud instead of silent. The GitHub token comes from

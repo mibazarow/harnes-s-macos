@@ -148,7 +148,7 @@ Swift 6 и SwiftUI, без Electron, без Node.js и npm в рантайме. 
 
 ```bash
 git clone git@gitverse.ru:mibazarow/harnes-s-macos.git
-# зеркало: https://github.com/mibazarow/harbes-s-macos
+# зеркало: https://github.com/mibazarow/harnes-s-macos
 cd harnes-s-macos
 xcodegen generate
 xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Debug -derivedDataPath .build build

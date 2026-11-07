@@ -9,7 +9,7 @@ The repo has two mirrors and they must stay identical:
 | remote | URL |
 |---|---|
 | `origin` | `git@gitverse.ru:mibazarow/harnes-s-macos.git` |
-| `github` | `https://github.com/mibazarow/harbes-s-macos.git` |
+| `github` | `https://github.com/mibazarow/harnes-s-macos.git` |
 
 When the user asks to push, push to **both, in parallel**:
 
