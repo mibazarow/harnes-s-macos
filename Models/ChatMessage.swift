@@ -145,7 +145,7 @@ struct ToolTrace: Identifiable, Sendable, Equatable {
     }
 }
 
-struct ChatMessage: Identifiable, Sendable {
+struct ChatMessage: Identifiable, Sendable, Equatable {
     enum Role: String, Sendable {
         case user
         case assistant

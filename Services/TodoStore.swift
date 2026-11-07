@@ -83,13 +83,6 @@ final class TodoStore: @unchecked Sendable {
 
         try? database.queue.write { db in
             try db.execute(sql: """
-                CREATE TABLE IF NOT EXISTS todos (
-                    id         INTEGER PRIMARY KEY CHECK (id = 1),
-                    payload    TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                """)
-            try db.execute(sql: """
                 INSERT INTO todos (id, payload, updated_at) VALUES (1, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at
                 """, arguments: [payload, Timestamps.now()])

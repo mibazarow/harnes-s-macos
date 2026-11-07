@@ -8,9 +8,14 @@ final class AppDatabase: Sendable {
         try AppPaths.ensureDirectory(path.deletingLastPathComponent())
 
         var configuration = Configuration()
+        // WAL: without it every write transaction creates and deletes a journal file.
+        // The indexer writes thousands of small transactions per project, and this is
+        // the difference between ~0.2 ms and ~0.01 ms per commit.
+        configuration.journalMode = .wal
+        configuration.busyMode = .timeout(5)
         configuration.prepareDatabase { db in
             try db.execute(sql: "PRAGMA foreign_keys = ON")
-            try db.execute(sql: "PRAGMA busy_timeout = 5000")
+            try db.execute(sql: "PRAGMA synchronous = NORMAL")
         }
 
         let queue = try DatabaseQueue(path: path.path, configuration: configuration)
@@ -216,6 +221,53 @@ final class AppDatabase: Sendable {
                     ADD COLUMN temperature REAL NOT NULL DEFAULT 0.2;
                     """)
             }
+        }
+
+        migrator.registerMigration("v9_indexes_and_lazy_tables") { db in
+            // The embedding cache is looked up by (kind, text hash) for every chunk on
+            // every re-index. The primary key starts with ref_kind and cannot serve the
+            // hash, so without this the lookup scans every vector of that kind.
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_embeddings_hash
+                    ON embeddings(ref_kind, text_hash);
+                """)
+
+            // `file_versions` is queried by path on every `file_versions` tool call.
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_versions_path
+                    ON file_versions(path, id DESC);
+                """)
+
+            // The system prompt is built on every turn with this exact ordering.
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_memory_pin_id
+                    ON memory(pinned DESC, id ASC);
+                """)
+
+            // Every history query orders by id; nothing reads created_at.
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_messages_created;")
+
+            // These two used to be created lazily inside write transactions, which put a
+            // schema change on the hot path of every todo save.
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS schedules (
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title            TEXT NOT NULL,
+                    prompt           TEXT NOT NULL,
+                    interval_minutes INTEGER NOT NULL,
+                    last_run_at      TEXT,
+                    next_run_at      TEXT NOT NULL,
+                    enabled          INTEGER NOT NULL DEFAULT 1,
+                    last_result      TEXT
+                );
+                """)
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS todos (
+                    id         INTEGER PRIMARY KEY CHECK (id = 1),
+                    payload    TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                """)
         }
 
         return migrator

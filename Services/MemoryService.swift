@@ -79,6 +79,76 @@ actor MemoryService {
         )
     }
 
+    /// One chunk of an indexed file.
+    struct IndexedChunk: Sendable, Equatable {
+        let text: String
+        let hash: String
+    }
+
+    /// Replaces the indexed chunks of one file in a single transaction.
+    ///
+    /// Unchanged chunks keep their row, so their vector is reused and nothing is
+    /// re-embedded. Chunks that no longer exist in the file are deleted together with
+    /// their vectors — otherwise an edited file would keep answering searches with the
+    /// code it used to contain. Returns one id per incoming chunk, in the same order.
+    @discardableResult
+    func syncChunks(source: String, chunks: [IndexedChunk], tags: [String]) throws -> [Int64] {
+        guard !chunks.isEmpty else { return [] }
+        let now = Timestamps.now()
+        let tagsJSON = String(data: try JSONEncoder().encode(tags), encoding: .utf8) ?? "[]"
+        let hashes = Set(chunks.map(\.hash))
+
+        return try database.queue.write { db in
+            let existing = try Row.fetchAll(
+                db,
+                sql: "SELECT id, content_hash FROM memory WHERE scope = 'workspace' AND source = ?",
+                arguments: [source]
+            )
+
+            var byHash: [String: Int64] = [:]
+            var stale: [Int64] = []
+            for row in existing {
+                let id: Int64 = row["id"]
+                let hash: String? = row["content_hash"]
+                if let hash, hashes.contains(hash), byHash[hash] == nil {
+                    byHash[hash] = id
+                } else {
+                    stale.append(id)
+                }
+            }
+
+            if !stale.isEmpty {
+                let placeholders = Array(repeating: "?", count: stale.count).joined(separator: ",")
+                let arguments = StatementArguments(stale)
+                try db.execute(
+                    sql: "DELETE FROM memory WHERE id IN (\(placeholders))",
+                    arguments: arguments
+                )
+                try db.execute(
+                    sql: "DELETE FROM embeddings WHERE ref_kind = 'memory' AND ref_id IN (\(placeholders))",
+                    arguments: StatementArguments(stale.map(String.init))
+                )
+            }
+
+            var ids: [Int64] = []
+            ids.reserveCapacity(chunks.count)
+            for chunk in chunks {
+                if let id = byHash[chunk.hash] {
+                    ids.append(id)
+                    continue
+                }
+                try db.execute(sql: """
+                    INSERT INTO memory (scope, content, kind, tags, source, pinned, content_hash, created_at, updated_at)
+                    VALUES ('workspace', ?, 'code', ?, ?, 0, ?, ?, ?)
+                    """, arguments: [chunk.text, tagsJSON, source, chunk.hash, now, now])
+                let id = db.lastInsertedRowID
+                byHash[chunk.hash] = id
+                ids.append(id)
+            }
+            return ids
+        }
+    }
+
     func list(limit: Int = 100) throws -> [MemoryItem] {
         try database.queue.read { db in
             try Row.fetchAll(db, sql: """

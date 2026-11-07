@@ -151,6 +151,87 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(after, before)
     }
 
+    func testSyncChunksDropsStaleAndKeepsUnchangedRows() async throws {
+        let database = try AppDatabase()
+        let memory = MemoryService(database: database)
+        let embeddings = EmbeddingsService(database: database)
+
+        let first = MemoryService.IndexedChunk(text: "func alpha() { return 1 }", hash: "h-alpha")
+        let second = MemoryService.IndexedChunk(text: "func beta() { return 2 }", hash: "h-beta")
+        let ids = try await memory.syncChunks(source: "/p/a.swift", chunks: [first, second], tags: ["a.swift"])
+        XCTAssertEqual(ids.count, 2)
+
+        try await embeddings.store(
+            refKind: "memory",
+            refID: String(ids[0]),
+            vector: EmbeddingsService.Vector(values: [1, 0, 0], model: "test"),
+            textHash: first.hash
+        )
+
+        // The file changed: the first chunk stayed, the second was replaced by a third.
+        let third = MemoryService.IndexedChunk(text: "func gamma() { return 3 }", hash: "h-gamma")
+        let newIDs = try await memory.syncChunks(source: "/p/a.swift", chunks: [first, third], tags: ["a.swift"])
+        XCTAssertEqual(newIDs.count, 2)
+        XCTAssertEqual(newIDs[0], ids[0], "unchanged chunk must keep its row and vector")
+
+        let all = try await memory.list(limit: 50)
+        XCTAssertEqual(all.count, 2)
+        XCTAssertTrue(all.contains { $0.content.contains("alpha") })
+        XCTAssertTrue(all.contains { $0.content.contains("gamma") })
+        XCTAssertFalse(all.contains { $0.content.contains("beta") }, "stale chunk must be deleted")
+
+        // The vector of the deleted chunk is gone; the kept one survived.
+        let keptVector = try await embeddings.vector(refKind: "memory", textHash: first.hash)
+        XCTAssertNotNil(keptVector)
+        let goneVector = try await embeddings.vector(refKind: "memory", textHash: second.hash)
+        XCTAssertNil(goneVector)
+    }
+
+    func testSyncChunksDoesNotFuzzyMergeAcrossFiles() async throws {
+        let database = try AppDatabase()
+        let memory = MemoryService(database: database)
+
+        let boilerplate = MemoryService.IndexedChunk(
+            text: "<?php namespace App; use Bitrix\\Main\\Loader; Loader::includeModule('iblock');",
+            hash: "h-one"
+        )
+        let sameText = MemoryService.IndexedChunk(
+            text: "<?php namespace App; use Bitrix\\Main\\Loader; Loader::includeModule('iblock');",
+            hash: "h-two"
+        )
+        try await memory.syncChunks(source: "/p/a.php", chunks: [boilerplate], tags: ["a.php"])
+        try await memory.syncChunks(source: "/p/b.php", chunks: [sameText], tags: ["b.php"])
+
+        let all = try await memory.list(limit: 50)
+        XCTAssertEqual(all.count, 2, "identical code in two files must stay two rows")
+    }
+
+    func testSchemaHasQueryIndexes() throws {
+        let database = try AppDatabase()
+        let names = try database.queue.read { db in
+            try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index'")
+        }
+        XCTAssertTrue(names.contains("idx_embeddings_hash"))
+        XCTAssertTrue(names.contains("idx_versions_path"))
+        XCTAssertTrue(names.contains("idx_memory_pin_id"))
+        XCTAssertFalse(names.contains("idx_messages_created"), "unused index must be dropped")
+        XCTAssertTrue(try database.queue.read { db in try db.tableExists("schedules") })
+        XCTAssertTrue(try database.queue.read { db in try db.tableExists("todos") })
+    }
+
+    func testFileDatabaseUsesWAL() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wal-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+
+        let database = try AppDatabase(path: directory.appendingPathComponent("test.db"))
+        let mode = try database.queue.read { db in
+            try String.fetchOne(db, sql: "PRAGMA journal_mode")
+        }
+        XCTAssertEqual(mode?.lowercased(), "wal")
+    }
+
     func testChunksOverlapAndBreakOnBoundaries() {
         let line = String(repeating: "abcdefghij ", count: 40) + "\n"
         let text = String(repeating: line, count: 6)

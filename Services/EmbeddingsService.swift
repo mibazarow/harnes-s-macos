@@ -104,6 +104,71 @@ actor EmbeddingsService {
         }
     }
 
+    /// Vectors already computed for these text hashes, keyed by hash. One query per
+    /// batch instead of one per chunk: the indexer asks about every chunk of a file.
+    func vectors(refKind: String, textHashes: [String]) throws -> [String: Vector] {
+        guard !textHashes.isEmpty else { return [:] }
+        var result: [String: Vector] = [:]
+        result.reserveCapacity(textHashes.count)
+
+        // SQLite limits the number of bound variables per statement.
+        let batchSize = 400
+        var start = 0
+        while start < textHashes.count {
+            let slice = Array(textHashes[start..<min(start + batchSize, textHashes.count)])
+            start += batchSize
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            try database.queue.read { db in
+                let rows = try Row.fetchAll(
+                    db,
+                    sql: """
+                        SELECT text_hash, model, vector FROM embeddings
+                        WHERE ref_kind = ? AND text_hash IN (\(placeholders))
+                        """,
+                    arguments: StatementArguments([refKind] + slice)
+                )
+                for row in rows {
+                    guard let hash: String = row["text_hash"] else { continue }
+                    guard result[hash] == nil else { continue }
+                    let blob: Data = row["vector"]
+                    guard let values = Self.decode(blob) else { continue }
+                    result[hash] = Vector(values: values, model: row["model"])
+                }
+            }
+        }
+        return result
+    }
+
+    /// Stores many vectors in one transaction. Same semantics as `store`, batched.
+    func storeBatch(
+        refKind: String,
+        items: [(refID: String, vector: Vector, textHash: String)]
+    ) throws {
+        guard !items.isEmpty else { return }
+        let now = Timestamps.now()
+        try database.queue.write { db in
+            for item in items {
+                try db.execute(sql: """
+                    INSERT INTO embeddings (ref_kind, ref_id, model, dim, vector, text_hash, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(ref_kind, ref_id, model) DO UPDATE SET
+                        dim = excluded.dim,
+                        vector = excluded.vector,
+                        text_hash = excluded.text_hash,
+                        updated_at = excluded.updated_at
+                    """, arguments: [
+                    refKind,
+                    item.refID,
+                    item.vector.model,
+                    item.vector.values.count,
+                    Self.encode(item.vector.values),
+                    item.textHash,
+                    now
+                ])
+            }
+        }
+    }
+
     /// Top matches by cosine similarity. Dot products run through vDSP and rows are
     /// streamed, so nothing is materialized as a dictionary of vectors.
     func bestMatches(refKind: String, query: [Float], limit: Int) throws -> [(refID: String, score: Double)] {

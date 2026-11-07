@@ -20,7 +20,13 @@ struct TranscriptView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                // A plain stack, not LazyVStack: the lazy container drops all of its
+                // children when the transcript is trimmed from the front or the tail
+                // message grows, and the window goes blank until a manual scroll. The
+                // view holds at most `ChatStore.transcriptCap` messages, so laying them
+                // out eagerly is affordable — and unchanged rows are skipped by
+                // `equatable()`.
+                VStack(alignment: .leading, spacing: 10) {
                     if chat.isLoadingOlder || loadingOlder {
                         HStack(spacing: 8) {
                             ProgressView()
@@ -40,6 +46,7 @@ struct TranscriptView: View {
                             fontSize: fontSize,
                             showTimestamp: showTimestamps
                         )
+                        .equatable()
                         .id(message.id)
                     }
 
@@ -52,6 +59,7 @@ struct TranscriptView: View {
                             fontSize: fontSize,
                             showTimestamp: showTimestamps
                         )
+                        .equatable()
                         .id(message.id)
                         .opacity(0.85)
                     }

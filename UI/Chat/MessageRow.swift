@@ -1,11 +1,21 @@
 import AppKit
 import SwiftUI
 
-struct MessageRow: View {
+struct MessageRow: View, Equatable {
     let message: ChatMessage
     let palette: Palette
     let fontSize: CGFloat
     let showTimestamp: Bool
+
+    /// Rows that did not change must not re-render while another row streams: with a
+    /// plain stack this is what keeps a long transcript from re-parsing every message
+    /// on every token.
+    nonisolated static func == (lhs: MessageRow, rhs: MessageRow) -> Bool {
+        lhs.message == rhs.message
+            && lhs.palette == rhs.palette
+            && lhs.fontSize == rhs.fontSize
+            && lhs.showTimestamp == rhs.showTimestamp
+    }
 
     private var isUser: Bool { message.role == .user }
 

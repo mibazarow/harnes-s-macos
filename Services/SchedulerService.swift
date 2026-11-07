@@ -25,22 +25,8 @@ final class SchedulerService: @unchecked Sendable {
         self.database = database
     }
 
-    func bootstrap() throws {
-        try database.queue.write { db in
-            try db.execute(sql: """
-                CREATE TABLE IF NOT EXISTS schedules (
-                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title            TEXT NOT NULL,
-                    prompt           TEXT NOT NULL,
-                    interval_minutes INTEGER NOT NULL,
-                    last_run_at      TEXT,
-                    next_run_at      TEXT NOT NULL,
-                    enabled          INTEGER NOT NULL DEFAULT 1,
-                    last_result      TEXT
-                );
-                """)
-        }
-    }
+    /// Tables come from the v9 migration; nothing to create at runtime.
+    func bootstrap() throws {}
 
     func list() throws -> [ScheduledTask] {
         try database.queue.read { db in

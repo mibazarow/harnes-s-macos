@@ -85,52 +85,40 @@ actor WorkspaceIndexer {
                     continue
                 }
 
-                // Identical chunks reuse their existing vector; only new text costs a
-                // model pass, and those go in one batch.
-                var vectors: [EmbeddingsService.Vector?] = []
-                var pending: [Int] = []
-                var pendingTexts: [String] = []
-                var hashes: [String] = []
+                let hashes = chunks.map(MemoryService.hash)
 
-                for (index, chunk) in chunks.enumerated() {
-                    let hash = MemoryService.hash(chunk)
-                    hashes.append(hash)
-                    if let existing = try? await embeddings.vector(refKind: "memory", textHash: hash) {
-                        vectors.append(existing)
-                    } else {
-                        vectors.append(nil)
-                        pending.append(index)
-                        pendingTexts.append(chunk)
+                // One query for the whole file: which chunks already have a vector.
+                // Only genuinely new text goes through the model, in one batch.
+                var vectors = (try? await embeddings.vectors(
+                    refKind: "memory",
+                    textHashes: hashes
+                )) ?? [:]
+
+                let missing = chunks.indices.filter { vectors[hashes[$0]] == nil }
+                if !missing.isEmpty {
+                    let computed = try await embeddings.embed(missing.map { chunks[$0] })
+                    for (offset, index) in missing.enumerated() where offset < computed.count {
+                        vectors[hashes[index]] = computed[offset]
                     }
                 }
 
-                if !pendingTexts.isEmpty {
-                    let computed = try await embeddings.embed(pendingTexts)
-                    for (offset, index) in pending.enumerated() where offset < computed.count {
-                        vectors[index] = computed[offset]
-                    }
-                }
+                // One transaction for the file: unchanged chunks keep their rows and
+                // vectors, vanished chunks are removed so search stops returning old code.
+                let ids = try await memory.syncChunks(
+                    source: file.path,
+                    chunks: zip(chunks, hashes).map { MemoryService.IndexedChunk(text: $0.0, hash: $0.1) },
+                    tags: [file.lastPathComponent]
+                )
 
-                for (index, chunk) in chunks.enumerated() {
-                    let item = try await memory.add(
-                        chunk,
-                        kind: "code",
-                        scope: "workspace",
-                        tags: [file.lastPathComponent],
-                        source: file.path,
-                        contentHash: hashes[index]
-                    )
-
-                    if let vector = vectors[index] {
-                        try? await embeddings.store(
-                            refKind: "memory",
-                            refID: String(item.id),
-                            vector: vector,
-                            textHash: hashes[index]
-                        )
-                    }
-                    progress.chunksIndexed += 1
+                var stores: [(refID: String, vector: EmbeddingsService.Vector, textHash: String)] = []
+                stores.reserveCapacity(ids.count)
+                for (index, id) in ids.enumerated() {
+                    guard index < hashes.count, let vector = vectors[hashes[index]] else { continue }
+                    stores.append((String(id), vector, hashes[index]))
                 }
+                try? await embeddings.storeBatch(refKind: "memory", items: stores)
+
+                progress.chunksIndexed += ids.count
 
                 try record(path: file.path, hash: fileHash)
                 progress.filesIndexed += 1
@@ -179,18 +167,13 @@ actor WorkspaceIndexer {
             }
 
             let chunks = Self.chunk(text, size: chunkSize, overlap: chunkOverlap)
-            for chunk in chunks {
-                // Same path as the embedding case: hash dedup keeps a re-index from
-                // piling up copies of the same chunk.
-                _ = try? await memory.add(
-                    chunk,
-                    kind: "code",
-                    scope: "workspace",
-                    tags: [file.lastPathComponent],
-                    source: file.path,
-                    contentHash: MemoryService.hash(chunk)
-                )
-                progress.chunksIndexed += 1
+            let hashes = chunks.map(MemoryService.hash)
+            if let ids = try? await memory.syncChunks(
+                source: file.path,
+                chunks: zip(chunks, hashes).map { MemoryService.IndexedChunk(text: $0.0, hash: $0.1) },
+                tags: [file.lastPathComponent]
+            ) {
+                progress.chunksIndexed += ids.count
             }
             try? record(path: file.path, hash: fileHash)
             progress.filesIndexed += 1
