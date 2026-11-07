@@ -79,39 +79,88 @@
 
 ---
 
-## 2. Раскладка репозитория
+## 2. Отдельный репозиторий
 
-Порт живёт рядом, а не вместо. Максимально не трогаем macOS-часть.
+Windows-версия — **отдельный репозиторий**, а не папка внутри этого. Общего дерева исходников,
+общего `git` и общих коммитов нет: две независимые кодовые базы, каждая со своими remote.
+
+Это осознанно: macOS-версия рабочая и не должна получать риск от порта, а Windows-версия не должна
+тащить `.xcodeproj`, Swift-модули и macOS-специфику, которую никто не будет поддерживать.
+
+### 2.1 Имена и remote
+
+| | macOS | Windows |
+|---|---|---|
+| репозиторий | `harnes-s-macos` | `harnes-s-windows` |
+| Gitverse | `git@gitverse.ru:mibazarow/harnes-s-macos.git` | `git@gitverse.ru:mibazarow/harnes-s-windows.git` |
+| GitHub | `https://github.com/mibazarow/harnes-s-macos.git` | `https://github.com/mibazarow/harnes-s-windows.git` |
+
+Правило двух зеркал сохраняется: любой пуш идёт в оба remote параллельно (`git pushall`).
+Оба Windows-репозитория создаются пустыми в момент первого пуша.
+
+### 2.2 Раскладка Windows-репозитория
 
 ```
-macOS_AGENT_HARNESS/
-├── App/ UI/ Core/ Services/ Storage/ Models/ Tests/   # как есть, Swift
-├── Harness.xcodeproj
-├── ВОСПРОИЗВОДИМОЕ_ТЕХНИЧЕСКОЕ_ЗАДАНИЕ.md
-├── WINDOWS_PORT.md                                     # этот файл
-├── shared/                                             # контракт, общий для обеих версий
-│   ├── prompts/system.md                               # базовый промпт (текст из §23.2 спецификации)
-│   ├── tools/catalog.json                              # имена + JSON-схемы 46 инструментов
-│   ├── schema/schema.sql                               # эталонная схема БД
-│   └── skills/                                         # те же SKILL.md, что в конфиге
-└── windows/
-    ├── Harness.sln
-    ├── src/
-    │   ├── Harness.App/            # WinUI 3, только UI
-    │   ├── Harness.Core/           # всё остальное, без зависимости от WinUI
-    │   └── Harness.Core.Tests/     # xUnit
-    └── packaging/
-        ├── Harness.Package/        # MSIX
-        └── assets/                 # иконки, шрифт
+harnes-s-windows/
+├── Harness.sln
+├── src/
+│   ├── Harness.App/            # WinUI 3, только UI
+│   ├── Harness.Core/           # всё остальное, без зависимости от WinUI
+│   └── Harness.Core.Tests/     # xUnit
+├── packaging/
+│   ├── Harness.Package/        # MSIX
+│   └── assets/                 # иконки, шрифт Nordwand Mono
+├── docs/
+│   ├── WINDOWS_PORT.md         # этот файл (копия)
+│   ├── CONTRACT.md             # §3–§6: схема БД, папка данных, инструменты
+│   └── screenshots/            # снимки macOS-версии как эталон вида
+├── contract.json               # машинный контракт: инструменты, схемы, версия БД
+├── AGENTS.md
+└── README.md
 ```
 
 Правило: `Harness.Core` не ссылается на `Microsoft.UI.Xaml`. Всё, что нужно UI, приходит через
 модели и события. Это то, что делает ядро тестируемым без окна — и это же главный урок
 существующей кодовой базы.
 
-`shared/` — не обязателен на первом шаге. Пока контракт не стабилен, C# может держать копии, но
-тест `ContractParityTests` обязан сравнивать их с Mac-версией (см. §11). Когда стабилизируется —
-переносим тексты в `shared/` и читаем из обоих приложений.
+### 2.3 Как завести репозиторий
+
+Папка этого проекта копируется на Windows-машину целиком, после чего из неё вычищается всё
+macOS-специфичное. На macOS для этого есть скрипт:
+
+```bash
+Scripts/seed_windows_repo.sh ~/harnes-s-windows
+```
+
+Он собирает чистую папку без Swift-исходников, `Harness.xcodeproj`, `project.yml`, `.build`,
+`DOCS/github-token.md` и без `.git` — то есть готовую к `git init` и первому коммиту.
+
+Внутри неё остаётся:
+
+- `WINDOWS_PORT.md` — инструкция для того, кто будет делать порт;
+- `ВОСПРОИЗВОДИМОЕ_ТЕХНИЧЕСКОЕ_ЗАДАНИЕ.md` — полная спецификация поведения macOS-версии;
+- `DOCS/screenshots/*.png` — эталон внешнего вида;
+- `Resources/Fonts/` — Nordwand Mono;
+- `shared-seed/skills/` — те же `SKILL.md`, что установлены в приложении;
+- `contract.json` — имена, схемы инструментов, версия схемы БД и хеш базового промпта.
+
+Чего в ней нет и почему: Swift-кода (переписывается), `.git` (история другой ветки разработки),
+токенов (у каждой машины свой), `Scripts/` для macOS-сборки.
+
+### 2.4 Как две версии не разъедутся
+
+Общего кода нет, но контракт должен совпадать. Механика — файл `contract.json`:
+
+1. В macOS-приложении есть Debug-команда `--export-contracts`, которая пишет `contract.json`:
+   версия схемы БД, список таблиц и колонок, имена и JSON-схемы 46 инструментов, хеш текста
+   базового промпта, версия формата `mcp.json`.
+2. Файл копируется в Windows-репозиторий и лежит в корне.
+3. В Windows-репозитории тест `ContractParityTests` читает `contract.json` и сверяет с тем, что
+   реально зарегистрировано в `Harness.Core`: набор имён, схемы параметров, версию БД.
+4. При любом изменении контракта на Mac файл перегенерируется и коммитится в Windows-репозиторий
+   отдельным коммитом «sync contract».
+
+Это дешевле общей папки и не связывает две сборки. Расхождение видно на тестах, а не в проде.
 
 ---
 
@@ -487,16 +536,16 @@ stdout/stdin-транспорт, как на Mac, но с двумя систе�
 ### 9.2 Сборка
 
 ```powershell
-dotnet restore windows/Harness.sln
-dotnet build windows/Harness.sln -c Debug
-dotnet test  windows/src/Harness.Core.Tests
-dotnet run   --project windows/src/Harness.App
+dotnet restore Harness.sln
+dotnet build Harness.sln -c Debug
+dotnet test  src/Harness.Core.Tests
+dotnet run   --project src/Harness.App
 ```
 
 Релиз:
 
 ```powershell
-dotnet publish windows/src/Harness.App -c Release -r win-x64 --self-contained `
+dotnet publish src/Harness.App -c Release -r win-x64 --self-contained `
   -p:PublishSingleFile=false -p:WindowsPackageType=MSIX
 ```
 
@@ -528,7 +577,7 @@ dotnet publish windows/src/Harness.App -c Release -r win-x64 --self-contained `
 | Скиллы | парсер frontmatter, установка, индекс, реакция на внешнее удаление |
 | MCP | handshake с живым сервером (по флагу) |
 | Токенизатор | **побайтовое совпадение token id с Mac-версией** |
-| Контракт | имена инструментов и схемы совпадают с `shared/tools/catalog.json` |
+| Контракт | имена и схемы совпадают с `contract.json` |
 
 CI: GitHub Actions `windows-latest`, `dotnet test`, отдельный job на сборку MSIX.
 
@@ -571,13 +620,15 @@ CI: GitHub Actions `windows-latest`, `dotnet test`, отдельный job на 
 ## 13. С чего начать в первый день
 
 1. Поставить VS с WinUI workload, .NET 10, Git, PowerShell 7, Node.
-2. `dotnet new winui3` → пустое окно с заголовком «HARNES-S» и фоном `#0D0D10`.
-3. `Microsoft.Data.Sqlite` + `bundle_e_sqlite3` → создать схему v8 из `Storage/AppDatabase.swift`,
+2. Взять папку, подготовленную `Scripts/seed_windows_repo.sh`, переименовать в `harnes-s-windows`,
+   выполнить `git init`, создать два пустых remote и запушить.
+3. `dotnet new winui3` → пустое окно с заголовком «HARNES-S» и фоном `#0D0D10`.
+4. `Microsoft.Data.Sqlite` + `bundle_e_sqlite3` → создать схему v8 по `docs/CONTRACT.md`,
    прогнать `SELECT` по `memory_fts` (убедиться, что FTS5 есть).
-4. `HttpClient` + `SseParser` → отправить один запрос к своему провайдеру и вывести дельты в
+5. `HttpClient` + `SseParser` → отправить один запрос к своему провайдеру и вывести дельты в
    `TextBlock`.
-5. **Токенизатор**: загрузить `tokenizer.json`, закодировать 100 строк, сравнить с Mac.
-6. Если 5 зелёный — зафиксировать `shared/tools/catalog.json` и идти в M1.
+6. **Токенизатор**: загрузить `tokenizer.json`, закодировать 100 строк, сравнить с Mac.
+7. Если 6 зелёный — импортировать `contract.json` в тесты и идти в M1.
 
 ---
 
