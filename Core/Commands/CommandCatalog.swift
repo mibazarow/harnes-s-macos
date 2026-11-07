@@ -36,7 +36,8 @@ enum CommandCatalog {
             Command(name: "install", summary: "установить скилл", arguments: "<путь|url> [--force]"),
             Command(name: "remove", summary: "удалить пользовательский", arguments: "<имя>"),
             Command(name: "enable", summary: "включить", arguments: "<имя>"),
-            Command(name: "disable", summary: "выключить", arguments: "<имя>")
+            Command(name: "disable", summary: "выключить", arguments: "<имя>"),
+            Command(name: "reload", summary: "перечитать список и системный промпт")
         ]),
         Command(name: "/mcp", summary: "MCP-серверы", subcommands: [
             Command(name: "list", summary: "список серверов"),

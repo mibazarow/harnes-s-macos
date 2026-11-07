@@ -222,7 +222,7 @@ final class SelfConfigTests: XCTestCase {
         XCTAssertFalse(index.contains("- grp-a:"))
     }
 
-    func testSkillIndexIsCachedUntilChange() async throws {
+    func testSkillIndexNoticesChangesMadeOutsideTheService() async throws {
         let root = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -236,15 +236,43 @@ final class SelfConfigTests: XCTestCase {
         let first = await service.promptIndex()
         XCTAssertTrue(first.contains("- cached:"))
 
-        // Added behind the cache's back: the cached index must not change.
+        // Added behind the cache's back, the way a shell command would do it.
         try writeSkill(to: user.appendingPathComponent("late", isDirectory: true), name: "late")
         let second = await service.promptIndex()
-        XCTAssertEqual(first, second)
+        XCTAssertNotEqual(first, second)
+        XCTAssertTrue(second.contains("- late:"))
 
-        // An explicit change through the service invalidates it.
-        try await service.setEnabled(name: "cached", enabled: false)
+        // Deleted behind the cache's back: the endless chat must stop advertising it.
+        try FileManager.default.removeItem(at: user.appendingPathComponent("cached", isDirectory: true))
         let third = await service.promptIndex()
         XCTAssertFalse(third.contains("- cached:"))
+        XCTAssertTrue(third.contains("- late:"))
+
+        // An explicit change through the service still works as before.
+        try await service.setEnabled(name: "late", enabled: false)
+        let fourth = await service.promptIndex()
+        XCTAssertFalse(fourth.contains("- late:"))
+    }
+
+    func testReloadRebuildsIndexAndList() async throws {
+        let root = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let user = root.appendingPathComponent("user", isDirectory: true)
+        try writeSkill(to: user.appendingPathComponent("one", isDirectory: true), name: "one")
+        let service = SkillsService(
+            userDirectory: user,
+            builtinDirectory: root.appendingPathComponent("builtin", isDirectory: true)
+        )
+        let before = await service.list()
+        XCTAssertEqual(before.count, 1)
+
+        try FileManager.default.removeItem(at: user.appendingPathComponent("one", isDirectory: true))
+        await service.reload()
+        let after = await service.list()
+        let index = await service.promptIndex()
+        XCTAssertTrue(after.isEmpty)
+        XCTAssertTrue(index.isEmpty)
     }
 
     func testMCPAddDisableRemove() async throws {

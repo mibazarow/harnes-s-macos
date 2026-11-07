@@ -5,10 +5,13 @@ actor SkillsService {
     private let builtinDirectory: URL?
     private let loader: SkillLoader
     private let importer: SkillImporter
-    /// The index is rebuilt only when the skill set changes; scanning ~120 manifests
-    /// on every request was pure latency before the first token.
+    /// The parsed set is cached, but the cache is checked against a cheap fingerprint
+    /// of the skill folders: scanning ~120 manifests before every first token was pure
+    /// latency, while trusting the cache blindly kept a deleted skill in the system
+    /// prompt until relaunch.
     private var cachedIndex: String?
     private var cachedRecords: [SkillRecord]?
+    private var cachedFingerprint: String?
 
     init(userDirectory: URL = AppPaths.userSkillsDirectory, builtinDirectory: URL? = SkillsService.defaultBuiltinDirectory) {
         self.userDirectory = userDirectory
@@ -22,15 +25,24 @@ actor SkillsService {
     }
 
     func list() -> [SkillRecord] {
-        if let cachedRecords { return cachedRecords }
+        let fingerprint = loader.fingerprint()
+        if let cachedRecords, cachedFingerprint == fingerprint { return cachedRecords }
         let records = loader.loadAll()
         cachedRecords = records
+        cachedFingerprint = fingerprint
+        cachedIndex = nil
         return records
+    }
+
+    /// Drops both caches. The next turn rebuilds the prompt from what is on disk.
+    func reload() {
+        invalidate()
     }
 
     private func invalidate() {
         cachedIndex = nil
         cachedRecords = nil
+        cachedFingerprint = nil
     }
 
     func install(from source: String, force: Bool = false) async throws -> SkillRecord {
@@ -86,9 +98,11 @@ actor SkillsService {
     }
 
     func promptIndex(characterLimit: Int = 8000) -> String {
-        if let cachedIndex { return cachedIndex }
+        let fingerprint = loader.fingerprint()
+        if let cachedIndex, cachedFingerprint == fingerprint { return cachedIndex }
         let index = buildIndex(characterLimit: characterLimit)
         cachedIndex = index
+        cachedFingerprint = fingerprint
         return index
     }
 

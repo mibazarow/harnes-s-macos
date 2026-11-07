@@ -81,6 +81,19 @@ struct SlashCommandRouter: Sendable {
             } catch {
                 return SlashCommandResult(error.localizedDescription, isError: true)
             }
+        case "reload", "refresh":
+            await skills.reload()
+            let records = await skills.list()
+            let enabled = records.filter(\.enabled).count
+            let index = await skills.promptIndex()
+            return SlashCommandResult("""
+            **Список скиллов перечитан.**
+
+            - на диске: \(records.count), включено \(enabled)
+            - в системном промпте: \(index.count) символов
+
+            Следующее сообщение уйдёт уже с новым списком; история при этом не трогается.
+            """)
         case "enable", "disable":
             guard let name = arguments.dropFirst().first else {
                 return SlashCommandResult("Нужно имя: `/skill \(subcommand) <имя>`", isError: true)
@@ -92,7 +105,7 @@ struct SlashCommandRouter: Sendable {
                 return SlashCommandResult(error.localizedDescription, isError: true)
             }
         default:
-            return SlashCommandResult("Неизвестное действие `\(subcommand)`. `/skill list|install|remove|enable|disable`", isError: true)
+            return SlashCommandResult("Неизвестное действие `\(subcommand)`. `/skill list|install|remove|enable|disable|reload`", isError: true)
         }
     }
 

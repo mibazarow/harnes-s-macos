@@ -20,6 +20,41 @@ struct SkillLoader: Sendable {
         return byName.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
+    /// Cheap signature of both skill directories: entry names, their modification
+    /// times, SKILL.md times and the enable/disable markers. The app caches the
+    /// parsed manifests, but a skill can also be deleted from the outside — by the
+    /// agent itself through `bash`, for instance — and that must not leave a stale
+    /// index in the system prompt for the rest of an endless chat.
+    func fingerprint() -> String {
+        var parts: [String] = []
+        for (directory, scope) in [(builtinDirectory, "b"), (userDirectory, "u")] {
+            guard let directory else { continue }
+            let entries = (try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )) ?? []
+
+            for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+                let values = try? entry.resourceValues(
+                    forKeys: [.contentModificationDateKey, .isDirectoryKey]
+                )
+                guard values?.isDirectory == true else { continue }
+                let manifest = entry.appendingPathComponent("SKILL.md")
+                let manifestDate = (try? manifest.resourceValues(
+                    forKeys: [.contentModificationDateKey]
+                ))?.contentModificationDate
+                let disabled = FileManager.default.fileExists(
+                    atPath: entry.appendingPathComponent(".disabled").path
+                )
+                let directoryDate = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
+                let manifestTime = manifestDate?.timeIntervalSince1970 ?? 0
+                parts.append("\(scope):\(entry.lastPathComponent):\(directoryDate):\(manifestTime):\(disabled)")
+            }
+        }
+        return "\(parts.count)|\(parts.joined(separator: ";"))"
+    }
+
     func record(named name: String) -> SkillRecord? {
         let normalized = name.lowercased()
         return loadAll().first { $0.name.lowercased() == normalized }
