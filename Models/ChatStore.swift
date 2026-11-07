@@ -854,7 +854,7 @@ final class ChatStore {
 
         // Keep the in-memory view bounded. Storage keeps everything; a restart restores
         // the tail, so nothing is actually lost.
-        let cap = 2_000
+        let cap = Self.transcriptCap
         if messages.count > cap {
             messages.removeFirst(messages.count - cap)
         }
@@ -870,6 +870,12 @@ final class ChatStore {
             messages[index].attachments = messages[index].attachments.map { $0.released() }
         }
     }
+
+    /// Messages held in the view at once. Storage keeps everything; this is only how
+    /// much the list keeps in memory. Scrolling up pulls older pages.
+    static let transcriptCap = 200
+    /// One page of history, both on launch and on every scroll-up.
+    static let pageSize = 200
 
     var isPlanMode: Bool { planMode }
 
@@ -897,7 +903,7 @@ final class ChatStore {
 
         let stored: [StoredMessage]
         do {
-            stored = try await services.history.recent(limit: 100)
+            stored = try await services.history.recent(limit: Self.pageSize)
         } catch {
             messages.append(ChatMessage(role: .system, text: "История не загрузилась: \(error.localizedDescription)"))
             return
@@ -930,7 +936,7 @@ final class ChatStore {
         defer { isLoadingOlder = false }
 
         do {
-            let stored = try await services.history.older(than: oldestStoredID, limit: 100)
+            let stored = try await services.history.older(than: oldestStoredID, limit: Self.pageSize)
             guard !stored.isEmpty else {
                 hasMoreHistory = false
                 return

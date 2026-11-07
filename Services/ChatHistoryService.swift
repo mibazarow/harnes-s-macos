@@ -28,12 +28,12 @@ actor ChatHistoryService {
         }
     }
 
-    func recent(limit: Int = 100) throws -> [StoredMessage] {
+    func recent(limit: Int = 200) throws -> [StoredMessage] {
         try page(before: nil, limit: limit)
     }
 
     /// A page older than `id`, oldest last. Used for scroll-up pagination.
-    func older(than id: Int64, limit: Int = 100) throws -> [StoredMessage] {
+    func older(than id: Int64, limit: Int = 200) throws -> [StoredMessage] {
         try page(before: id, limit: limit)
     }
 
