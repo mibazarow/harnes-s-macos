@@ -14,7 +14,7 @@
 </tr>
 </table>
 
-**Персональный ИИ-агент для macOS. Один чат, одна память, без привязки к облаку.**
+**Персональный ИИ-агент и чат-ассистент для macOS. Один чат, одна память, ваши файлы.**
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2027%2B-black?style=flat-square)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange?style=flat-square)](https://swift.org)
