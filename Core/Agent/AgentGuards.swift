@@ -24,11 +24,15 @@ struct LoopGuard: Sendable {
     let window: Int
     /// Longest cycle considered. Three covers read→edit→test and its variants.
     let maxPeriod: Int
+    /// Consecutive steps with the same tool but ever-changing arguments before we
+    /// call it thrashing. See `isThrashing` for why arguments alone are not progress.
+    let maxThrashSteps: Int
 
-    init(maxIdenticalIterations: Int = 3, window: Int = 12, maxPeriod: Int = 3) {
+    init(maxIdenticalIterations: Int = 3, window: Int = 12, maxPeriod: Int = 3, maxThrashSteps: Int = 8) {
         self.maxIdenticalIterations = maxIdenticalIterations
         self.window = window
         self.maxPeriod = maxPeriod
+        self.maxThrashSteps = maxThrashSteps
     }
 
     /// Returns true when this iteration is a stuck loop and the caller should stop.
@@ -54,7 +58,55 @@ struct LoopGuard: Sendable {
             let second = Array(tail.suffix(period))
             if first == second { return true }
         }
+
+        if isThrashing { return true }
         return false
+    }
+
+    /// Same tool hammered with slightly different arguments and no result change.
+    ///
+    /// The two checks above compare whole signatures, so they miss the most common
+    /// real failure: the model keeps poking the same tool, tweaking the arguments
+    /// (`sed -n '40,60p'`, then `sed -n '90,110p'`, then `grep -n`) and getting the
+    /// same truncated output back. Formally every step differs, so nothing fires,
+    /// and the run burns the whole step budget going nowhere.
+    ///
+    /// A step counts as thrash when its tool name and its result digest match the
+    /// previous step — the arguments are allowed to differ, that is the point.
+    private var isThrashing: Bool {
+        guard steps.count >= maxThrashSteps else { return false }
+        let tail = Array(steps.suffix(maxThrashSteps))
+        let first = tail[0]
+        // Compare only the "tool + result" part: drop the arguments from the call.
+        let tool = Self.toolName(of: first.call)
+        guard !tool.isEmpty else { return false }
+        let digest = Self.digest(of: first.progress)
+        for step in tail.dropFirst() {
+            if Self.toolName(of: step.call) != tool { return false }
+            if Self.digest(of: step.progress) != digest { return false }
+        }
+        return true
+    }
+
+    /// Tool name from a call signature, dropping the arguments.
+    ///
+    /// Real signatures are `name{json}`; tests and the loop use `name(args)`.
+    /// Both have to be handled, otherwise the tool name never matches and the
+    /// thrash detector silently never fires.
+    private static func toolName(of signature: String) -> String {
+        guard let cut = signature.firstIndex(where: { $0 == "{" || $0 == "(" || $0 == " " }) else {
+            return signature
+        }
+        return String(signature[signature.startIndex..<cut])
+    }
+
+    /// Result digest from a progress signature, dropping the tool name.
+    private static func digest(of signature: String) -> String {
+        guard let hash = signature.firstIndex(of: "#") else { return signature }
+        let afterTool = signature[signature.index(after: hash)...]
+        // The digest is the part after the "name#error#" prefix.
+        guard let second = afterTool.firstIndex(of: "#") else { return String(afterTool) }
+        return String(afterTool[afterTool.index(after: second)...])
     }
 
     static func callSignature(_ calls: [ToolCall]) -> String {

@@ -42,6 +42,10 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
     /// Sampling temperature for this provider. Individual per provider: a chatty
     /// model and a terse one rarely want the same value.
     var temperature: Double
+    /// Price per 1 000 000 tokens, in whatever currency the provider bills in.
+    /// Optional: without it the app simply does not estimate cost.
+    var inputPrice: Double?
+    var outputPrice: Double?
     var isDefault: Bool
     var health: String
     var lastCheckAt: String?
@@ -58,6 +62,8 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
         contextWindow: Int = 128_000,
         reasoningLevel: ReasoningLevel = .off,
         temperature: Double = ProviderModel.defaultTemperature,
+        inputPrice: Double? = nil,
+        outputPrice: Double? = nil,
         isDefault: Bool = false,
         health: String = "unknown",
         lastCheckAt: String? = nil,
@@ -73,6 +79,8 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
         self.contextWindow = contextWindow
         self.reasoningLevel = reasoningLevel
         self.temperature = temperature
+        self.inputPrice = inputPrice
+        self.outputPrice = outputPrice
         self.isDefault = isDefault
         self.health = health
         self.lastCheckAt = lastCheckAt

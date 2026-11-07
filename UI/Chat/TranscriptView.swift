@@ -39,7 +39,7 @@ struct TranscriptView: View {
                         .padding(.vertical, 4)
                     }
 
-                    ForEach(chat.messages) { message in
+                    ForEach(displayed) { message in
                         MessageRow(
                             message: message,
                             palette: palette,
@@ -148,6 +148,12 @@ struct TranscriptView: View {
         } else {
             proxy.scrollTo(bottomID, anchor: .bottom)
         }
+    }
+
+    /// Messages as the transcript shows them: runs of tool-only steps collapsed into
+    /// one bubble. Storage and the model's replay keep every step separate.
+    private var displayed: [ChatMessage] {
+        ChatMessage.groupedForDisplay(chat.messages)
     }
 
     /// Anything that changes the height of the newest message.

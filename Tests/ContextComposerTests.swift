@@ -72,7 +72,7 @@ final class ContextComposerTests: XCTestCase {
 }
 final class CompactionBatchTests: XCTestCase {
     private func message(_ index: Int, tokens: Int) -> ContextMessage {
-        ContextMessage(id: index, role: "user", text: String(repeating: "a", count: tokens * 3))
+        ContextMessage(id: index, role: "user", text: "message \(index)", tokens: tokens)
     }
 
     func testShortHistoryIsOneBatch() {
@@ -104,7 +104,7 @@ final class CompactionBatchTests: XCTestCase {
 
 final class ContextTailTests: XCTestCase {
     private func message(_ id: Int, role: String, tokens: Int) -> ContextMessage {
-        ContextMessage(id: id, role: role, text: String(repeating: "я", count: tokens * 3))
+        ContextMessage(id: id, role: role, text: "message \(id)", tokens: tokens)
     }
 
     func testTailStartsAtUserMessage() {

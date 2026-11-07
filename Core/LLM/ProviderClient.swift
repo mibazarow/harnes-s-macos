@@ -60,7 +60,7 @@ enum ProviderEvent: Sendable {
     case toolCall(ToolCall)
     /// Token accounting from the final chunk. `cacheHit` is the part of the prompt the
     /// provider served from its prefix cache; zero means the cache was missed.
-    case usage(promptTokens: Int, cacheHit: Int, cacheMiss: Int)
+    case usage(promptTokens: Int, completionTokens: Int, cacheHit: Int, cacheMiss: Int)
     case finished(reason: String)
 }
 
@@ -260,6 +260,7 @@ struct ProviderClient: Sendable {
                     if let usage {
                         continuation.yield(.usage(
                             promptTokens: usage.promptTokens ?? 0,
+                            completionTokens: usage.completionTokens ?? 0,
                             cacheHit: usage.cacheHit,
                             cacheMiss: usage.cacheMiss
                         ))
@@ -448,6 +449,7 @@ struct ProviderChunk: Decodable, Sendable {
 
     struct Usage: Decodable, Sendable {
         let promptTokens: Int?
+        let completionTokens: Int?
         let promptCacheHitTokens: Int?
         let promptCacheMissTokens: Int?
         let promptTokensDetails: Details?
@@ -462,6 +464,7 @@ struct ProviderChunk: Decodable, Sendable {
 
         enum CodingKeys: String, CodingKey {
             case promptTokens = "prompt_tokens"
+            case completionTokens = "completion_tokens"
             case promptCacheHitTokens = "prompt_cache_hit_tokens"
             case promptCacheMissTokens = "prompt_cache_miss_tokens"
             case promptTokensDetails = "prompt_tokens_details"

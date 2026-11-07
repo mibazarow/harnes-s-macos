@@ -16,6 +16,7 @@ struct AppServices: Sendable {
     let fileSafety: FileSafetyService
     let todos: TodoStore
     let style: StyleStore
+    let usage: UsageService
     let skills: SkillsService
     let mcp: MCPService
     let mcpManager: MCPManager
@@ -41,6 +42,7 @@ struct AppServices: Sendable {
         self.fileSafety = FileSafetyService(database: database)
         self.todos = TodoStore(database: database)
         self.style = StyleStore(database: database)
+        self.usage = UsageService(database: database)
         self.skills = SkillsService()
         let mcpConfig = MCPService()
         self.mcp = mcpConfig

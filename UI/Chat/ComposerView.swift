@@ -15,6 +15,7 @@ struct ComposerView: View {
     let contextWarning: Bool
     let modelLabel: String?
     let modelWarning: Bool
+    let spent: Double
     let onSend: () -> Void
     let onStop: () -> Void
 
@@ -137,6 +138,12 @@ struct ComposerView: View {
                     if queuedCount > 0 {
                         Text("· в очереди: \(queuedCount)")
                             .foregroundStyle(palette.reasoning)
+                    }
+
+                    if spent > 0 {
+                        Text("· $\(spent.formatted(.number.precision(.fractionLength(2))))")
+                            .foregroundStyle(palette.faint)
+                            .help("Потрачено по текущим ценам провайдера. Считается из usage каждого запроса.")
                     }
 
                     if let modelLabel {

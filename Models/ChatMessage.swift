@@ -233,3 +233,55 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
         self.state = state
     }
 }
+
+extension ChatMessage {
+    /// A step that only called tools: nothing the user reads, only traces.
+    var isToolOnly: Bool {
+        role == .assistant
+            && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !tools.isEmpty
+            && state != .queued
+    }
+
+    /// Collapses runs of tool-only steps into one message for display.
+    ///
+    /// Every model step gets its own message, so ten sequential `bash` calls arrived as
+    /// ten bubbles with a single trace each — the run read as ten unrelated answers.
+    /// They belong together: one run, one list of traces, one timestamp.
+    ///
+    /// This is display only. Storage and the replay sent to the model are untouched:
+    /// the model still sees each step separately, with its own result in between. Merging
+    /// in storage would have turned sequential, dependent calls into one parallel batch,
+    /// which is a different and misleading shape.
+    static func groupedForDisplay(_ messages: [ChatMessage]) -> [ChatMessage] {
+        var result: [ChatMessage] = []
+        var run: ChatMessage?
+
+        for message in messages {
+            guard message.isToolOnly else {
+                if let run { result.append(run) }
+                run = nil
+                result.append(message)
+                continue
+            }
+
+            guard var accumulating = run else {
+                run = message
+                continue
+            }
+
+            accumulating.tools += message.tools
+            if let extra = message.reasoning, !extra.isEmpty {
+                let existing = accumulating.reasoning ?? ""
+                accumulating.reasoning = existing.isEmpty ? extra : existing + "\n\n" + extra
+            }
+            accumulating.warning = accumulating.warning ?? message.warning
+            // The newest state wins: a run still streaming must keep showing as such.
+            accumulating.state = message.state
+            run = accumulating
+        }
+
+        if let run { result.append(run) }
+        return result
+    }
+}

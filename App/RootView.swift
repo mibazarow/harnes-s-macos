@@ -45,6 +45,7 @@ struct RootView: View {
                 contextWarning: plan.isOverThreshold,
                 modelLabel: modelLabel,
                 modelWarning: modelWarning,
+                spent: chat.spent,
                 onSend: send,
                 onStop: chat.stop
             )

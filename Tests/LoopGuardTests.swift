@@ -56,6 +56,31 @@ final class LoopGuardTests: XCTestCase {
         }
     }
 
+    /// Тот самый цикл: один и тот же `bash` с чуть разными аргументами,
+    /// на выходе всё то же обрезанное полотно. Формально каждый вызов
+    /// уникален, поэтому старые проверки молчат, а прогон жрёт весь бюджет.
+    func testThrashingSameToolWithChangingArgsIsStuck() {
+        var guardValue = LoopGuard()
+        let outputs = ["sed -n '118,197p'", "sed -n '44p'", "grep -n Guard"]
+        var fired = false
+        for round in 0..<4 {
+            for (index, _) in outputs.enumerated() {
+                let firedNow = step(&guardValue, "bash(\(outputs[round % 3])\(index))", "bash#0#обрезанный вывод")
+                if firedNow { fired = true }
+            }
+        }
+        XCTAssertTrue(fired, "топтание одним инструментом без смены результата должно ловиться")
+    }
+
+    /// А вот честная работа тем же инструментом: аргументы меняются и
+    /// результат меняется — тут останавливать нельзя.
+    func testSameToolWithRealProgressIsNotStuck() {
+        var guardValue = LoopGuard()
+        for i in 1...12 {
+            XCTAssertFalse(step(&guardValue, "bash(cmd\(i))", "bash#0#вывод\(i)"), "шаг \(i)")
+        }
+    }
+
     func testWindowKeepsMemoryBounded() {
         var guardValue = LoopGuard(window: 4)
         for i in 1...50 {

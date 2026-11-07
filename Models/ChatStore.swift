@@ -196,7 +196,9 @@ final class ChatStore {
         )
         let prepMs = Self.millis(since: prepStart)
         let promptChars = history.reduce(0) { $0 + $1.content.count }
-        Self.logLatency("prep=\(prepMs)ms prompt=\(promptChars)ch messages=\(history.count) model=\(model)")
+        Self.logLatency(
+            "prep_ms=\(prepMs) prompt_chars=\(promptChars) messages=\(history.count) model=\(model)"
+        )
         let loop = AgentLoop(
             provider: provider,
             model: model,
@@ -269,9 +271,28 @@ final class ChatStore {
                             isError: isError,
                             in: assistantID
                         )
-                    case .usage(let promptTokens, let cacheHit, let cacheMiss):
+                    case .usage(let promptTokens, let completionTokens, let cacheHit, let cacheMiss):
                         let ratio = promptTokens > 0 ? cacheHit * 100 / promptTokens : 0
-                        Self.logLatency("cache hit=\(cacheHit) miss=\(cacheMiss) prompt=\(promptTokens) (\(ratio)%)")
+                        Self.logLatency(
+                            "cache_hit=\(cacheHit) cache_miss=\(cacheMiss) "
+                            + "prompt_tokens=\(promptTokens) completion_tokens=\(completionTokens) "
+                            + "cache_ratio=\(ratio)%"
+                        )
+                        do {
+                            let cost = UsageService.cost(
+                                promptTokens: promptTokens,
+                                completionTokens: completionTokens,
+                                inputPrice: provider.inputPrice,
+                                outputPrice: provider.outputPrice
+                            )
+                            let totals = await services.usage.add(
+                                promptTokens: promptTokens,
+                                completionTokens: completionTokens,
+                                cachedTokens: cacheHit,
+                                cost: cost
+                            )
+                            spent = totals.cost
+                        }
                     case .truncated(let reason):
                         truncatedReason = reason
                     case .completed:
@@ -1049,6 +1070,10 @@ final class ChatStore {
     }
 
     func loadHistory() async {
+        if let services {
+            spent = await services.usage.totals().cost
+        }
+
         guard let services else { return }
 
         // Restore the compaction checkpoint, otherwise a saved summary would be
@@ -1163,6 +1188,8 @@ final class ChatStore {
     }
 
     var autopilot = false
+    /// Money spent so far in the provider's currency. Zero when no prices are set.
+    var spent: Double = 0
 
     func contextPlan(contextWindow: Int, thresholdPercent: Double, summaryTokens: Int = 0) -> ContextPlan {
         // Planning tokenizes the whole history. The composer asks for the plan on every

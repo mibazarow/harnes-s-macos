@@ -1,12 +1,50 @@
 import Foundation
 
-/// Approximate token cost of a string for budgeting decisions.
-/// Mixed Russian/English text plus code averages out near 3 characters per token.
+/// Token cost of a string, estimated from its character mix.
+///
+/// A flat "characters / 3" was wrong by about 23% on real traffic. BPE tokenizers do
+/// not spend tokens evenly: Russian in UTF-8 costs roughly two characters per token,
+/// while English prose and code cost three to four. Because the error was always in the
+/// same direction — the estimate was too low — compaction started too late and the
+/// last request before a fold could leave the window.
+///
+/// The weighted sum below is calibrated against measured usage (median 2.32 characters
+/// per token on Russian-plus-code prompts) and deliberately rounds up: running out of
+/// context is much worse than folding a little early.
 enum TokenEstimator {
+    /// Characters per token, by class. Lower means "costs more tokens per character".
+    private static let asciiWordCharsPerToken: Double = 3.6
+    private static let whitespaceCharsPerToken: Double = 4.0
+    private static let punctuationCharsPerToken: Double = 2.8
+    private static let nonASCIICharsPerToken: Double = 2.1
+
     static func tokens(in text: String) -> Int {
         guard !text.isEmpty else { return 0 }
-        let scalars = text.unicodeScalars.count
-        return (scalars + 2) / 3
+
+        var word = 0
+        var space = 0
+        var punctuation = 0
+        var other = 0
+
+        for scalar in text.unicodeScalars {
+            switch scalar.value {
+            case 0x30...0x39, 0x41...0x5A, 0x61...0x7A: // 0-9 A-Z a-z
+                word += 1
+            case 0x20, 0x09, 0x0A, 0x0D:                // space, tab, newline
+                space += 1
+            case 0x00...0x7F:                           // remaining ASCII is punctuation
+                punctuation += 1
+            default:
+                other += 1
+            }
+        }
+
+        let estimate = Double(word) / asciiWordCharsPerToken
+            + Double(space) / whitespaceCharsPerToken
+            + Double(punctuation) / punctuationCharsPerToken
+            + Double(other) / nonASCIICharsPerToken
+
+        return max(Int(estimate.rounded(.up)), 1)
     }
 }
 
@@ -25,6 +63,15 @@ struct ContextMessage: Sendable, Identifiable {
         self.text = text
         self.tokens = TokenEstimator.tokens(in: text)
             + (extra.isEmpty ? 0 : TokenEstimator.tokens(in: extra))
+    }
+
+    /// Explicit token count. Used by tests and by callers that already know the exact
+    /// number, so budgeting tests do not depend on the estimator's calibration.
+    init(id: Int, role: String, text: String, tokens: Int) {
+        self.id = id
+        self.role = role
+        self.text = text
+        self.tokens = tokens
     }
 }
 

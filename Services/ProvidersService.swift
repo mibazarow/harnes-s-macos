@@ -56,12 +56,12 @@ actor ProvidersService {
                     UPDATE providers SET
                         name = ?, base_url = ?, api_key = ?, models_json = ?,
                         default_model = ?, context_window = ?, reasoning_level = ?,
-                        temperature = ?, is_default = ?, health = ?, last_check_at = ?, updated_at = ?
+                        temperature = ?, input_price = ?, output_price = ?, is_default = ?, health = ?, last_check_at = ?, updated_at = ?
                     WHERE id = ?
                     """, arguments: [
                     provider.name, provider.baseURL, provider.apiKey, modelsJSON,
                     provider.defaultModel, provider.contextWindow, provider.reasoningLevel.rawValue,
-                    provider.temperature,
+                    provider.temperature, provider.inputPrice, provider.outputPrice,
                     provider.isDefault ? 1 : 0,
                     provider.health, provider.lastCheckAt, provider.updatedAt, provider.id
                 ])
@@ -69,13 +69,13 @@ actor ProvidersService {
                 try db.execute(sql: """
                     INSERT INTO providers (
                         id, name, base_url, api_key, models_json, default_model,
-                        context_window, reasoning_level, temperature, is_default, health,
-                        last_check_at, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        context_window, reasoning_level, temperature, input_price, output_price,
+                        is_default, health, last_check_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, arguments: [
                     provider.id, provider.name, provider.baseURL, provider.apiKey, modelsJSON,
                     provider.defaultModel, provider.contextWindow, provider.reasoningLevel.rawValue,
-                    provider.temperature,
+                    provider.temperature, provider.inputPrice, provider.outputPrice,
                     provider.isDefault ? 1 : 0,
                     provider.health, provider.lastCheckAt, provider.createdAt, provider.updatedAt
                 ])
@@ -190,6 +190,8 @@ actor ProvidersService {
             contextWindow: row["context_window"],
             reasoningLevel: ReasoningLevel(rawValue: row["reasoning_level"] ?? "off") ?? .off,
             temperature: row["temperature"] ?? ProviderModel.defaultTemperature,
+            inputPrice: row["input_price"],
+            outputPrice: row["output_price"],
             isDefault: (row["is_default"] as Int) == 1,
             health: row["health"],
             lastCheckAt: row["last_check_at"],

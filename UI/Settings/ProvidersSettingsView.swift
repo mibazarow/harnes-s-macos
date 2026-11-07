@@ -290,6 +290,15 @@ struct ProviderEditorView: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    if provider.contextWindow > 300_000 {
+                        Label(
+                            "Такое окно есть у считанных моделей. Если оно завышено, компактация не включится никогда: она ждёт \(Int(settings.compactionThresholdPercent))% от этого числа. Типичные значения: 128 000 у DeepSeek и большинства Qwen, 200 000 у Claude, 1 000 000 у Gemini.",
+                            systemImage: "exclamationmark.triangle"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(Palette.current.reasoning)
+                    }
+
                     Picker("Уровень размышлений", selection: $provider.reasoningLevel) {
                         ForEach(ReasoningLevel.allCases) { level in
                             Text(level.title).tag(level)
@@ -314,6 +323,30 @@ struct ProviderEditorView: View {
                     }
 
                     Text("Насколько свободно модель выбирает слова. 0.2 — собранно и по делу; выше — живее, но многословнее. У каждого провайдера своя.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 10) {
+                        Text("Цена входа")
+                        TextField("0", value: $provider.inputPrice, format: .number.precision(.fractionLength(0...4)))
+                            .font(AppFont.mono(13))
+                            .frame(width: 90)
+                        Text("за 1M токенов")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 10) {
+                        Text("Цена выхода")
+                        TextField("0", value: $provider.outputPrice, format: .number.precision(.fractionLength(0...4)))
+                            .font(AppFont.mono(13))
+                            .frame(width: 90)
+                        Text("за 1M токенов")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text("Необязательно. Если задать, в футере появится потраченная сумма по данным usage каждого запроса. Пусто — стоимость не считается.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 

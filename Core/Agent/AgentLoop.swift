@@ -40,7 +40,7 @@ struct AgentLoop: Sendable {
             isError: Bool,
             imagePath: String?
         )
-        case usage(promptTokens: Int, cacheHit: Int, cacheMiss: Int)
+        case usage(promptTokens: Int, completionTokens: Int, cacheHit: Int, cacheMiss: Int)
         /// The provider cut the answer off at the output ceiling. Carries the reason so
         /// the UI can say "truncated" instead of silently showing half a sentence.
         case truncated(reason: String)
@@ -87,9 +87,10 @@ struct AgentLoop: Sendable {
                                 continuation.yield(.reasoning(text))
                             case .toolCall(let call):
                                 calls.append(call)
-                            case .usage(let promptTokens, let cacheHit, let cacheMiss):
+                            case .usage(let promptTokens, let completionTokens, let cacheHit, let cacheMiss):
                                 continuation.yield(.usage(
                                     promptTokens: promptTokens,
+                                    completionTokens: completionTokens,
                                     cacheHit: cacheHit,
                                     cacheMiss: cacheMiss
                                 ))
