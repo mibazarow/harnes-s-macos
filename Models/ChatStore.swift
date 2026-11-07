@@ -44,6 +44,8 @@ final class ChatStore {
     var compactionThreshold: Double = 80
     /// Last assembled system prompt, reused for the footer budget so the numbers match.
     private var cachedSystemPrompt = Prompts.system
+    /// Last `contextPlan` result, keyed by everything that plan depends on.
+    private var planCache: (signature: String, plan: ContextPlan)?
 
     init(services: AppServices? = nil) {
         self.services = services
@@ -993,13 +995,34 @@ final class ChatStore {
     var autopilot = false
 
     func contextPlan(contextWindow: Int, thresholdPercent: Double, summaryTokens: Int = 0) -> ContextPlan {
-        composer.plan(
+        // Planning tokenizes the whole history. The composer asks for the plan on every
+        // body pass, so during streaming this ran twice per token. The signature covers
+        // everything the plan depends on, so a hit is exact rather than approximate.
+        let last = messages.last
+        let signature = [
+            String(contextWindow),
+            String(thresholdPercent),
+            String(summaryTokens),
+            String(messages.count),
+            last?.id.uuidString ?? "-",
+            String(last?.text.count ?? 0),
+            String(last?.reasoning?.count ?? 0),
+            String(last?.tools.count ?? 0),
+            String(cachedSystemPrompt.count)
+        ].joined(separator: "|")
+        if let cache = planCache, cache.signature == signature {
+            return cache.plan
+        }
+
+        let plan = composer.plan(
             systemPrompt: cachedSystemPrompt,
             messages: promptMessages,
             contextWindow: contextWindow,
             thresholdPercent: thresholdPercent,
             summaryTokens: summaryTokens
         )
+        planCache = (signature, plan)
+        return plan
     }
 
     private func runCommand(_ input: String) {

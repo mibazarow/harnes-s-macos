@@ -9,10 +9,16 @@ struct RootView: View {
     @State private var draft = ""
     @State private var composerHeight: CGFloat = 24
     @State private var attachments: [ChatAttachment] = []
+    /// Set while the user drags a window edge; rows drop text selection for the drag.
+    @State private var liveResize = LiveResizeState()
 
     private var palette: Palette { Palette.current }
 
     var body: some View {
+        // Computed once: the plan tokenizes the whole history, and it used to be
+        // evaluated twice per body pass — twice per token while streaming.
+        let plan = contextPlan
+
         VStack(spacing: 0) {
             HeaderBar(palette: palette, planMode: chat.isPlanMode)
 
@@ -35,8 +41,8 @@ struct RootView: View {
                 isStreaming: chat.isStreaming,
                 queuedCount: chat.queuedCount,
                 providerLabel: providerDirectory.label,
-                contextLabel: contextLabel,
-                contextWarning: contextPlan.isOverThreshold,
+                contextLabel: contextLabel(for: plan),
+                contextWarning: plan.isOverThreshold,
                 modelLabel: modelLabel,
                 modelWarning: modelWarning,
                 onSend: send,
@@ -44,6 +50,11 @@ struct RootView: View {
             )
         }
         .background(palette.background)
+        .background(
+            WindowResizeBridge(state: liveResize)
+                .frame(width: 0, height: 0)
+        )
+        .environment(liveResize)
         .tint(palette.accent)
         .preferredColorScheme(.dark)
         .frame(minWidth: 560, minHeight: 420)
@@ -121,8 +132,7 @@ struct RootView: View {
         )
     }
 
-    private var contextLabel: String {
-        let plan = contextPlan
+    private func contextLabel(for plan: ContextPlan) -> String {
         let used = Self.shortTokens(plan.usedTokens)
         let window = Self.shortTokens(plan.contextWindow)
         if plan.didCompact {

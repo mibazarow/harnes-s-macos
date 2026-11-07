@@ -32,11 +32,12 @@ enum AppFont {
         return stored
     }
 
-    /// Extra leading that brings the block to a 160% line box, the rhythm the reference
-    /// UI uses. Nordwand Mono's natural line height is ~1.32 em, so the remainder is
-    /// ~0.28 em; it is computed rather than fixed so the ratio holds at every size.
+    /// Extra leading on top of the font's natural line height (~1.32 em). It used to be
+    /// 0.28 em, which gave a 160% line box and read as a wall of text; 0.20 em keeps the
+    /// block at ~152% — 30% less added leading — and paragraphs carry the rest of the
+    /// rhythm. Computed, not fixed, so the ratio holds at every size.
     static func lineSpacing(for size: CGFloat) -> CGFloat {
-        max((size * 0.28).rounded(), 1)
+        max((size * 0.20).rounded(), 1)
     }
 
     static func isAvailable(_ family: String) -> Bool {

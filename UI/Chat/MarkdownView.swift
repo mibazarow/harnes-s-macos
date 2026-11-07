@@ -11,10 +11,13 @@ struct MarkdownView: View {
     let fontSize: CGFloat
     var isStreaming: Bool = false
 
-    var body: some View {
-        let document = Document(parsing: text, options: [.parseBlockDirectives, .parseSymbolLinks])
-        let blocks = Array(document.children)
+    /// Parsed blocks live in state and are rebuilt only when the text changes. Parsing
+    /// inside `body` re-ran on every layout pass — including each frame of a window
+    /// resize — which is a large part of why dragging an edge felt like 15 fps.
+    @State private var blocks: [Markup] = []
+    @State private var parsedText: String?
 
+    var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, child in
                 MarkdownBlockView(node: child, palette: palette, fontSize: fontSize, dimmed: false)
@@ -28,6 +31,14 @@ struct MarkdownView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: text, initial: true) { _, newValue in
+            guard parsedText != newValue else { return }
+            parsedText = newValue
+            blocks = Array(
+                Document(parsing: newValue, options: [.parseBlockDirectives, .parseSymbolLinks])
+                    .children
+            )
+        }
     }
 }
 
@@ -67,7 +78,9 @@ struct MarkdownBlockView: View {
         if node is Markdown.Table || node is BlockQuote { return 16 }
         if node is ThematicBreak { return 32 }
         if node is UnorderedList || node is OrderedList { return 12 }
-        return 12
+        // A paragraph is followed by a real blank line: with the tightened leading the
+        // old 12 pt merged neighbouring paragraphs into one block of text.
+        return 20
     }
 
     /// Adjacent vertical margins collapse: the larger one wins.
@@ -107,7 +120,7 @@ struct MarkdownBlockView: View {
             Text(html.rawHTML)
                 .font(mono)
                 .foregroundStyle(palette.comment)
-                .textSelection(.enabled)
+                .selectableWhileIdle()
         } else {
             childBlocks
         }
@@ -120,7 +133,7 @@ struct MarkdownBlockView: View {
             .font(mono)
             .foregroundStyle(resolvedBase)
             .lineSpacing(lineSpacing)
-            .textSelection(.enabled)
+            .selectableWhileIdle()
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -152,7 +165,7 @@ struct MarkdownBlockView: View {
         .font(mono)
         .foregroundStyle(level >= 4 ? palette.dim : resolvedBase)
         .lineSpacing(lineSpacing)
-        .textSelection(.enabled)
+        .selectableWhileIdle()
         .fixedSize(horizontal: false, vertical: true)
     }
 

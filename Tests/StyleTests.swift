@@ -200,11 +200,12 @@ final class MarkdownMetricsTests: XCTestCase {
     }
 
     @MainActor
-    func testLineBoxIsOneSixtyPercent() {
-        // 160% of the body size minus the font's own line height is the extra leading.
+    func testLineBoxIsAboutOneFiftyTwoPercent() {
+        // Leading was tightened from 0.28 em to 0.20 em of extra space: the block sits
+        // at ~1.52 of the body size instead of 1.6. Paragraph gaps carry the rest.
         for size in [11.0, 14.0, 20.0] as [CGFloat] {
             let total = size * 1.32 + AppFont.lineSpacing(for: size)
-            XCTAssertEqual(total / size, 1.6, accuracy: 0.06, "size \(size)")
+            XCTAssertEqual(total / size, 1.52, accuracy: 0.04, "size \(size)")
         }
     }
 
@@ -231,8 +232,9 @@ final class MarkdownMetricsTests: XCTestCase {
         let document = Document(parsing: markdown)
         let blocks = Array(document.children)
 
-        // Paragraphs are 12 apart, code gets 24 below, headings 28 above and 12 below.
-        XCTAssertEqual(MarkdownBlockView.marginBottom(blocks[1]), 12)
+        // Paragraphs are 20 apart — a visible blank line now that leading is tighter.
+        // Code gets 24 below, headings 28 above and 12 below.
+        XCTAssertEqual(MarkdownBlockView.marginBottom(blocks[1]), 20)
         XCTAssertEqual(MarkdownBlockView.marginTop(blocks[2]), 8)
         XCTAssertEqual(MarkdownBlockView.marginTop(blocks[3]), 16)
         XCTAssertEqual(MarkdownBlockView.marginBottom(blocks[4]), 24)

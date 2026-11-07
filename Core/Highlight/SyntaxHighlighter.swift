@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum CodeLanguage: String, Sendable {
+enum CodeLanguage: String, Hashable, Sendable {
     case swift
     case javascript
     case typescript
@@ -240,5 +240,42 @@ struct SyntaxHighlighter {
 
         let pattern = parts.joined(separator: "|")
         return try? NSRegularExpression(pattern: pattern, options: [])
+    }
+}
+
+/// Memoizes highlighted code. A transcript holds the same code blocks for a long time
+/// and re-renders them on every layout pass, so the regex pass is worth caching by
+/// content. Small LRU: code blocks are the largest things in a message.
+@MainActor
+enum HighlightCache {
+    private struct Key: Hashable {
+        let language: CodeLanguage
+        let fontSize: CGFloat
+        let code: String
+    }
+
+    private static var storage: [Key: AttributedString] = [:]
+    private static var order: [Key] = []
+    private static let limit = 120
+
+    static func render(
+        language: CodeLanguage,
+        palette: Palette,
+        fontSize: CGFloat,
+        code: String
+    ) -> AttributedString {
+        let key = Key(language: language, fontSize: fontSize, code: code)
+        if let hit = storage[key] { return hit }
+
+        let value = SyntaxHighlighter(language: language, palette: palette, fontSize: fontSize)
+            .highlight(code)
+        storage[key] = value
+        order.append(key)
+
+        if order.count > limit {
+            let dropped = order.removeFirst()
+            storage[dropped] = nil
+        }
+        return value
     }
 }

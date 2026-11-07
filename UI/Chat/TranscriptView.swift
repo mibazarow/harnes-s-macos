@@ -71,9 +71,9 @@ struct TranscriptView: View {
                 .padding(.horizontal, 0)
                 .padding(.vertical, 20)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                // One switch for the whole transcript: every label, trace, paragraph
-                // and code block becomes selectable, including the user's own message.
-                .textSelection(.enabled)
+                // Selection is applied per block instead of once for the whole stack:
+                // the container-level modifier wrapped every run again, doubling the
+                // platform text views and slowing layout on every width change.
             }
             .background(palette.background)
             .onScrollGeometryChange(for: CGFloat.self) { geometry in

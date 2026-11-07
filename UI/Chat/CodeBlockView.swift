@@ -25,7 +25,7 @@ struct CodeBlockView: View {
         Text(highlighted)
             .font(AppFont.mono(fontSize))
             .lineSpacing(AppFont.lineSpacing(for: fontSize))
-            .textSelection(.enabled)
+            .selectableWhileIdle()
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -63,11 +63,12 @@ struct CodeBlockView: View {
     }
 
     private var highlighted: AttributedString {
-        SyntaxHighlighter(
+        HighlightCache.render(
             language: resolvedLanguage,
             palette: palette,
-            fontSize: fontSize
-        ).highlight(code)
+            fontSize: fontSize,
+            code: code
+        )
     }
 
     private func copy() {

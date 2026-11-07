@@ -75,7 +75,7 @@ struct MessageRow: View, Equatable {
                         .font(AppFont.mono(fontSize))
                         .foregroundStyle(palette.text)
                         .lineSpacing(AppFont.lineSpacing(for: fontSize))
-                        .textSelection(.enabled)
+                        .selectableWhileIdle()
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -344,7 +344,7 @@ struct ReasoningBlock: View {
                     .font(AppFont.mono(fontSize))
                     .foregroundStyle(palette.reasoning)
                     .lineSpacing(AppFont.lineSpacing(for: fontSize))
-                    .textSelection(.enabled)
+                    .selectableWhileIdle()
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(palette.reasoningBackground)
