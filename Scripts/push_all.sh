@@ -20,7 +20,9 @@ names=()
 
 for remote in origin github; do
     git remote get-url "$remote" >/dev/null 2>&1 || continue
-    git push "$remote" "$branch" >"$log.$remote" 2>&1 &
+    # `--follow-tags` sends annotated tags reachable from this branch, so a release
+    # tag does not need a separate push to every mirror.
+    git push --follow-tags "$remote" "$branch" >"$log.$remote" 2>&1 &
     pids+=($!)
     names+=("$remote")
 done
