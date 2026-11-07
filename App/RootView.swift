@@ -241,6 +241,16 @@ struct PlanBar: View {
                         .font(.system(size: 8, weight: .semibold))
                     Text("план · \(todos.items.filter { $0.status == "done" }.count)/\(todos.items.count)")
                     Spacer(minLength: 0)
+                    Button {
+                        todos.clear()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .semibold))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Убрать план")
+                    .accessibilityLabel("Убрать план")
                 }
                 .font(AppFont.mono(max(fontSize - 3, 9)))
                 .foregroundStyle(palette.dim)

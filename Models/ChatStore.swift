@@ -107,6 +107,10 @@ final class ChatStore {
             return
         }
 
+        // A plan belongs to the turn that produced it. Keeping it forever left a stale
+        // checklist hanging under the transcript after the task was long done.
+        services?.todos.clear()
+
         messages.append(ChatMessage(role: .user, text: trimmed, attachments: attachments))
         persistUser(trimmed, attachments: attachments)
         start(trimmed, attachments: attachments)
@@ -209,7 +213,9 @@ final class ChatStore {
 
                 var firstTokenLogged = false
                 let requestStart = ContinuousClock.now
-                for try await event in loop.run(history: history) {
+                var repetitionStopped = false
+                var lastLoopCheck = 0
+                stream: for try await event in loop.run(history: history) {
                     if Task.isCancelled { break }
                     if !firstTokenLogged {
                         firstTokenLogged = true
@@ -224,6 +230,18 @@ final class ChatStore {
                         stepIndex += 1
                     case .delta(let chunk):
                         append(chunk, to: assistantID)
+                        // A degenerate generation repeats itself in the text, not in
+                        // the tool calls, so LoopGuard cannot see it. Checking the tail
+                        // every few hundred characters is enough to catch it early
+                        // without measuring on every token.
+                        let length = messageText(of: assistantID).utf8.count
+                        if length - lastLoopCheck >= 250 {
+                            lastLoopCheck = length
+                            if RepetitionGuard.isLooping(messageText(of: assistantID)) {
+                                repetitionStopped = true
+                                break stream
+                            }
+                        }
                     case .reasoning(let chunk):
                         appendReasoning(chunk, to: assistantID)
                     case .toolStarted(let name, let summary):
@@ -240,6 +258,12 @@ final class ChatStore {
                 }
 
                 if Task.isCancelled { break }
+
+                if repetitionStopped {
+                    trimLoop(assistantID)
+                    markLoopWarning(assistantID)
+                    break
+                }
 
                 let answer = messages.first(where: { $0.id == assistantID })?.text ?? ""
 
@@ -438,7 +462,7 @@ final class ChatStore {
         let lastErrored = messages[index].tools.last?.isError ?? false
         let toolCalls = messages[index].tools.count
 
-        var warnings: [String] = []
+        var warnings: [String] = messages[index].warning.map { [$0] } ?? []
 
         if let note = FalseSuccessGuard.note(
             userText: userText,
@@ -785,6 +809,23 @@ final class ChatStore {
     private func append(_ chunk: String, to id: UUID) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         messages[index].text += chunk
+    }
+
+    private func messageText(of id: UUID) -> String {
+        messages.first(where: { $0.id == id })?.text ?? ""
+    }
+
+    /// Drops the repeating tail so the user is left with the part that made sense.
+    private func trimLoop(_ id: UUID) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[index].text = RepetitionGuard.trimmed(messages[index].text)
+    }
+
+    private func markLoopWarning(_ id: UUID) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[index].warning = """
+        Остановился: ответ начал повторяться. Модель зациклилась на одном и том же,         и продолжение только тратило бы токены. Хвост повтора я убрал — переформулируй         задачу или разбей её на части.
+        """
     }
 
     private func appendReasoning(_ chunk: String, to id: UUID) {

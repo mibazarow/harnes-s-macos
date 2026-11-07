@@ -232,6 +232,27 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(mode?.lowercased(), "wal")
     }
 
+    func testTodosPersistAndClear() async throws {
+        let database = try AppDatabase()
+        let todos = TodoStore(database: database)
+        todos.set(json: ["items": [
+            ["text": "первый шаг", "status": "done"],
+            ["text": "второй шаг", "status": "pending"]
+        ]])
+        XCTAssertEqual(todos.items.count, 2)
+
+        // A new store reads the same session's plan back.
+        let reloaded = TodoStore(database: database)
+        reloaded.load()
+        XCTAssertEqual(reloaded.items.map(\.text), ["первый шаг", "второй шаг"])
+
+        todos.clear()
+        XCTAssertTrue(todos.items.isEmpty)
+        let afterClear = TodoStore(database: database)
+        afterClear.load()
+        XCTAssertTrue(afterClear.items.isEmpty, "очищенный план не должен воскресать после перезапуска")
+    }
+
     func testChunksOverlapAndBreakOnBoundaries() {
         let line = String(repeating: "abcdefghij ", count: 40) + "\n"
         let text = String(repeating: line, count: 6)

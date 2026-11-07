@@ -257,3 +257,156 @@ enum CapabilityClaimGuard {
         return nil
     }
 }
+/// Catches a degenerating generation: the model starts repeating a word, a phrase or a
+/// whole sentence and never stops.
+///
+/// This is a known failure of low-temperature and greedy sampling on long outputs, and
+/// it is invisible to `LoopGuard`: no tool is called, so there is nothing to compare.
+/// The check runs on the streamed text itself and only looks at its tail, because a
+/// loop always forms at the end. Work is done on UTF-8 bytes — repetition is a byte
+/// property, and byte comparison is far cheaper than grapheme comparison.
+enum RepetitionGuard {
+    /// Shorter answers cannot be a loop worth stopping.
+    private static let minLength = 500
+    /// Only the tail is inspected.
+    private static let window = 1_200
+    /// A unit repeated this many times is a loop, not emphasis.
+    private static let minRepeats = 4
+    /// Longest repeating unit considered: longer than this is a paragraph, not a stutter.
+    private static let maxUnit = 300
+    /// A unit must carry this many letters or digits to count; this keeps `----` and
+    /// runs of whitespace from tripping the guard.
+    private static let minUnitVisible = 12
+    /// Identical consecutive lines that count as a loop.
+    private static let minRepeatedLines = 6
+    private static let minLineLength = 20
+    /// Identical consecutive words that count as a loop.
+    private static let minRepeatedWords = 14
+
+    static func isLooping(_ text: String) -> Bool {
+        loopCut(in: text) != nil
+    }
+
+    /// The answer cut at the start of the repeating run, or the text unchanged.
+    static func trimmed(_ text: String) -> String {
+        guard let cut = loopCut(in: text) else { return text }
+        let head = String(decoding: text.utf8.prefix(cut), as: UTF8.self)
+        return head.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Byte offset where the repeating run starts, or nil when the text is healthy.
+    static func loopCut(in text: String) -> Int? {
+        let bytes = Array(text.utf8)
+        let count = bytes.count
+        guard count >= minLength else { return nil }
+
+        let start = max(0, count - window)
+        let tail = Array(bytes[start...])
+
+        if let offset = repeatedUnitStart(tail) { return start + offset }
+        if let offset = repeatedLineStart(tail) { return start + offset }
+        if let offset = repeatedWordStart(tail) { return start + offset }
+        return nil
+    }
+
+    // MARK: - Shapes
+
+    private static func repeatedUnitStart(_ tail: [UInt8]) -> Int? {
+        let count = tail.count
+        let limit = min(maxUnit, count / minRepeats)
+        guard limit >= 1 else { return nil }
+
+        for length in 1...limit {
+            let runStart = count - length * minRepeats
+            guard runStart >= 0 else { continue }
+
+            let unit = Array(tail[runStart..<runStart + length])
+            let visible = unit.reduce(0) { $0 + (isVisible($1) ? 1 : 0) }
+            guard visible >= minUnitVisible else { continue }
+
+            var matches = true
+            for repeatIndex in 1..<minRepeats {
+                let from = runStart + repeatIndex * length
+                if !tail[from..<from + length].elementsEqual(unit) {
+                    matches = false
+                    break
+                }
+            }
+            guard matches else { continue }
+
+            // Walk back over the whole run, not just the four copies that tripped the
+            // check: the answer is trimmed at the first repetition, so nothing of the
+            // loop is left on screen.
+            var cut = runStart
+            while cut - length >= 0, tail[(cut - length)..<cut].elementsEqual(unit) {
+                cut -= length
+            }
+            return cut
+        }
+        return nil
+    }
+
+    private static func repeatedLineStart(_ tail: [UInt8]) -> Int? {
+        let text = String(decoding: tail, as: UTF8.self)
+        var lines: [(text: String, offset: Int)] = []
+        var offset = 0
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty {
+                lines.append((trimmed, offset))
+            }
+            offset += raw.utf8.count + 1
+        }
+
+        guard lines.count >= minRepeatedLines else { return nil }
+        let last = Array(lines.suffix(minRepeatedLines))
+        guard let first = last.first, first.text.count >= minLineLength else { return nil }
+        guard last.allSatisfy({ $0.text == first.text }) else { return nil }
+
+        var index = lines.count - minRepeatedLines
+        while index > 0, lines[index - 1].text == first.text {
+            index -= 1
+        }
+        return lines[index].offset
+    }
+
+    private static func repeatedWordStart(_ tail: [UInt8]) -> Int? {
+        let text = String(decoding: tail, as: UTF8.self)
+        var words: [(value: String, offset: Int)] = []
+        var offset = 0
+        var index = text.startIndex
+
+        while index < text.endIndex {
+            if text[index].isWhitespace {
+                offset += text[index].utf8.count
+                index = text.index(after: index)
+                continue
+            }
+            let start = index
+            let startOffset = offset
+            while index < text.endIndex, !text[index].isWhitespace {
+                offset += text[index].utf8.count
+                index = text.index(after: index)
+            }
+            words.append((String(text[start..<index]).lowercased(), startOffset))
+        }
+
+        guard words.count >= minRepeatedWords else { return nil }
+        let last = Array(words.suffix(minRepeatedWords))
+        guard let first = last.first, first.value.count >= 2 else { return nil }
+        guard last.allSatisfy({ $0.value == first.value }) else { return nil }
+
+        var runIndex = words.count - minRepeatedWords
+        while runIndex > 0, words[runIndex - 1].value == first.value {
+            runIndex -= 1
+        }
+        return words[runIndex].offset
+    }
+
+    private static func isVisible(_ byte: UInt8) -> Bool {
+        (byte >= 0x30 && byte <= 0x39)      // 0-9
+            || (byte >= 0x41 && byte <= 0x5A) // A-Z
+            || (byte >= 0x61 && byte <= 0x7A) // a-z
+            || byte >= 0x80                   // any non-ASCII (Cyrillic, CJK, emoji)
+    }
+}
