@@ -436,18 +436,24 @@ final class ChatStore {
         let lastErrored = messages[index].tools.last?.isError ?? false
         let toolCalls = messages[index].tools.count
 
-        if FalseSuccessGuard.shouldCorrect(
+        var warnings: [String] = []
+
+        if let note = FalseSuccessGuard.note(
             userText: userText,
             assistantText: answer,
             toolCallsInTurn: toolCalls,
             lastToolErrored: lastErrored
         ) {
-            messages[index].text += "\n\n" + FalseSuccessGuard.unverifiedSuccessNote
+            warnings.append(note)
         }
 
         if let note = CapabilityClaimGuard.note(for: answer) {
-            messages[index].text += "\n\n_" + note + "._"
+            warnings.append(note + ".")
         }
+
+        // A separate field, not appended text: the model must not read this back as
+        // its own previous answer on the next turn.
+        messages[index].warning = warnings.isEmpty ? nil : warnings.joined(separator: " ")
     }
 
     private func activeProvider(_ services: AppServices) async throws -> ProviderModel? {

@@ -109,6 +109,18 @@ struct MessageRow: View, Equatable {
                         .foregroundStyle(palette.faint)
                 }
             }
+
+            if let warning = message.warning, !warning.isEmpty {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: max(fontSize - 2, 9)))
+                    Text(warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(AppFont.mono(max(fontSize - 2, 9)))
+                .foregroundStyle(palette.reasoning)
+                .padding(.top, 2)
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

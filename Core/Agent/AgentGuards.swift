@@ -67,36 +67,72 @@ enum NoAttemptGuard {
 
 /// Guards against claiming an action was done when it was not: no tool was
 /// called, or the last tool result was an error.
+///
+/// The hard part is silence. A Russian answer is full of words that look like a
+/// success claim to a substring match — "файл создаётся", "готово к запуску",
+/// "успешно компилируется" — and a question like "как создаётся файл?" looks like
+/// an action request. Matching roots anywhere produced the note on ordinary
+/// explanations, which is worse than not having the guard: a warning that fires on
+/// every other answer trains the reader to ignore it.
+///
+/// So both sides are anchored: the request must be an imperative at a sentence
+/// start, the claim must be a first-person past or a completion marker near the top
+/// of the answer, and the answer must be short — a lie is a confirmation line, not a
+/// long explanation.
 enum FalseSuccessGuard {
-    static let unverifiedSuccessNote = """
-    Внимание: инструмент не подтвердил успешное выполнение — действие могло быть НЕ выполнено. \
-    Проверь результат сам или переформулируй запрос.
+    static let noToolNote = """
+    Похоже на отчёт о выполненном действии, но ни один инструмент не вызывался.     Проверь результат сам или переформулируй запрос.
     """
 
-    private static let actionRoots = [
-        "созда", "добав", "поставь", "постав", "установ", "удали", "удал",
-        "переимену", "отправ", "позвон", "заархив", "архив", "запомни", "настрой",
-        "напомн", "включи", "выключи", "проверяй", "каждый час", "по расписанию",
-        "скопиру", "перемест", "собер", "заброниру", "закаж", "оплат", "запиши", "сохрани"
-    ]
+    static let failedToolNote = """
+    Последний инструмент вернул ошибку — действие могло не выполниться.     Проверь результат сам.
+    """
 
-    private static let successRoots = [
-        "созда", "создана", "создал", "добав", "поставил", "установил", "удалил",
-        "переименова", "отправил", "позвонил", "заархив", "запомнил", "настроил",
-        "напомн", "включил", "готово", "выполнено", "сделано", "сделал",
-        "сохранён", "сохранен", "успешно", "записал"
+    static let unverifiedSuccessNote = noToolNote
+
+    /// How much of the answer is inspected for a claim.
+    private static let claimWindow = 400
+    /// A success claim in a wall of text is not a success claim.
+    private static let maxAnswerForClaim = 700
+
+    /// An imperative at the start of a sentence, or an infinitive after a cue word
+    /// ("можешь добавить", "нужно создать"). Both halves are needed: a bare substring
+    /// match catches "как создаётся файл" and fires on plain explanations.
+    private static let requestPattern = try! NSRegularExpression(
+        pattern: #"(?i)((^|[.!?,;:]\s+|\n\s*)(создай|сделай|удали|добавь|установи|настрой|запомни|напомни|отправь|скопируй|переименуй|перемести|заархивируй|забронируй|закажи|оплати|запиши|сохрани|проверяй|включи|выключи|собери|поставь)\b)|(\b(можешь|можно|нужно|надо|давай|помоги)\s+(создать|сделать|удалить|добавить|установить|настроить|запомнить|напомнить|отправить|скопировать|переименовать|переместить|заархивировать|забронировать|заказать|оплатить|записать|сохранить|проверять|включить|выключить|собрать|поставить)\b)"#
+    )
+
+    private static let schedulePattern = try! NSRegularExpression(
+        pattern: #"(?i)\b(каждый час|каждые\s+\d+|по расписанию|поставь напоминание)\b"#
+    )
+
+    private static let claimPatterns: [NSRegularExpression] = [
+        // "Готово.", "Сделано!", "Выполнено —"
+        try! NSRegularExpression(
+            pattern: #"(?i)^\s*(готово|сделано|выполнено|done)\b"#
+        ),
+        // "создал файл", "я удалил папку" — at the start of a sentence
+        try! NSRegularExpression(
+            pattern: #"(?i)(^|[.!?]\s+|\n\s*)(я\s+)?(создал|создала|удалил|удалила|добавил|добавила|установил|установила|настроил|настроила|запомнил|запомнила|напомнил|напомнила|отправил|отправила|скопировал|скопировала|переименовал|переименовала|заархивировал|забронировал|заказал|оплатил|записал|сохранил|сделал)\b"#
+        ),
+        // "Файл создан", "Задача удалена" — passive, but with a concrete object
+        try! NSRegularExpression(
+            pattern: #"(?i)\b(файл|папка|задача|напоминание|запись|архив|письмо|скрипт|проект|коммит|ветка|таблица)\s+(создан|создана|удалён|удален|удалена|установлен|установлена|сохранён|сохранен|сохранена|настроен|настроена|добавлен|добавлена|отправлен|отправлена)\b"#
+        )
     ]
 
     static func looksLikeActionRequest(_ text: String) -> Bool {
         guard !text.isEmpty else { return false }
-        let lower = text.lowercased()
-        return actionRoots.contains { lower.contains($0) }
+        let range = NSRange(text.startIndex..., in: text)
+        if requestPattern.firstMatch(in: text, range: range) != nil { return true }
+        return schedulePattern.firstMatch(in: text, range: range) != nil
     }
 
     static func claimsActionDone(_ text: String) -> Bool {
-        guard !text.isEmpty else { return false }
-        let lower = text.lowercased()
-        return successRoots.contains { lower.contains($0) }
+        guard !text.isEmpty, text.count <= maxAnswerForClaim else { return false }
+        let head = String(text.prefix(claimWindow))
+        let range = NSRange(head.startIndex..., in: head)
+        return claimPatterns.contains { $0.firstMatch(in: head, range: range) != nil }
     }
 
     static func shouldCorrect(
@@ -110,6 +146,22 @@ enum FalseSuccessGuard {
             return looksLikeActionRequest(userText)
         }
         return lastToolErrored
+    }
+
+    /// The note to show, or nil when the answer is consistent with what happened.
+    static func note(
+        userText: String,
+        assistantText: String,
+        toolCallsInTurn: Int,
+        lastToolErrored: Bool
+    ) -> String? {
+        guard shouldCorrect(
+            userText: userText,
+            assistantText: assistantText,
+            toolCallsInTurn: toolCallsInTurn,
+            lastToolErrored: lastToolErrored
+        ) else { return nil }
+        return toolCallsInTurn == 0 ? noToolNote : failedToolNote
     }
 }
 

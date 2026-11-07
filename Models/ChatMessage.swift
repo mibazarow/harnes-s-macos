@@ -175,6 +175,9 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
     var reasoning: String?
     var attachments: [ChatAttachment]
     var tools: [ToolTrace]
+    /// Honesty warning shown under the answer. Deliberately not part of `text`: it
+    /// must not be sent back to the model as if the assistant had said it.
+    var warning: String?
     let date: Date
     var state: State
 
@@ -184,6 +187,7 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
         reasoning: String? = nil,
         attachments: [ChatAttachment] = [],
         tools: [ToolTrace] = [],
+        warning: String? = nil,
         date: Date = .now,
         state: State = .complete
     ) {
@@ -193,6 +197,7 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
         self.reasoning = reasoning
         self.attachments = attachments
         self.tools = tools
+        self.warning = warning
         self.date = date
         self.state = state
     }
