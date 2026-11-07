@@ -215,7 +215,7 @@ actor MCPSession {
     }
 
     private func initialize() async throws {
-        let params = #"{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"clientInfo":{"name":"HARNES-S","version":"0.1.0"}}"#
+        let params = #"{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"clientInfo":{"name":"HARNES-S","version":"1.0.0"}}"#
         _ = try await request("initialize", paramsJSON: params)
         notify("notifications/initialized")
         initialized = true
