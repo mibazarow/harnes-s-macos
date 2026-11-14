@@ -18,7 +18,7 @@ extension ToolRegistry {
         // The detached task does not inherit cancellation, so the handler has to reach
         // the child through the shared box: otherwise Stop returns to the user while a
         // build keeps running until its own timeout.
-        let output = try await withTaskCancellationHandler {
+        var output = try await withTaskCancellationHandler {
             try await Task.detached(priority: .userInitiated) {
                 try Self.runSync(command, cwd: workspace, timeout: timeout, cancellation: cancellation)
             }.value
@@ -26,9 +26,26 @@ extension ToolRegistry {
             cancellation.cancel()
         }
 
-        // The two stream caps add up to 30 000, so the reply keeps the documented
-        // ceiling without cutting the truncation note itself.
-        return .ok(output.isEmpty ? "(команда выполнена, вывода нет)" : output)
+        // macOS tools treat bytes as multibyte characters in a UTF-8 locale and bail out
+        // with "illegal byte sequence" on binary-ish input. One targeted retry with the
+        // C locale is enough and does not change how normal commands read UTF-8.
+        if output.contains("illegal byte sequence") {
+            output = (try? await Task.detached(priority: .userInitiated) {
+                try Self.runSync("export LC_ALL=C\n" + command, cwd: workspace, timeout: timeout, cancellation: cancellation)
+            }.value) ?? output
+        }
+
+        // 2 000 characters by default. The old 30 000 reply was silently cut later by
+        // the run budget, so the model lost it entirely; a small, announced window is
+        // honest and keeps the run alive. `full` is the deliberate opt-in.
+        let full = Self.bool(args, "full") ?? false
+        let cap = full ? 30_000 : min(max(Self.int(args, "max_chars") ?? 2_000, 200), 30_000)
+        guard output.count > cap else {
+            return .ok(output.isEmpty ? "(команда выполнена, вывода нет)" : output)
+        }
+        let shown = String(output.prefix(cap))
+        return .ok(shown + "\n[обрезано: показано \(cap) из \(output.count) символов; "
+            + (full ? "это и есть предел" : "весь вывод — full: true") + "]")
     }
 
     /// Runs a command to completion or timeout and returns `exit N` plus its output.
@@ -157,6 +174,9 @@ extension ToolRegistry {
         let data = (try? handle.read(upToCount: limit)) ?? Data()
         let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
         var text = String(decoding: data, as: UTF8.self)
+        // A byte-limited read can land in the middle of a UTF-8 sequence; the decoder
+        // turns the tail into U+FFFD. Dropping it is cleaner than showing "�".
+        while text.hasSuffix("\u{FFFD}") { text.removeLast() }
         if size > data.count {
             text += "\n[вывод обрезан на \(limit) байт из \(size)]"
         }

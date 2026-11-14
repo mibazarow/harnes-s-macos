@@ -160,15 +160,54 @@ extension ToolRegistry {
 
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
-        request.recognitionLanguages = ["ru-RU", "en-US"]
+        request.recognitionLanguages = Self.languages(from: args["lang"]) 
         request.usesLanguageCorrection = true
         try VNImageRequestHandler(cgImage: cgImage).perform([request])
 
-        let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+        // Bounding boxes are needed to click on a found label, so they are in pixel
+        // coordinates with a top-left origin — the same space the mouse lives in.
+        let withCoords = Self.bool(args, "coords") ?? false
+        let width = CGFloat(cgImage.width)
+        let height = CGFloat(cgImage.height)
+        let lines = (request.results ?? []).compactMap { observation -> String? in
+            guard let text = observation.topCandidates(1).first?.string else { return nil }
+            guard withCoords else { return text }
+            let box = observation.boundingBox
+            let x = box.minX * width
+            let y = (1 - box.maxY) * height
+            return String(
+                format: "%@ [x=%.0f y=%.0f w=%.0f h=%.0f]",
+                text, x, y, box.width * width, box.height * height
+            )
+        }
         return .ok(lines.isEmpty ? "Текст не распознан." : lines.joined(separator: "\n"))
     }
 
 // MARK: - Helpers
+    /// Vision wants locale identifiers; `["ru", "en"]` is what a model naturally sends.
+    static func languages(from raw: Any?) -> [String] {
+        let requested: [String]
+        if let list = raw as? [String] {
+            requested = list
+        } else if let text = raw as? String {
+            requested = text.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+        } else {
+            requested = ["ru", "en"]
+        }
+        let mapped = requested.filter { !$0.isEmpty }.map { value -> String in
+            switch value.lowercased() {
+            case "ru": return "ru-RU"
+            case "en": return "en-US"
+            case "de": return "de-DE"
+            case "fr": return "fr-FR"
+            case "es": return "es-ES"
+            case "zh": return "zh-Hans"
+            default: return value
+            }
+        }
+        return mapped.isEmpty ? ["ru-RU", "en-US"] : mapped
+    }
+
     static func plainText(fromHTML html: String, limit: Int) -> String {
         var text = html
         for pattern in [

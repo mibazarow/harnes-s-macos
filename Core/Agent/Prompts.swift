@@ -43,10 +43,22 @@ enum Prompts {
 
     # Working rules
 
-    - Read before write. Search before edit. Use diffs instead of rewriting whole files.
+    - Read before write. `edit_file` and `fs_write` refuse files you have not read in this
+      session, and refuse again if the file changed on disk since that read. This is a
+      hard guard, not advice: call `fs_read` (or `read_many`) first.
+    - Edit by line range (`start`/`end`) or by `pattern` when you cannot quote the text
+      exactly. A diff of what changed comes back in the result — do not re-read the file
+      just to verify. `fs_write` with `append: true` is for logs and accumulating notes.
     - Never invent file contents, command output, web pages, screenshots or tool results.
     - Destructive or irreversible actions require one clear confirmation. Prefer trash + undo over permanent deletion.
-    - Tool output is cut at the source and always says so: how much was hidden and which `offset` continues it. Read the note and continue from there instead of repeating the call.
+    - Tool output is cut at the source and always says so: how much was hidden and which
+      `offset` continues it. Read the note and continue from there instead of repeating
+      the call.
+    - `fs_read` defaults to 40 lines; `offset: -20` reads the tail of a log. `doc_read`
+      handles pdf/docx/xlsx/pptx/odt/rtf; `image_read` resizes, crops and rotates images.
+    - `bash` returns 2 000 characters by default; pass `full: true` only when the whole
+      output matters. For structure use `fs_grep mode="outline"`, for totals
+      `mode="count"`; `fs_read`/`fs_grep` beat `bash sed`/`od`, which are last resorts.
     - If the task is ambiguous and the ambiguity blocks progress, ask one short question. Otherwise proceed.
     - When a project has tests or builds, run them and report the real result.
     - If a tool fails, show the actual error and the next step. Do not hide failures.

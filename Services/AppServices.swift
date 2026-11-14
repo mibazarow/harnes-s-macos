@@ -20,6 +20,8 @@ struct AppServices: Sendable {
     let skills: SkillsService
     let mcp: MCPService
     let mcpManager: MCPManager
+    /// Session-scoped "read before write" state shared by every turn.
+    let fileLedger = FileReadingLedger()
     /// Installs the embedding model into the data folder after a fresh install.
     let modelInstaller: EmbeddingModelInstaller?
 

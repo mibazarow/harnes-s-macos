@@ -32,12 +32,20 @@ final class ToolLimitsTests: XCTestCase {
         return url
     }
 
+    /// Satisfies the read-before-write guard on the same registry, like one app session.
+    private func readFirst(_ tool: ToolRegistry, _ url: URL) async throws {
+        let result = try await tool.readFile(["path": url.path])
+        XCTAssertFalse(result.isError, result.output)
+    }
+
     // MARK: - edit_file
 
     func testEditFileReplacesEveryOccurrenceWithReplaceAll() async throws {
         let url = try write("a.txt", "foo foo foo")
+        let tool = registry()
+        try await readFirst(tool, url)
 
-        let result = try await registry().editFile([
+        let result = try await tool.editFile([
             "path": url.path, "old_text": "foo", "new_text": "bar", "replace_all": true
         ])
 
@@ -46,28 +54,197 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertTrue(result.output.contains("3"))
     }
 
-    func testEditFileReportsRemainingOccurrences() async throws {
+    func testEditFileRefusesAnAmbiguousOldText() async throws {
         let url = try write("b.txt", "foo foo")
+        let tool = registry()
+        try await readFirst(tool, url)
 
-        let result = try await registry().editFile([
+        let result = try await tool.editFile([
             "path": url.path, "old_text": "foo", "new_text": "bar"
         ])
 
-        XCTAssertFalse(result.isError)
-        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "bar foo")
-        XCTAssertTrue(result.output.contains("первое из 2"), result.output)
-        XCTAssertTrue(result.output.contains("replace_all=true"), result.output)
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.output.contains("2 совпадений"), result.output)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "foo foo")
+    }
+
+    func testEditFileByLineRangeShowsADiff() async throws {
+        let body = (1...300).map { "line \($0)" }.joined(separator: "\n")
+        let url = try write("range.txt", body)
+        let tool = registry()
+        try await readFirst(tool, url)
+
+        let result = try await tool.editFile([
+            "path": url.path, "start": 245, "end": 251, "new_text": "replaced A\nreplaced B"
+        ])
+
+        XCTAssertFalse(result.isError, result.output)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        let lines = text.components(separatedBy: "\n")
+        XCTAssertEqual(lines[243], "line 244")
+        XCTAssertEqual(lines[244], "replaced A")
+        XCTAssertEqual(lines[245], "replaced B")
+        XCTAssertEqual(lines[246], "line 252")
+        XCTAssertEqual(lines.count, 295)
+        XCTAssertTrue(result.output.contains("245- line 245"), result.output)
+        XCTAssertTrue(result.output.contains("245+ replaced A"), result.output)
+    }
+
+    func testEditFileByRegexRefusesMultipleMatches() async throws {
+        let url = try write("regex.txt", "item-1 item-2")
+        let tool = registry()
+        try await readFirst(tool, url)
+
+        let refused = try await tool.editFile([
+            "path": url.path, "pattern": #"item-\d"#, "new_text": "item"
+        ])
+        XCTAssertTrue(refused.isError)
+        XCTAssertTrue(refused.output.contains("2 совпадений"), refused.output)
+
+        let replaced = try await tool.editFile([
+            "path": url.path, "pattern": #"item-(\d)"#, "new_text": "item $1", "replace_all": true
+        ])
+        XCTAssertFalse(replaced.isError, replaced.output)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "item 1 item 2")
+    }
+
+    func testWriteFileAppendMode() async throws {
+        let url = try write("log.txt", "first")
+
+        let result = try await registry().writeFile([
+            "path": url.path, "content": "second", "append": true
+        ])
+
+        XCTAssertFalse(result.isError, result.output)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "first\nsecond")
+        XCTAssertTrue(result.output.contains("Дописано"), result.output)
+    }
+
+    func testEditWithoutReadingIsRefused() async throws {
+        let url = try write("blind.txt", "content")
+
+        let result = try await registry().editFile([
+            "path": url.path, "old_text": "content", "new_text": "changed"
+        ])
+
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.output.contains("Сначала прочитай файл"), result.output)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "content")
+    }
+
+    func testOverwritingAnUnreadFileIsRefused() async throws {
+        let url = try write("unread.txt", "keep me")
+
+        let result = try await registry().writeFile(["path": url.path, "content": "gone"])
+
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.output.contains("Сначала прочитай файл"), result.output)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "keep me")
+    }
+
+    func testWritingANewFileNeedsNoRead() async throws {
+        let url = sandbox.appendingPathComponent("fresh.txt")
+
+        let result = try await registry().writeFile(["path": url.path, "content": "new"])
+
+        XCTAssertFalse(result.isError, result.output)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "new")
+    }
+
+    func testEditAfterAnExternalChangeIsRefused() async throws {
+        let url = try write("moving.txt", "one")
+        let tool = registry()
+        try await readFirst(tool, url)
+
+        try "one plus more".write(to: url, atomically: true, encoding: .utf8)
+
+        let result = try await tool.editFile(["path": url.path, "old_text": "one", "new_text": "two"])
+
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.output.contains("изменился после чтения"), result.output)
+    }
+
+    func testReadManySatisfiesTheReadGuard() async throws {
+        let url = try write("many.txt", "alpha beta")
+        let tool = registry()
+
+        _ = try await tool.readMany(["paths": [url.path]])
+        let result = try await tool.editFile(["path": url.path, "old_text": "alpha", "new_text": "gamma"])
+
+        XCTAssertFalse(result.isError, result.output)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "gamma beta")
     }
 
     func testEditFileRejectsEmptyNeedle() async throws {
         let url = try write("c.txt", "text")
+        let tool = registry()
+        try await readFirst(tool, url)
 
-        let result = try await registry().editFile([
+        let result = try await tool.editFile([
             "path": url.path, "old_text": "", "new_text": "x"
         ])
 
         XCTAssertTrue(result.isError)
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "text")
+    }
+
+    // MARK: - fs_read window
+
+    func testFsReadDefaultsToFortyLinesAndNamesTheOffset() async throws {
+        let body = (1...812).map(String.init).joined(separator: "\n")
+        let url = try write("long.txt", body)
+
+        let result = try await registry().readFile(["path": url.path])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertTrue(result.output.contains("40: 40"), result.output.suffix(200).description)
+        XCTAssertFalse(result.output.contains("41: 41"), "по умолчанию должно быть ровно 40 строк")
+        XCTAssertTrue(result.output.contains("строки 1–40 из 812"), result.output.suffix(200).description)
+        XCTAssertTrue(result.output.contains("offset=41"), result.output.suffix(200).description)
+    }
+
+    func testFsReadNegativeOffsetReturnsTheTail() async throws {
+        let body = (1...812).map(String.init).joined(separator: "\n")
+        let url = try write("tail.txt", body)
+
+        let result = try await registry().readFile(["path": url.path, "offset": -20])
+
+        XCTAssertTrue(result.output.contains("793: 793"), result.output)
+        XCTAssertTrue(result.output.contains("812: 812"), result.output)
+        XCTAssertTrue(result.output.contains("последние 20 строк из 812"), result.output.suffix(120).description)
+    }
+
+    func testFsReadRefusesBinaryFiles() async throws {
+        let url = sandbox.appendingPathComponent("blob.bin")
+        try Data([0x00, 0x01, 0x02, 0xFF, 0x00]).write(to: url)
+
+        let result = try await registry().readFile(["path": url.path])
+
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.output.contains("binary"), result.output)
+    }
+
+    func testFsReadDoesNotLoadHugeFiles() async throws {
+        // 200k lines, ~20 MB: the reply must stay tiny and arrive fast.
+        let chunk = (0..<200_000).map { "\($0) " + String(repeating: "x", count: 90) }.joined(separator: "\n")
+        let url = try write("huge.log", chunk)
+
+        let start = Date()
+        let result = try await registry().readFile(["path": url.path])
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertFalse(result.isError)
+        XCTAssertLessThan(result.output.count, 10_000)
+        XCTAssertLessThan(elapsed, 2.0, "чтение 20 МБ заняло \(elapsed) с")
+    }
+
+    func testFsReadCutsAnEnormousLine() async throws {
+        let url = try write("minified.js", String(repeating: "y", count: 20_000))
+
+        let result = try await registry().readFile(["path": url.path])
+
+        XCTAssertTrue(result.output.contains("строка обрезана"), result.output.suffix(160).description)
+        XCTAssertLessThan(result.output.count, FileLines.maxLineChars + 200)
     }
 
     // MARK: - read_many
@@ -159,6 +336,32 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertEqual(ToolRegistry.string(args, "name"), "x")
     }
 
+    // MARK: - end to end
+
+    func testReadFindAndEditInTwoCalls() async throws {
+        // Acceptance scenario from the task: read, locate a paragraph, replace it by
+        // line number, see the diff — without re-reading the file to verify.
+        let body = (1...120).map { "строка \($0)" }.joined(separator: "\n")
+        let url = try write("scenario.md", body)
+        let tool = registry()
+
+        let read = try await tool.readFile(["path": url.path, "limit": 200])
+        XCTAssertFalse(read.isError, read.output)
+        XCTAssertTrue(read.output.contains("45: строка 45"), read.output)
+
+        let edit = try await tool.editFile([
+            "path": url.path, "start": 45, "end": 45, "new_text": "заменённый абзац"
+        ])
+
+        XCTAssertFalse(edit.isError, edit.output)
+        XCTAssertTrue(edit.output.contains("45- строка 45"), edit.output)
+        XCTAssertTrue(edit.output.contains("45+ заменённый абзац"), edit.output)
+        XCTAssertEqual(
+            try String(contentsOf: url, encoding: .utf8).components(separatedBy: "\n")[44],
+            "заменённый абзац"
+        )
+    }
+
     // MARK: - usage stats
 
     func testToolUsageStatsCountStepsAndRuns() {
@@ -220,11 +423,12 @@ final class ToolLimitsTests: XCTestCase {
     // MARK: - schema budget
 
     func testToolSchemaCostStaysInsideItsBudget() {
-        // Measured 2026-11-14: 3 635 tokens for 46 tools by the app's own estimator.
-        // The ceiling keeps ~10% headroom: a tool that pushes the catalog past it has to
-        // make that trade explicitly instead of hiding it in a new description.
+        // Measured 2026-11-14: 4 405 tokens for 49 tools by the app's own estimator
+        // (3 635 at 46 before doc_read/doc_write/image_read). The ceiling keeps ~8%
+        // headroom: a tool that pushes the catalog past it has to make that trade
+        // explicitly instead of hiding it in a new description.
         let cost = ToolRegistry.schemasTokenCost()
-        XCTAssertLessThanOrEqual(cost, 4_000, "\(cost) токенов на \(ToolRegistry.definitions.count) инструментов")
+        XCTAssertLessThanOrEqual(cost, 4_800, "\(cost) токенов на \(ToolRegistry.definitions.count) инструментов")
     }
 
     // MARK: - argument coercion
@@ -250,8 +454,10 @@ final class ToolLimitsTests: XCTestCase {
 
     func testStringBooleanIsAccepted() async throws {
         let url = try write("coerce-bool.txt", "foo foo")
+        let tool = registry()
+        try await readFirst(tool, url)
 
-        let result = try await registry().editFile([
+        let result = try await tool.editFile([
             "path": url.path, "old_text": "foo", "new_text": "bar", "replace_all": "true"
         ])
 
@@ -288,6 +494,58 @@ final class ToolLimitsTests: XCTestCase {
 
         XCTAssertTrue(exchange.output.contains("обрезано 96000 символов"), exchange.output.suffix(80).description)
         XCTAssertLessThan(exchange.output.count, 4_100)
+    }
+
+    // MARK: - grep modes
+
+    func testGrepLiteralAndIgnoreCase() async throws {
+        _ = try write("grep-flags.txt", "Hello world\naxb\n")
+
+        let regex = try await registry().grep(["pattern": "a.b", "path": sandbox.path])
+        XCTAssertTrue(regex.output.contains("axb"), regex.output)
+
+        let literal = try await registry().grep(["pattern": "a.b", "path": sandbox.path, "literal": true])
+        XCTAssertFalse(literal.output.contains("axb"), literal.output)
+
+        let cased = try await registry().grep(["pattern": "hello", "path": sandbox.path])
+        XCTAssertFalse(cased.output.contains("Hello"), cased.output)
+        let folded = try await registry().grep(["pattern": "hello", "path": sandbox.path, "ignore_case": true])
+        XCTAssertTrue(folded.output.contains("Hello"), folded.output)
+    }
+
+    func testGrepCountModeTotalsPerFile() async throws {
+        _ = try write("count-a.txt", "needle\nneedle\n")
+        _ = try write("count-b.txt", "needle\n")
+
+        let result = try await registry().grep(["pattern": "needle", "path": sandbox.path, "mode": "count"])
+
+        XCTAssertTrue(result.output.contains("Всего: 3"), result.output)
+        XCTAssertTrue(result.output.contains("count-a.txt: 2"), result.output)
+    }
+
+    func testGrepLimitCapsMatches() async throws {
+        _ = try write("many-matches.txt", Array(repeating: "needle", count: 300).joined(separator: "\n"))
+
+        let result = try await registry().grep(["pattern": "needle", "path": sandbox.path, "limit": 50])
+
+        XCTAssertTrue(result.output.contains("показаны первые 50"), result.output.suffix(160).description)
+    }
+
+    func testGrepOutlineReturnsStructure() async throws {
+        _ = try write("outline.swift", """
+        struct Router {
+            func handle() {}
+            private func privateHelper() {}
+        }
+        """)
+        _ = try write("outline.md", "# Title\n\ntext\n\n## Section\n")
+
+        let result = try await registry().grep(["pattern": ".", "path": sandbox.path, "mode": "outline"])
+
+        XCTAssertTrue(result.output.contains("outline.swift"), result.output)
+        XCTAssertTrue(result.output.contains("struct Router"), result.output)
+        XCTAssertTrue(result.output.contains("func handle"), result.output)
+        XCTAssertTrue(result.output.contains("# Title"), result.output)
     }
 
     // MARK: - shell
@@ -358,12 +616,30 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(start), 5)
     }
 
-    func testShellOutputIsCapped() async throws {
+    func testShellOutputIsCappedAtTwoThousandByDefault() async throws {
         let result = try await registry().runShell(["command": "seq 1 200000"])
 
         XCTAssertFalse(result.isError)
+        XCTAssertLessThan(result.output.count, 2_300)
+        XCTAssertTrue(result.output.contains("обрезано: показано"), result.output.suffix(160).description)
+        XCTAssertTrue(result.output.contains("full: true"), result.output.suffix(160).description)
+    }
+
+    func testShellFullFlagReturnsMore() async throws {
+        let result = try await registry().runShell(["command": "seq 1 200000", "full": true])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertGreaterThan(result.output.count, 2_000)
         XCTAssertLessThanOrEqual(result.output.count, 30_100)
-        XCTAssertTrue(result.output.contains("вывод обрезан"), result.output.suffix(160).description)
+    }
+
+    func testShellRetriesWithTheCLocaleOnIllegalByteSequence() async throws {
+        let result = try await registry().runShell([
+            "command": #"printf '\xff\xfehello' | sed 's/[^[:print:]]//g'"#
+        ])
+
+        XCTAssertFalse(result.output.contains("illegal byte sequence"), result.output)
+        XCTAssertTrue(result.output.contains("hello"), result.output)
     }
 
     func testShellKeepsStderrSeparate() async throws {

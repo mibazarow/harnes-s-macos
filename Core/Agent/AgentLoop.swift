@@ -313,6 +313,12 @@ struct AgentLoop: Sendable {
     }
 
     private static func imagePath(from output: String) -> String? {
+        // `[image: /path.png]` is the explicit marker; screenshots keep their older
+        // human-readable prefix so existing traces still render.
+        if let start = output.range(of: "[image: "),
+           let end = output.range(of: "]", range: start.upperBound..<output.endIndex) {
+            return String(output[start.upperBound..<end.lowerBound]).trimmingCharacters(in: .whitespaces)
+        }
         guard let range = output.range(of: "Скриншот: ") else { return nil }
         let path = output[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
         return path.hasSuffix(".png") ? path : nil

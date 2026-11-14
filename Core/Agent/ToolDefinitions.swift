@@ -28,13 +28,16 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "edit_file",
-            description: "Replace an exact occurrence of old_text with new_text. By default only the first one; the result says how many occurrences remain.",
+            description: "Edit by line range (start/end), regex (pattern) or exact text (old_text). Ambiguous matches are refused. Returns a diff of what changed.",
             parameters: schema([
                 "path": ["type": "string"],
-                "old_text": ["type": "string"],
+                "start": ["type": "integer", "description": "First line to replace, 1-based"],
+                "end": ["type": "integer", "description": "Last line to replace, inclusive (default start)"],
+                "pattern": ["type": "string", "description": "Regex to replace instead of line range"],
+                "old_text": ["type": "string", "description": "Exact text to replace"],
                 "new_text": ["type": "string"],
-                "replace_all": ["type": "boolean", "description": "Replace every occurrence, default false (first only)"]
-            ], required: ["path", "old_text", "new_text"])
+                "replace_all": ["type": "boolean", "description": "Replace every match, default false"]
+            ], required: ["path", "new_text"])
         ),
         ToolDefinition(
             name: "apply_patch",
@@ -181,10 +184,12 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "bash",
-            description: "Run a shell command in the workspace and return stdout/stderr.",
+            description: "Run a shell command in the workspace. Output is cut to 2000 characters by default and the reply says how much was left; pass full: true only when the whole output matters.",
             parameters: schema([
                 "command": ["type": "string"],
-                "timeout_ms": ["type": "integer", "description": "Default 60000"]
+                "timeout_ms": ["type": "integer", "description": "Default 60000"],
+                "max_chars": ["type": "integer", "description": "Output cap in characters, default 2000"],
+                "full": ["type": "boolean", "description": "Return up to 30000 characters instead"]
             ], required: ["command"])
         ),
         ToolDefinition(
@@ -215,8 +220,46 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "ocr",
-            description: "Extract text from an image file using the macOS Vision framework.",
-            parameters: schema(["path": ["type": "string"]], required: ["path"])
+            description: "Extract text from an image with the macOS Vision framework. coords=true also returns pixel bounding boxes for clicking.",
+            parameters: schema([
+                "path": ["type": "string"],
+                "lang": ["type": "array", "items": ["type": "string"], "description": "Languages, default [ru, en]"],
+                "coords": ["type": "boolean", "description": "Include pixel bounding boxes"]
+            ], required: ["path"])
+        ),
+        ToolDefinition(
+            name: "doc_read",
+            description: "Read a document by extension: pdf (page range), docx, xlsx, pptx, odt, rtf, and plain text/markdown. Use it instead of fs_read for these formats.",
+            parameters: schema([
+                "path": ["type": "string"],
+                "page_from": ["type": "integer", "description": "PDF first page, 1-based"],
+                "page_to": ["type": "integer", "description": "PDF last page, inclusive"],
+                "offset": ["type": "integer", "description": "For plain text: first line"],
+                "limit": ["type": "integer", "description": "For plain text: max lines"]
+            ], required: ["path"])
+        ),
+        ToolDefinition(
+            name: "doc_write",
+            description: "Build a document from markdown. Supported extensions: docx, rtf, pdf, html, md, txt.",
+            parameters: schema([
+                "path": ["type": "string", "description": "Output file, extension decides the format"],
+                "content": ["type": "string", "description": "Markdown source"],
+                "source": ["type": "string", "description": "Or a path to a markdown file"]
+            ], required: ["path"])
+        ),
+        ToolDefinition(
+            name: "image_read",
+            description: "Inspect or transform an image (EXIF orientation, crop, rotate, resize) and return a PNG the chat can display. No external tools needed.",
+            parameters: schema([
+                "path": ["type": "string"],
+                "info": ["type": "boolean", "description": "Only report size and orientation"],
+                "width": ["type": "integer", "description": "Target width, keeps aspect"],
+                "height": ["type": "integer", "description": "Target height, keeps aspect"],
+                "scale_down": ["type": "integer", "description": "Shrink only if wider than this"],
+                "crop_x": ["type": "integer"], "crop_y": ["type": "integer"],
+                "crop_w": ["type": "integer"], "crop_h": ["type": "integer"],
+                "rotate": ["type": "integer", "description": "Degrees clockwise"]
+            ], required: ["path"])
         ),
         ToolDefinition(
             name: "index_workspace",

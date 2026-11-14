@@ -34,6 +34,9 @@ struct ToolRegistry: Sendable {
     let todos: TodoStore?
     let readOnly: Bool
     let subagent: (@Sendable (String, Bool) async -> String)?
+    /// Session-scoped read state. Shared across turns so "read it first" survives the
+    /// step boundary; a subagent gets its own because it has its own context.
+    let ledger: FileReadingLedger
 
     init(
         workspace: URL,
@@ -48,7 +51,8 @@ struct ToolRegistry: Sendable {
         fileSafety: FileSafetyService? = nil,
         todos: TodoStore? = nil,
         readOnly: Bool = false,
-        subagent: (@Sendable (String, Bool) async -> String)? = nil
+        subagent: (@Sendable (String, Bool) async -> String)? = nil,
+        ledger: FileReadingLedger? = nil
     ) {
         self.workspace = workspace
         self.memory = memory
@@ -63,14 +67,34 @@ struct ToolRegistry: Sendable {
         self.todos = todos
         self.readOnly = readOnly
         self.subagent = subagent
+        self.ledger = ledger ?? FileReadingLedger()
     }
 
     static let mutatingTools: Set<String> = [
         "fs_write", "edit_file", "apply_patch", "trash_paths", "restore_trashed", "restore_version",
+        "doc_write",
         "git_commit", "git_stash",
         "bash", "schedule_add", "schedule_remove", "memory_add", "memory_forget", "secret_save",
         "skill_install", "index_workspace", "todowrite"
     ]
+
+    /// Refuses a blind write.
+    ///
+    /// The reference agents require a read before rewriting a file, and require a fresh
+    /// read when the file changed on disk since. Without this an `edit_file` by marker
+    /// is a guess: the agent has no idea what it is replacing.
+    func requireFreshRead(_ url: URL) async -> ToolResult? {
+        switch await ledger.status(of: url) {
+        case .fresh:
+            return nil
+        case .neverRead:
+            return .fail("Сначала прочитай файл: \(display(url)). Правка вслепую запрещена — "
+                + "вызови fs_read (или read_many), потом повтори.")
+        case .changed:
+            return .fail("Файл изменился после чтения: \(display(url)). "
+                + "Перечитай его через fs_read и повтори правку.")
+        }
+    }
 
     /// Unknown MCP servers count as mutating: the base list cannot describe them, and
     /// guessing "read" would let an unknown tool write in plan mode. A server whose
@@ -138,11 +162,11 @@ struct ToolRegistry: Sendable {
         do {
             switch call.name {
             case "fs_list": return try listFiles(args)
-            case "fs_read": return try readFile(args)
+            case "fs_read": return try await readFile(args)
             case "fs_write": return try await writeFile(args)
             case "edit_file": return try await editFile(args)
             case "apply_patch": return try await applyPatch(args)
-            case "read_many": return try readMany(args)
+            case "read_many": return try await readMany(args)
             case "project_overview": return projectOverview(args)
             case "search_code": return try await searchCode(args)
             case "git_commit": return try await gitCommit(args)
@@ -167,6 +191,9 @@ struct ToolRegistry: Sendable {
             case "browser": return try await browser(args)
             case "screenshot": return try screenshot(args)
             case "ocr": return try ocr(args)
+            case "doc_read": return try await docRead(args)
+            case "doc_write": return try await docWrite(args)
+            case "image_read": return try await imageRead(args)
             case "index_workspace": return await indexWorkspace(args)
             case "schedule_add": return try scheduleAdd(args)
             case "schedule_list": return try scheduleList()

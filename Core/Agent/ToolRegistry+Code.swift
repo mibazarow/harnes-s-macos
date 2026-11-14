@@ -27,6 +27,7 @@ extension ToolRegistry {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return .fail("Файл не найден: \(display(url))")
         }
+        if let refusal = await requireFreshRead(url) { return refusal }
 
         let original = try String(contentsOf: url, encoding: .utf8)
         let updated: String
@@ -50,7 +51,7 @@ extension ToolRegistry {
     /// 60k is two full tool messages, enough for a real multi-file review.
     static let readManyBudget = 60_000
 
-    func readMany(_ args: [String: Any]) throws -> ToolResult {
+    func readMany(_ args: [String: Any]) async throws -> ToolResult {
         guard let paths = args["paths"] as? [String], !paths.isEmpty else {
             return .fail("paths обязателен")
         }
@@ -92,6 +93,7 @@ extension ToolRegistry {
             blocks.append(block)
             used += block.count
             read += 1
+            await ledger.note(url)
         }
 
         if failures == attempted.count {

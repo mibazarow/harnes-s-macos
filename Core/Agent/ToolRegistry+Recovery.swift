@@ -17,6 +17,7 @@ extension ToolRegistry {
             if let refusal = writeGuard(url) { return refusal }
             do {
                 let entry = try await fileSafety.trash(url)
+                await ledger.forget(url)
                 moved.append("#\(entry.id) \(entry.originalPath)")
             } catch {
                 return .fail("\(path): \(error.localizedDescription)")
@@ -38,6 +39,7 @@ extension ToolRegistry {
             return .fail("Нужен id")
         }
         let path = try await fileSafety.restore(id)
+        await ledger.forget(resolve(path))
         return .ok("Восстановлено: \(path)")
     }
 
@@ -56,6 +58,7 @@ extension ToolRegistry {
         }
         let target = resolve(path)
         try await fileSafety.restoreVersion(version, to: target.path)
+        await ledger.forget(target)
         return .ok("Восстановлено из версии: \(display(target))")
     }
 }

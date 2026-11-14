@@ -182,7 +182,8 @@ final class ChatStore {
             readOnly: planMode,
             subagent: { [weak self] prompt, readOnly in
                 await self?.runSubagent(prompt: prompt, readOnly: readOnly, provider: provider, model: model, services: services) ?? ""
-            }
+            },
+            ledger: services.fileLedger
         )
 
         let prepStart = ContinuousClock.now
