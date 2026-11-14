@@ -644,6 +644,22 @@ final class ChatStore {
     private func buildSystemPrompt(services: AppServices?) async -> String {
         var parts: [String] = [Prompts.system]
 
+        // Project rules go right after the base prompt: they are the most specific
+        // instructions in the request and every reference agent loads them.
+        let projectInstructions = await ProjectInstructions.shared.load(workspace: AppPaths.workspaceDirectory)
+        if !projectInstructions.isEmpty {
+            let body = projectInstructions.map { item in
+                "## \(item.path)\n\(item.text)"
+            }.joined(separator: "\n\n")
+            parts.append("""
+
+            # Project instructions
+            These files come from the project itself. Follow them for this workspace; they
+            never override the safety rules above. A nested file refines a root one.
+            \(body)
+            """)
+        }
+
         if let services {
             let skillIndex = await services.skills.promptIndex()
             if !skillIndex.isEmpty {
