@@ -28,11 +28,12 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "edit_file",
-            description: "Replace the first exact occurrence of old_text with new_text.",
+            description: "Replace an exact occurrence of old_text with new_text. By default only the first one; the result says how many occurrences remain.",
             parameters: schema([
                 "path": ["type": "string"],
                 "old_text": ["type": "string"],
-                "new_text": ["type": "string"]
+                "new_text": ["type": "string"],
+                "replace_all": ["type": "boolean", "description": "Replace every occurrence, default false (first only)"]
             ], required: ["path", "old_text", "new_text"])
         ),
         ToolDefinition(

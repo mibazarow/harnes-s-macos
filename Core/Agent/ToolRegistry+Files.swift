@@ -53,15 +53,37 @@ extension ToolRegistry {
               let new = args["new_text"] as? String else {
             return .fail("path, old_text и new_text обязательны")
         }
+        guard !old.isEmpty else {
+            // An empty needle matches everywhere and would insert `new` between every
+            // character. Refusing is the only sane answer.
+            return .fail("old_text не может быть пустым")
+        }
+        let replaceAll = args["replace_all"] as? Bool ?? false
         let url = resolve(path)
         if let refusal = writeGuard(url) { return refusal }
         var content = try String(contentsOf: url, encoding: .utf8)
-        guard content.contains(old) else {
+        let occurrences = content.components(separatedBy: old).count - 1
+        guard occurrences > 0 else {
             return .fail("Фрагмент не найден в \(display(url))")
         }
         _ = try? await fileSafety?.snapshot(url)
-        content = content.replacingOccurrences(of: old, with: new, options: .literal, range: content.range(of: old))
+        if replaceAll {
+            content = content.replacingOccurrences(of: old, with: new, options: .literal)
+        } else {
+            content = content.replacingOccurrences(of: old, with: new, options: .literal, range: content.range(of: old))
+        }
         try content.write(to: url, atomically: true, encoding: .utf8)
+
+        // Say how many occurrences are left: the first-only default otherwise looks
+        // like the job is done, and the model re-reads the file and edits it again for
+        // every remaining match. Reporting the count here removes most of those steps.
+        if replaceAll {
+            return .ok("Изменено: \(display(url)) — заменено \(occurrences) вхождений")
+        }
+        if occurrences > 1 {
+            return .ok("Изменено: \(display(url)) — первое из \(occurrences) вхождений; "
+                + "ещё \(occurrences - 1) — повтори с replace_all=true")
+        }
         return .ok("Изменено: \(display(url))")
     }
 
