@@ -143,4 +143,65 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertFalse(result.isError)
         XCTAssertTrue(result.output.contains("обрезано на 20 000"), result.output.suffix(120).description)
     }
+
+    // MARK: - shell
+
+    func testShellTimeoutKillsTheWholeProcessTree() async throws {
+        let pidFile = sandbox.appendingPathComponent("child.pid")
+        // The backgrounded sleep is a grandchild of zsh: terminate() used to leave it
+        // running until its own 300 seconds ran out.
+        let command = "sleep 300 & echo $! > \(pidFile.path); wait"
+
+        let start = Date()
+        do {
+            _ = try await registry().runShell(["command": command, "timeout_ms": 1_000])
+            XCTFail("команда должна была упереться в таймаут")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("таймаут"), error.localizedDescription)
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5)
+
+        let text = (try? String(contentsOf: pidFile, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let pid = pid_t(text) else {
+            return XCTFail("не удалось прочитать pid ребёнка: \(text)")
+        }
+        var attempts = 0
+        while kill(pid, 0) == 0, attempts < 40 {
+            usleep(50_000)
+            attempts += 1
+        }
+        XCTAssertNotEqual(kill(pid, 0), 0, "процесс \(pid) пережил таймаут")
+    }
+
+    func testShellCancellationStopsTheProcess() async throws {
+        let tool = registry()
+        let start = Date()
+        let task = Task { try await tool.runShell(["command": "sleep 60", "timeout_ms": 60_000]) }
+        try await Task.sleep(for: .milliseconds(300))
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("команда должна была отмениться")
+        } catch {
+            // CancellationError or the wrapped failure: either way it must stop early.
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5)
+    }
+
+    func testShellOutputIsCapped() async throws {
+        let result = try await registry().runShell(["command": "seq 1 200000"])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertLessThanOrEqual(result.output.count, 30_100)
+        XCTAssertTrue(result.output.contains("вывод обрезан"), result.output.suffix(160).description)
+    }
+
+    func testShellKeepsStderrSeparate() async throws {
+        let result = try await registry().runShell(["command": "echo out; echo err 1>&2"])
+
+        XCTAssertTrue(result.output.contains("out"), result.output)
+        XCTAssertTrue(result.output.contains("--- stderr ---"), result.output)
+        XCTAssertTrue(result.output.contains("err"), result.output)
+    }
 }
