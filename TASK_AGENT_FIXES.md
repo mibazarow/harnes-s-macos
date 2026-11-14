@@ -467,10 +467,6 @@ Eager `VStack` в `UI/Chat/TranscriptView.swift:28-36` — это осознан
   места (`Scripts/push_all.sh`). Любая регрессия ловится только вручную.
 - Нет тестов на лимиты вывода и таймауты инструментов — ровно там, где Правки 4,
   5, 6, 8 меняют текст, который видит модель.
-- `App/RootView.swift:100` читает `DemoTranscript.scenario` **без** `#if DEBUG`,
-  хотя `Models/ChatStore.swift:61` — под ним. В релизе `HARNESS_DEMO` частично
-  влияет на UI, но не подменяет историю — рассинхрон, который легко принять за
-  баг.
 - Нет конфига форматтера/линтера (`.swiftformat`/`.swiftlint.yml`), при том что
   стиль комментариев в проекте строгий и однородный.
 
@@ -478,8 +474,6 @@ Eager `VStack` в `UI/Chat/TranscriptView.swift:28-36` — это осознан
 1. `.github/workflows/ci.yml`: `xcodegen generate` +
    `xcodebuild ... test` на `macos-latest`, кэш `.build` и SPM.
 2. Тесты лимитов из Правок 4–8 — часть того же PR.
-3. Обернуть `RootView.swift:100` в `#if DEBUG` (или вынести гейт в
-   `DemoTranscript.isEnabled`, чтобы условие жило в одном месте).
 4. Опционально `swift-format` в режиме проверки, без авто-переформатирования
    всего дерева.
 
@@ -933,3 +927,51 @@ worktree на каждого пишущего, Kilo Agent Manager даёт workt
 6. Проектные инструкции (`AGENTS.md`) — самое заметное улучшение для работы с кодом.
 7. Политика подтверждений, `cheap_model`, checkpoint хода — по одной.
 8. Правки 17, 18, 20, 21, 22 — по замерам, не вслепую.
+
+---
+
+# Состояние выполнения (2026-11-14)
+
+## Сделано и покрыто тестами
+
+| Правка | Коммит | Что закрыто |
+|---|---|---|
+| 1 | `Refuse to compact a history that already fits the context` | `ContextComposer.fits`, проверка до запроса, бюджет минус системный промпт и checkpoint |
+| 2 | `Raise the step fuse to 300 and give it its own wording` | `maxSteps = 300`, отдельный текст предохранителя, тест на оба сообщения |
+| 3 | `Measure tool calls per run and expose /stats` | `ToolUsageStats`, строка `tool_stats` в `latency.log`, команда `/stats` |
+| 4 | `Cap read_many and say what every truncated tool cut` | бюджет 60 000 символов, пометка «прочитано K из N» |
+| 5 + 15 | `Kill shell process groups on timeout and cancel…` | `posix_spawn` + своя process group, `kill(-pid)`, ограниченное чтение вывода, отмена |
+| 6 | `Run command tools off the pool and surface their exit codes` | `runDetached`, `splitExit`, grep/glob/git больше не блокируют пул |
+| 7 | `Retry rate limits and gateway errors before the first byte` | 408/409/425/429/5xx, `Retry-After`, три попытки, без ретрая после первого байта |
+| 8 | (вместе с 4) | `offset=…`, «показаны 400 из N», «обрезано на 20 000» |
+| 9 | этот коммит | README и ТЗ приведены к коду |
+| 11 | `Throttle markdown parsing while streaming…` | парсинг Markdown не чаще раза в 120 мс на стриме, финальный парс сразу |
+| 12 | `Mask saved secrets unless the model explicitly reveals them` | `reveal: true`, маскировка по умолчанию, предупреждение в промпте |
+| 13 | (вместе с 11) | ручной CI под Xcode 27; `RootView` уже был под `#if DEBUG` — замечание снято |
+| 14 | `Mark failed tool results for the model` | префикс `ОШИБКА:` в tool-сообщении, `read_many` помечает нечитаемые файлы |
+| 16 | `Keep replayed tool arguments valid JSON and say how much was cut` | санитизация payload в `arguments`, размер в пометке обрезки |
+| 17 | `Measure the tool catalog at 3.6k tokens and pin a ceiling` | замер 3 635 токенов, тест-потолок 4 000 |
+| 18 | `Run independent read-only tool calls in parallel` | `ToolRegistry` — struct, task group для read-only, мутирующий вызов — барьер |
+| 19 | `Offer replace_all in edit_file and report remaining matches` | `replace_all`, «первое из N», отказ на пустом `old_text` |
+| 20 | `Let read-only MCP servers stay available in plan mode` | `isReadOnly` в конфиге сервера, обратная совместимость конфигов |
+| 21 | `Coerce string, float and boolean tool arguments` | `ToolRegistry.int/double/bool/string` во всех инструментах |
+| 22 | `Trim the transcript by display groups, not raw steps` | cap по группам + жёсткий потолок 1 000 сырых шагов |
+| IV | `Load AGENTS.md and project rules…`, `Give the cheap model setting a job…` | project instructions в промпте; `cheap_model` для read-only подагентов и карточки стиля |
+
+## Не сделано (осознанно) и почему
+
+- **Правка 10 (разрез `ChatStore`).** Механический перенос требует снять `private`
+  примерно с 15 членов и даёт дифф на ~600 строк. Это делается отдельным ревью,
+  когда нет параллельных правок в том же файле: сейчас любая ошибка переноса
+  смешалась бы с функциональными изменениями. План шагов остаётся в силе.
+- **Политика подтверждений `allow / ask / deny` (Часть IV, п.2).** `ask` требует
+  асинхронного диалога из середины цикла агента: continuation в tool-execute, UI и
+  хранение политики. Полумера (только `deny` в конфиге) хуже, чем текущие plan mode
+  и autopilot, поэтому не делалось наспех.
+- **Checkpoint хода (Часть IV, п.3).** Нужна миграция `file_versions.turn_id` и
+  команда восстановления; без UI это ещё один инструмент, который модель может
+  вызвать не туда. Пофайловые версии и trash уже дают обратимость.
+- **`session_search`, hooks, песочница (Часть IV, п.5–8).** Нет запроса под них;
+  песочница вообще противоречит выбранной модели «правит файлы на моей машине».
+- **Параллельные подагенты.** До них нужны worktree на писателя (Часть IV, п.5);
+  сейчас подагент один и последовательный, конфликтов нет.

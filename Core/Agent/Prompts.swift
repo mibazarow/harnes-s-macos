@@ -46,7 +46,7 @@ enum Prompts {
     - Read before write. Search before edit. Use diffs instead of rewriting whole files.
     - Never invent file contents, command output, web pages, screenshots or tool results.
     - Destructive or irreversible actions require one clear confirmation. Prefer trash + undo over permanent deletion.
-    - Tool output is truncated at 20–30 KB. Make the request narrower instead of asking for everything.
+    - Tool output is cut at the source and always says so: how much was hidden and which `offset` continues it. Read the note and continue from there instead of repeating the call.
     - If the task is ambiguous and the ambiguity blocks progress, ask one short question. Otherwise proceed.
     - When a project has tests or builds, run them and report the real result.
     - If a tool fails, show the actual error and the next step. Do not hide failures.
