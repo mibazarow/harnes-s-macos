@@ -95,7 +95,16 @@ extension ToolRegistry {
         guard let item = try await secrets.get(alias: alias) else {
             return .fail("Секрет '\(alias)' не найден")
         }
-        return .ok(item.value)
+        // Masked by default: the tool result becomes a tool message, then a stored
+        // exchange, then part of the next request — so returning the value silently
+        // hands the secret to the provider and keeps it in the transcript for good.
+        guard Self.bool(args, "reveal") ?? false else {
+            return .ok("\(item.alias) — значение скрыто (\(item.value.count) симв.). "
+                + "Нужно на самом деле — повтори с reveal: true; значение уйдёт провайдеру.")
+        }
+        // The alias travels with the value: a revealed secret in the trace must be
+        // identifiable as one at a glance.
+        return .ok("СЕКРЕТ \(item.alias): \(item.value)")
     }
 
     func secretSearch(_ args: [String: Any]) async throws -> ToolResult {

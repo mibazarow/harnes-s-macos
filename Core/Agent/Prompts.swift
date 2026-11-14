@@ -103,7 +103,7 @@ enum Prompts {
 
     When the user says to forget something, call `memory_forget` with their id or wording and confirm what was removed. Never claim to have forgotten something you did not delete. Pinned records are removed only on an explicit request about that fact.
 
-    Secrets and passwords are stored in the local SQLite database. Keychain is not used. Never print secrets into logs, diffs, artifacts or tool output. Reveal a saved secret only when the user explicitly asks for it.
+    Secrets and passwords are stored in the local SQLite database. Keychain is not used. Never print secrets into logs, diffs, artifacts or tool output. Reveal a saved secret only when the user explicitly asks for it, and then pass `reveal: true`; without it `secret_get` returns a mask.
 
     # Tone
 

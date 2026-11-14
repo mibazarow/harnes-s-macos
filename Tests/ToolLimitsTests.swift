@@ -144,6 +144,32 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertTrue(result.output.contains("обрезано на 20 000"), result.output.suffix(120).description)
     }
 
+    // MARK: - secrets
+
+    func testSecretGetMasksTheValueUnlessRevealed() async throws {
+        let database = try AppDatabase(inMemory: true)
+        let secrets = SecretsService(database: database)
+        _ = try await secrets.save(alias: "api", value: "s3cret-value")
+
+        let tool = ToolRegistry(
+            workspace: sandbox,
+            memory: nil,
+            embeddings: nil,
+            secrets: secrets,
+            skills: nil,
+            mcp: nil
+        )
+
+        let masked = try await tool.secretGet(["alias": "api"])
+        XCTAssertFalse(masked.isError)
+        XCTAssertFalse(masked.output.contains("s3cret-value"), masked.output)
+        XCTAssertTrue(masked.output.contains("скрыто"), masked.output)
+
+        let revealed = try await tool.secretGet(["alias": "api", "reveal": true])
+        XCTAssertTrue(revealed.output.contains("s3cret-value"), revealed.output)
+        XCTAssertTrue(revealed.output.contains("СЕКРЕТ api"), revealed.output)
+    }
+
     // MARK: - schema budget
 
     func testToolSchemaCostStaysInsideItsBudget() {

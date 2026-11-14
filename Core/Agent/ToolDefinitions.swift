@@ -281,8 +281,11 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "secret_get",
-            description: "Read a saved secret by alias. Only when the user explicitly asks.",
-            parameters: schema(["alias": ["type": "string"]], required: ["alias"])
+            description: "Read a saved secret by alias. By default the value stays masked; reveal=true returns it and sends it to the provider in this conversation.",
+            parameters: schema([
+                "alias": ["type": "string"],
+                "reveal": ["type": "boolean", "description": "false (default) = mask, true = return the value"]
+            ], required: ["alias"])
         ),
         ToolDefinition(
             name: "secret_search",
