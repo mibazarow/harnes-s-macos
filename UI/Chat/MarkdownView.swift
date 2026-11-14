@@ -16,6 +16,10 @@ struct MarkdownView: View {
     /// resize — which is a large part of why dragging an edge felt like 15 fps.
     @State private var blocks: [Markup] = []
     @State private var parsedText: String?
+    /// Coalesces streaming bursts. Parsing the whole answer on every token was the
+    /// other half of the live-resize cost: at 40–60 chunks per second the parser ran
+    /// tens of times a second for no visible benefit.
+    @State private var parseTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -32,13 +36,44 @@ struct MarkdownView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: text, initial: true) { _, newValue in
-            guard parsedText != newValue else { return }
-            parsedText = newValue
-            blocks = Array(
-                Document(parsing: newValue, options: [.parseBlockDirectives, .parseSymbolLinks])
-                    .children
-            )
+            scheduleParse(newValue)
         }
+        // The final text must be parsed at once: the stream stopped, no more chunks are
+        // coming to flush the last one.
+        .onChange(of: isStreaming) { _, streaming in
+            if !streaming { scheduleParse(text) }
+        }
+        .onDisappear { parseTask?.cancel() }
+    }
+}
+
+extension MarkdownView {
+    private func scheduleParse(_ value: String) {
+        guard parsedText != value else { return }
+        guard isStreaming else {
+            parseTask?.cancel()
+            parseTask = nil
+            parsedText = value
+            blocks = Self.parse(value)
+            return
+        }
+        parseTask?.cancel()
+        parseTask = Task {
+            // 120 ms is below the point where a slower update is visible, and it
+            // collapses a whole burst of chunks into one parse.
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            guard parsedText != value else { return }
+            parsedText = value
+            blocks = Self.parse(value)
+        }
+    }
+
+    private static func parse(_ value: String) -> [Markup] {
+        Array(
+            Document(parsing: value, options: [.parseBlockDirectives, .parseSymbolLinks])
+                .children
+        )
     }
 }
 

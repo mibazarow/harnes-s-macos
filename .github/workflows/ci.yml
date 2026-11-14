@@ -1,0 +1,36 @@
+name: CI
+
+# Manual on purpose: the app targets macOS 27 and needs Xcode 27, which hosted
+# `macos-latest` runners do not provide yet. Switch the trigger to `push` once a runner
+# image with that SDK exists, or point `runs-on` at a self-hosted Mac.
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .build/SourcePackages
+          key: ${{ runner.os }}-spm-${{ hashFiles('Harness.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Test
+        run: |
+          xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Debug \
+            -derivedDataPath .build -destination 'platform=macOS' test
