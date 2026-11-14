@@ -1,6 +1,26 @@
 import Foundation
 
 extension ToolRegistry {
+    /// One line per reveal, never the value.
+    ///
+    /// Working with production credentials needs a trail: when a secret was read and
+    /// for which alias. The file is created 0600 next to the other logs.
+    static func auditReveal(alias: String, workspace: URL) {
+        let url = AppPaths.logsDirectory.appendingPathComponent("secrets-audit.log")
+        try? AppPaths.ensureDirectory(AppPaths.logsDirectory)
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(
+                atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600]
+            )
+        }
+        let line = "\(Timestamps.now()) reveal alias=\(alias) workspace=\(workspace.path)\n"
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: Data(line.utf8))
+        }
+    }
+
 // MARK: - Memory and indexing
     func indexWorkspace(_ args: [String: Any]) async -> ToolResult {
         guard let indexer else { return .fail("Индексатор недоступен") }
@@ -104,6 +124,7 @@ extension ToolRegistry {
         }
         // The alias travels with the value: a revealed secret in the trace must be
         // identifiable as one at a glance.
+        Self.auditReveal(alias: item.alias, workspace: workspace)
         return .ok("СЕКРЕТ \(item.alias): \(item.value)")
     }
 

@@ -33,7 +33,7 @@ struct ToolRegistry: Sendable {
     let fileSafety: FileSafetyService?
     let todos: TodoStore?
     let readOnly: Bool
-    let subagent: (@Sendable (String, Bool) async -> String)?
+    let subagent: (@Sendable (String, Bool) async -> SubagentOutcome)?
     /// Session-scoped read state. Shared across turns so "read it first" survives the
     /// step boundary; a subagent gets its own because it has its own context.
     let ledger: FileReadingLedger
@@ -51,7 +51,7 @@ struct ToolRegistry: Sendable {
         fileSafety: FileSafetyService? = nil,
         todos: TodoStore? = nil,
         readOnly: Bool = false,
-        subagent: (@Sendable (String, Bool) async -> String)? = nil,
+        subagent: (@Sendable (String, Bool) async -> SubagentOutcome)? = nil,
         ledger: FileReadingLedger? = nil
     ) {
         self.workspace = workspace
@@ -191,6 +191,7 @@ struct ToolRegistry: Sendable {
             case "browser": return try await browser(args)
             case "screenshot": return try screenshot(args)
             case "ocr": return try ocr(args)
+            case "app_logs": return try await appLogs(args)
             case "doc_read": return try await docRead(args)
             case "doc_write": return try await docWrite(args)
             case "image_read": return try await imageRead(args)

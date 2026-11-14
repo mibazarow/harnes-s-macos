@@ -210,6 +210,9 @@ extension ToolRegistry {
             return .fail("Нужен content (markdown) или source (путь к .md)")
         }
 
+        if TruncationGuard.isPlaceholder(content) {
+            return .fail("Контент обрезан сверху, сборка документа отменена: \(TruncationGuard.excerpt(content))")
+        }
         let output = resolve(path)
         if let refusal = writeGuard(output) { return refusal }
         if FileManager.default.fileExists(atPath: output.path),
@@ -309,14 +312,32 @@ extension ToolRegistry {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Named and numeric entities. Without numeric decoding, pages rendered as
+    /// `&#1055;…` look like garbage.
     static func decodeEntities(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&apos;", with: "'")
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&#xA;", with: "\n")
+        var out = text
+        for (entity, value) in [
+            ("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
+            ("&quot;", "\""), ("&apos;", "'"), ("&mdash;", "—"), ("&ndash;", "–"),
+            ("&laquo;", "«"), ("&raquo;", "»"), ("&hellip;", "…"), ("&copy;", "©"),
+            ("&trade;", "™"), ("&middot;", "·"), ("&times;", "×"), ("&#xA;", "\n")
+        ] {
+            out = out.replacingOccurrences(of: entity, with: value)
+        }
+        guard let regex = try? NSRegularExpression(pattern: #"&#(x?[0-9A-Fa-f]+);"#) else { return out }
+        let matches = regex.matches(in: out, range: NSRange(out.startIndex..., in: out))
+        for match in matches.reversed() {
+            guard match.numberOfRanges > 1,
+                  let range = Range(match.range, in: out),
+                  let valueRange = Range(match.range(at: 1), in: out) else { continue }
+            let raw = String(out[valueRange])
+            let scalar = raw.hasPrefix("x") || raw.hasPrefix("X")
+                ? UInt32(raw.dropFirst(), radix: 16)
+                : UInt32(raw, radix: 10)
+            guard let scalar, let unicode = Unicode.Scalar(scalar) else { continue }
+            out.replaceSubrange(range, with: String(Character(unicode)))
+        }
+        return out
     }
 
     static func matches(in text: String, pattern: String) -> [String] {

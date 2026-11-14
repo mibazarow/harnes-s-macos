@@ -1,5 +1,18 @@
 import Foundation
 
+/// What a subagent produced.
+///
+/// A bare String could not distinguish "answered with an empty string" from "ran out of
+/// steps while calling tools", and the tool reported both as a successful empty answer.
+struct SubagentOutcome: Sendable {
+    var text: String
+    var error: String?
+    var steps: Int = 0
+    var calls: Int = 0
+
+    var isEmpty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+}
+
 extension ToolRegistry {
 // MARK: - Agent state
     func runSubagent(_ args: [String: Any]) async -> ToolResult {
@@ -33,8 +46,15 @@ extension ToolRegistry {
             context += "\n\n## Уже найденные файлы (не искать заново)\n" + blocks.joined(separator: "\n\n")
         }
 
-        let answer = await subagent(context, readOnly)
-        return .ok(answer.isEmpty ? "(подагент ничего не вернул)" : String(answer.prefix(20_000)))
+        let outcome = await subagent(context, readOnly)
+        if outcome.isEmpty {
+            // An empty answer is a failure, not a result. Name the likely cause so the
+            // parent can retry with a narrower prompt instead of pretending it worked.
+            let reason = outcome.error
+                ?? "не вернул текст за \(outcome.steps) шагов (\(outcome.calls) вызовов инструментов)"
+            return .fail("Подагент: \(reason). Уточни задачу или сузь paths.")
+        }
+        return .ok(String(outcome.text.prefix(20_000)))
     }
 
     func todoWrite(_ args: [String: Any]) -> ToolResult {
@@ -47,6 +67,20 @@ extension ToolRegistry {
             return .fail("План не принят: у элементов нет поля text. Пример: \"items\": [{\"text\": \"шаг\", \"status\": \"pending\"}]")
         }
         return .ok("План обновлён:\n" + todos.summary)
+    }
+
+    /// Called by the loop after a stretch of work. Returns nil unless the plan has an
+    /// open step that has not been touched for a while.
+    ///
+    /// 12 tool calls without a status change is long enough to be real drift and short
+    /// enough that the plan still helps the model recover.
+    func todoNudge(callsSinceUpdate: Int) -> String? {
+        guard let todos, callsSinceUpdate >= 12 else { return nil }
+        let open = todos.items.filter { $0.status == "active" || $0.status == "pending" }
+        guard !open.isEmpty else { return nil }
+        let current = todos.items.first(where: { $0.status == "active" })?.text ?? open[0].text
+        return "[напоминание: \(callsSinceUpdate) вызовов без обновления плана; "
+            + "открыт шаг «\(current)» — отметь прогресс через todowrite]"
     }
 
     func todoRead() -> ToolResult {
@@ -77,14 +111,33 @@ extension ToolRegistry {
 // MARK: - Scheduler
     func scheduleAdd(_ args: [String: Any]) throws -> ToolResult {
         guard let scheduler else { return .fail("Планировщик недоступен") }
-        guard let title = args["title"] as? String,
-              let prompt = args["prompt"] as? String,
-              let minutes = Self.int(args, "interval_minutes") else {
-            return .fail("Нужны title, prompt и interval_minutes")
+        guard let title = args["title"] as? String, let prompt = args["prompt"] as? String else {
+            return .fail("Нужны title и prompt")
+        }
+        let minutes = Self.int(args, "interval_minutes")
+        let at = (args["at"] as? String).flatMap(Self.parseISO8601)
+        guard minutes != nil || at != nil else {
+            return .fail("Нужен interval_minutes (повтор) или at (ISO8601, одноразово)")
+        }
+        if minutes != nil, at != nil {
+            return .fail("Выбери одно: interval_minutes или at")
         }
 
-        let task = try scheduler.add(title: title, prompt: prompt, intervalMinutes: minutes)
+        let task = try scheduler.add(
+            title: title, prompt: prompt, intervalMinutes: minutes ?? 0, firesAt: at
+        )
+        if let firesAt = task.firesAt {
+            return .ok("Одноразовая задача #\(task.id) «\(task.title)» на \(firesAt).")
+        }
         return .ok("Расписание #\(task.id) создано: «\(task.title)» каждые \(task.intervalMinutes) мин.")
+    }
+
+    /// Models send both `2026-11-15T15:00:00Z` and the same with fractional seconds.
+    static func parseISO8601(_ text: String) -> Date? {
+        let plain = ISO8601DateFormatter()
+        if let date = plain.date(from: text) { return date }
+        plain.formatOptions.insert(.withFractionalSeconds)
+        return plain.date(from: text)
     }
 
     func scheduleList() throws -> ToolResult {
@@ -94,6 +147,9 @@ extension ToolRegistry {
 
         return .ok(tasks.map { task in
             let state = task.enabled ? "вкл" : "выкл"
+            if let firesAt = task.firesAt {
+                return "#\(task.id) «\(task.title)» — одноразово в \(firesAt), \(state)"
+            }
             return "#\(task.id) «\(task.title)» — каждые \(task.intervalMinutes) мин, \(state), следующее: \(task.nextRunAt)"
         }.joined(separator: "\n"))
     }

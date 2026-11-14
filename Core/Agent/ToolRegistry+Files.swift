@@ -80,6 +80,12 @@ extension ToolRegistry {
         guard let path = args["path"] as? String, let content = args["content"] as? String else {
             return .fail("path и content обязательны")
         }
+        // Never write the runtime's own cut marker: it means the payload arrived
+        // truncated, and writing it corrupts the file while reporting success.
+        if TruncationGuard.isPlaceholder(content) {
+            return .fail("Контент обрезан сверху, запись отменена: \(TruncationGuard.excerpt(content)) "
+                + "Передай текст заново, порциями если он длинный.")
+        }
         let url = resolve(path)
         if let refusal = writeGuard(url) { return refusal }
         let exists = FileManager.default.fileExists(atPath: url.path)
@@ -114,7 +120,8 @@ extension ToolRegistry {
             }
             await ledger.note(url)
             let appended = before.isEmpty ? content : (needsNewline ? "\n" : "") + content
-            return .ok("Дописано: \(display(url)) (+\(content.count) симв.)\n"
+            return .ok("Дописано: \(display(url)) (+\(payload.count) байт)\n"
+                + Self.echo(appended)
                 + Self.renderDiff(before: "", after: appended, label: "дописано"))
         }
 
@@ -126,7 +133,8 @@ extension ToolRegistry {
         }
         await ledger.note(url)
         let diff = Self.renderDiff(before: before, after: content, label: "записано")
-        return .ok("Записано: \(display(url)) (\(content.count) симв.)\n" + diff)
+        return .ok("Записано: \(display(url)) (\(content.utf8.count) байт)\n"
+            + Self.echo(content) + diff)
     }
 
     /// Writes and proves it happened.
@@ -145,6 +153,16 @@ extension ToolRegistry {
                     "файла нет на диске или его размер \(size) ≠ \(data.count) байт"
             ])
         }
+    }
+
+    /// First and last characters of what actually went to disk.
+    ///
+    /// A size alone does not show a substituted body; the model (and the user) must be
+    /// able to see whether the written text is the text that was sent.
+    static func echo(_ text: String) -> String {
+        let flat = text.replacingOccurrences(of: "\n", with: "⏎")
+        if flat.count <= 120 { return "содержимое: \(flat)\n" }
+        return "начало: \(String(flat.prefix(60)))…\nконец: …\(String(flat.suffix(60)))\n"
     }
 
     /// Compact diff of only the changed region.
@@ -188,6 +206,10 @@ extension ToolRegistry {
         guard let path = args["path"] as? String,
               let new = args["new_text"] as? String else {
             return .fail("path и new_text обязательны")
+        }
+        if TruncationGuard.isPlaceholder(new) {
+            return .fail("new_text обрезан сверху, правка отменена: \(TruncationGuard.excerpt(new)) "
+                + "Передай текст заново.")
         }
         let url = resolve(path)
         if let refusal = writeGuard(url) { return refusal }

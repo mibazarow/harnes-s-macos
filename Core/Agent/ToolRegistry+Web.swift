@@ -13,12 +13,36 @@ extension ToolRegistry {
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0) Harness/1.0", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            return .fail("HTTP \(http.statusCode) для \(raw)")
+            let body = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            // An empty 401/403/429 is usually a network-level block, not a missing page;
+            // saying so saves the model a retry loop that cannot succeed.
+            let hint = [401, 403, 429].contains(http.statusCode) && body.isEmpty
+                ? " — пустое тело: вероятно, блокировка по IP или региону. "
+                    + "Попробуй другой proxy через scrapling make_request или stealthy_fetch."
+                : ""
+            return .fail("HTTP \(http.statusCode) для \(raw)\(hint)")
         }
         guard let html = String(data: data, encoding: .utf8) else {
             return .fail("Ответ не является текстом")
         }
-        return .ok(Self.plainText(fromHTML: html, limit: 30_000))
+        // Extraction happens first, pagination second: a page is one HTML blob, but the
+        // model often needs only the top of it, and says so with offset.
+        let full = Self.plainText(fromHTML: html, limit: 200_000)
+        guard !full.isEmpty else { return .ok("(на странице нет читаемого текста)") }
+        let offset = max(0, Self.int(args, "offset") ?? 0)
+        let limit = min(max(Self.int(args, "limit") ?? 30_000, 500), 100_000)
+        guard offset < full.count else {
+            return .ok("(пусто: offset=\(offset) за концом текста, всего \(full.count) симв.)")
+        }
+        let start = full.index(full.startIndex, offsetBy: offset)
+        let end = full.index(start, offsetBy: min(limit, full.count - offset))
+        var out = String(full[start..<end])
+        if end < full.endIndex {
+            out += "\n\n[обрезано: символы \(offset)–\(full.distance(from: full.startIndex, to: end)) "
+                + "из \(full.count); продолжение — offset=\(full.distance(from: full.startIndex, to: end))]"
+        }
+        return .ok(out)
     }
 
     func webSearch(_ args: [String: Any]) async throws -> ToolResult {
@@ -139,15 +163,36 @@ extension ToolRegistry {
 
     func screenshot(_ args: [String: Any]) throws -> ToolResult {
         try AppPaths.ensureDirectory(AppPaths.artifactsDirectory)
-        let name = "screen-\(Int(Date().timeIntervalSince1970)).png"
-        let path = AppPaths.artifactsDirectory.appendingPathComponent(name)
+        let path: URL
+        if let saveTo = args["save_to"] as? String, !saveTo.isEmpty {
+            var url = resolve(saveTo)
+            if url.pathExtension.isEmpty { url.appendPathExtension("png") }
+            if let refusal = writeGuard(url) { return refusal }
+            try AppPaths.ensureDirectory(url.deletingLastPathComponent())
+            path = url
+        } else {
+            path = AppPaths.artifactsDirectory
+                .appendingPathComponent("screen-\(UUID().uuidString.prefix(8)).png")
+        }
+
         var command = "screencapture -x"
         if let windowID = Self.int(args, "window_id") {
             command += " -o -l \(windowID)"
         }
+        if let clip = args["clip"] as? [String: Any],
+           let x = Self.int(clip, "x"), let y = Self.int(clip, "y"),
+           let width = Self.int(clip, "width"), let height = Self.int(clip, "height") {
+            command += " -R \(x),\(y),\(width),\(height)"
+        }
         command += " \(Self.shellQuote(path.path))"
-        _ = try Self.runSync(command, cwd: workspace, timeout: 30)
-        return .ok("Скриншот: \(path.path)\nПоказать пользователю: путь можно передать в ocr(path: \"\(path.path)\").")
+
+        let result = try Self.runSync(command, cwd: workspace, timeout: 30)
+        let (status, body) = Self.splitExit(result)
+        guard status == 0, FileManager.default.fileExists(atPath: path.path) else {
+            return .fail("screencapture: \(String(body.prefix(300)))")
+        }
+        return .ok("Скриншот: \(path.path)\nРазмер: \(Self.humanSize(FileLines.fileSize(path))). "
+            + "Дальше: image_read(path:) для кропа/сжатия, ocr(path:) для текста.")
     }
 
     func ocr(_ args: [String: Any]) throws -> ToolResult {
@@ -208,27 +253,64 @@ extension ToolRegistry {
         return mapped.isEmpty ? ["ru-RU", "en-US"] : mapped
     }
 
+    /// Readable text from a page, without the navigation soup.
+    ///
+    /// The old extractor only removed script/style and tags, so menus, footers and
+    /// duplicate nav blocks came through three or four times. Prefer <main>/<article>,
+    /// drop chrome, collapse repeated lines.
     static func plainText(fromHTML html: String, limit: Int) -> String {
         var text = html
+
+        for tag in ["main", "article"] {
+            if let open = text.range(of: "<\(tag)[^>]*>", options: .regularExpression),
+               let close = text.range(
+                of: "</\(tag)>", options: .regularExpression, range: open.upperBound..<text.endIndex
+               ) {
+                text = String(text[open.upperBound..<close.lowerBound])
+                break
+            }
+        }
+
         for pattern in [
+            #"(?is)<head[\s\S]*?</head>"#,
             #"(?is)<script[\s\S]*?</script>"#,
             #"(?is)<style[\s\S]*?</style>"#,
-            #"(?is)<head[\s\S]*?</head>"#,
+            #"(?is)<noscript[\s\S]*?</noscript>"#,
+            #"(?is)<nav[\s\S]*?</nav>"#,
+            #"(?is)<header[\s\S]*?</header>"#,
+            #"(?is)<footer[\s\S]*?</footer>"#,
+            #"(?is)<aside[\s\S]*?</aside>"#,
+            #"(?is)<form[\s\S]*?</form>"#,
+            #"(?is)<svg[\s\S]*?</svg>"#,
             #"(?is)<!--[\s\S]*?-->"#
         ] {
             text = text.replacingOccurrences(of: pattern, with: " ", options: .regularExpression)
         }
+
         text = text.replacingOccurrences(of: #"(?i)<br\s*/?>"#, with: "\n", options: .regularExpression)
-        text = text.replacingOccurrences(of: #"(?i)</(p|div|li|h[1-6]|tr)>"#, with: "\n", options: .regularExpression)
+        text = text.replacingOccurrences(
+            of: #"(?i)</(p|div|li|h[1-6]|tr|section|article|main|blockquote|pre|dt|dd)>"#,
+            with: "\n", options: .regularExpression
+        )
+        text = text.replacingOccurrences(of: #"(?i)<li[^>]*>"#, with: "• ", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"(?i)</t[dh]>"#, with: " | ", options: .regularExpression)
         text = text.replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
-        text = text.replacingOccurrences(of: #"&nbsp;"#, with: " ")
-        text = text.replacingOccurrences(of: #"&amp;"#, with: "&")
-        text = text.replacingOccurrences(of: #"&lt;"#, with: "<")
-        text = text.replacingOccurrences(of: #"&gt;"#, with: ">")
-        text = text.replacingOccurrences(of: #"&quot;"#, with: "\"")
-        text = text.replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
-        text = text.replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        text = decodeEntities(text)
+
+        // Collapse runs and duplicate lines: the same menu item repeated 4 times is the
+        // single biggest source of wasted context on real pages.
+        var lines: [String] = []
+        for rawLine in text.components(separatedBy: "\n") {
+            let line = rawLine
+                .replacingOccurrences(of: #"[ \t\u{00A0}]+"#, with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespaces)
+            if line.count <= 1 { continue }
+            if lines.last == line { continue }
+            lines.append(line)
+        }
+        var result = lines.joined(separator: "\n")
+        result = result.replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.count > limit ? String(trimmed.prefix(limit)) + "\n…" : trimmed
     }
 }

@@ -423,12 +423,12 @@ final class ToolLimitsTests: XCTestCase {
     // MARK: - schema budget
 
     func testToolSchemaCostStaysInsideItsBudget() {
-        // Measured 2026-11-14: 4 405 tokens for 49 tools by the app's own estimator
-        // (3 635 at 46 before doc_read/doc_write/image_read). The ceiling keeps ~8%
-        // headroom: a tool that pushes the catalog past it has to make that trade
-        // explicitly instead of hiding it in a new description.
+        // Measured 2026-11-14: 4 886 tokens for 50 tools by the app's own estimator
+        // (3 635 at 46; 4 405 at 49). The ceiling keeps ~6% headroom: a tool that
+        // pushes the catalog past it has to make that trade explicitly instead of
+        // hiding it in a new description.
         let cost = ToolRegistry.schemasTokenCost()
-        XCTAssertLessThanOrEqual(cost, 4_800, "\(cost) токенов на \(ToolRegistry.definitions.count) инструментов")
+        XCTAssertLessThanOrEqual(cost, 5_200, "\(cost) токенов на \(ToolRegistry.definitions.count) инструментов")
     }
 
     // MARK: - argument coercion
@@ -479,7 +479,7 @@ final class ToolLimitsTests: XCTestCase {
         let data = try XCTUnwrap(exchange.arguments.data(using: .utf8))
         let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         XCTAssertEqual(object["path"] as? String, "a.txt")
-        XCTAssertTrue((object["content"] as? String)?.contains("обрезано") == true)
+        XCTAssertTrue((object["content"] as? String)?.contains("СЛУЖЕБНАЯ ПОМЕТКА") == true)
     }
 
     func testToolExchangeLeavesSmallArgumentsAlone() {
@@ -488,12 +488,36 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertEqual(exchange.arguments, raw)
     }
 
-    func testToolExchangeSaysHowMuchOutputWasCut() {
+    func testToolExchangeMarksCutOutputUnmistakably() {
         let output = String(repeating: "y", count: 100_000)
         let exchange = ToolExchange(callID: "1", name: "bash", arguments: "{}", output: output, isError: false)
 
-        XCTAssertTrue(exchange.output.contains("обрезано 96000 символов"), exchange.output.suffix(80).description)
-        XCTAssertLessThan(exchange.output.count, 4_100)
+        XCTAssertTrue(exchange.output.contains("СЛУЖЕБНАЯ ПОМЕТКА"), exchange.output.suffix(80).description)
+        XCTAssertTrue(exchange.output.contains("96000"), exchange.output.suffix(80).description)
+        XCTAssertLessThan(exchange.output.count, 4_200)
+    }
+
+    func testWriteRefusesTheRuntimePlaceholder() async throws {
+        // The live failure: a replayed placeholder was copied into fs_write and written
+        // to disk as if it were content. Every write path must refuse it first.
+        let url = try write("guarded.txt", "real content")
+        let tool = registry()
+        try await readFirst(tool, url)
+
+        let result = try await tool.writeFile([
+            "path": url.path,
+            "content": "[обрезано при сохранении: 3301 символов]"
+        ])
+
+        XCTAssertTrue(result.isError, result.output)
+        XCTAssertTrue(result.output.contains("обрезан"), result.output)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "real content")
+
+        let other = try await tool.editFile([
+            "path": url.path, "old_text": "real", "new_text": TruncationGuard.placeholder(length: 42)
+        ])
+        XCTAssertTrue(other.isError, other.output)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "real content")
     }
 
     // MARK: - grep modes
@@ -602,11 +626,79 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertTrue(try fields("bash").contains("full"))
         XCTAssertTrue(try fields("image_read").contains("page"))
         XCTAssertTrue(try fields("doc_read").contains("page_from"))
+        XCTAssertTrue(try fields("screenshot").contains("clip"))
+        XCTAssertTrue(try fields("screenshot").contains("save_to"))
+        XCTAssertTrue(try fields("schedule_add").contains("at"))
+        XCTAssertTrue(try fields("app_logs").contains("since"))
+        XCTAssertTrue(try fields("webfetch").contains("offset"))
     }
 
     func testVerifiedWriteRejectsAMissingDirectory() throws {
         let target = sandbox.appendingPathComponent("nope/deeper/f.txt")
         XCTAssertThrowsError(try ToolRegistry.verifiedWrite(Data("x".utf8), to: target))
+    }
+
+    // MARK: - extraction, plan nudge, audit
+
+    func testHTMLExtractionDropsChromeAndDuplicates() {
+        let html = """
+        <html><head><title>X</title><style>.a{}</style></head><body>
+        <nav>Меню</nav><header>Шапка</header>
+        <main><h1>Заголовок</h1><p>Первый абзац.</p><p>Первый абзац.</p>
+        <ul><li>Пункт</li></ul><script>bad()</script></main>
+        <footer>Подвал</footer>
+        </body></html>
+        """
+
+        let text = ToolRegistry.plainText(fromHTML: html, limit: 10_000)
+
+        XCTAssertTrue(text.contains("Заголовок"), text)
+        XCTAssertTrue(text.contains("Первый абзац"), text)
+        XCTAssertFalse(text.contains("Меню"), text)
+        XCTAssertFalse(text.contains("Шапка"), text)
+        XCTAssertFalse(text.contains("Подвал"), text)
+        XCTAssertFalse(text.contains("bad()"), text)
+        XCTAssertEqual(text.components(separatedBy: "Первый абзац").count - 1, 1, "дубли строк схлопываются")
+    }
+
+    func testTodoNudgeOnlyFiresWithAnOpenPlan() async throws {
+        let database = try AppDatabase(inMemory: true)
+        let todos = TodoStore(database: database)
+        let tool = ToolRegistry(
+            workspace: sandbox, memory: nil, embeddings: nil, secrets: nil,
+            skills: nil, mcp: nil, todos: todos
+        )
+
+        XCTAssertNil(tool.todoNudge(callsSinceUpdate: 12), "без плана напоминаний нет")
+
+        todos.set([["text": "шаг", "status": "active"]])
+        XCTAssertNil(tool.todoNudge(callsSinceUpdate: 11))
+        let nudge = tool.todoNudge(callsSinceUpdate: 12)
+        XCTAssertNotNil(nudge)
+        XCTAssertTrue(nudge?.contains("шаг") == true, nudge ?? "")
+
+        todos.set([["text": "шаг", "status": "done"]])
+        XCTAssertNil(tool.todoNudge(callsSinceUpdate: 12), "закрытый план не трогаем")
+    }
+
+    func testSecretRevealWritesAnAuditLine() async throws {
+        let database = try AppDatabase(inMemory: true)
+        let secrets = SecretsService(database: database)
+        let alias = "audit-\(UUID().uuidString.prefix(8))"
+        _ = try await secrets.save(alias: alias, value: "top-secret-value")
+        let tool = ToolRegistry(
+            workspace: sandbox, memory: nil, embeddings: nil, secrets: secrets,
+            skills: nil, mcp: nil
+        )
+
+        _ = try await tool.secretGet(["alias": alias, "reveal": true])
+
+        let audit = try String(
+            contentsOf: AppPaths.logsDirectory.appendingPathComponent("secrets-audit.log"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(audit.contains("alias=\(alias)"), audit.suffix(300).description)
+        XCTAssertFalse(audit.contains("top-secret-value"), "значение в аудит попадать не должно")
     }
 
     // MARK: - shell

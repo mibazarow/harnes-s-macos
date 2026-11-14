@@ -268,8 +268,8 @@ final class StorageTests: XCTestCase {
             output: long,
             isError: false
         )
-        XCTAssertLessThan(exchange.output.count, ToolExchange.historyOutputLimit + 100)
-        XCTAssertTrue(exchange.output.contains("обрезано"))
+        XCTAssertLessThan(exchange.output.count, ToolExchange.historyOutputLimit + 200)
+        XCTAssertTrue(exchange.output.contains("СЛУЖЕБНАЯ ПОМЕТКА"), exchange.output.suffix(80).description)
     }
 
     func testTodosPersistAndClear() async throws {

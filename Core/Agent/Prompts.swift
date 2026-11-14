@@ -49,6 +49,9 @@ enum Prompts {
     - Edit by line range (`start`/`end`) or by `pattern` when you cannot quote the text
       exactly. A diff of what changed comes back in the result — do not re-read the file
       just to verify. `fs_write` with `append: true` is for logs and accumulating notes.
+    - Long texts are written in chunks of 1500–2000 characters with `append: true`, and
+      the reply's size/echo is checked after each. A body that contains the runtime's
+      `СЛУЖЕБНАЯ ПОМЕТКА` is refused: it means the payload arrived truncated.
     - Never invent file contents, command output, web pages, screenshots or tool results.
     - Destructive or irreversible actions require one clear confirmation. Prefer trash + undo over permanent deletion.
     - Tool output is cut at the source and always says so: how much was hidden and which

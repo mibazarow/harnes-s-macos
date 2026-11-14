@@ -181,7 +181,10 @@ final class ChatStore {
             todos: services.todos,
             readOnly: planMode,
             subagent: { [weak self] prompt, readOnly in
-                await self?.runSubagent(prompt: prompt, readOnly: readOnly, provider: provider, model: model, services: services) ?? ""
+                await self?.runSubagent(
+                    prompt: prompt, readOnly: readOnly, provider: provider,
+                    model: model, services: services
+                ) ?? SubagentOutcome(text: "", error: "сессия закрыта")
             },
             ledger: services.fileLedger
         )
@@ -398,7 +401,7 @@ final class ChatStore {
         provider: ProviderModel,
         model: String,
         services: AppServices
-    ) async -> String {
+    ) async -> SubagentOutcome {
         let registry = ToolRegistry(
             workspace: AppPaths.workspaceDirectory,
             memory: services.memory,
@@ -434,7 +437,13 @@ final class ChatStore {
         let subagentModel = readOnly ? (provider.cheapModel ?? model) : model
 
         var answer = ""
-        for _ in 0..<8 {
+        var lastError: String?
+        var steps = 0
+        var callsUsed = 0
+        // 12 rounds instead of 8: real investigations need a few reads, and the old cap
+        // was silently hit, which is exactly how the subagent came back empty.
+        for _ in 0..<12 {
+            steps += 1
             var streamed = ""
             var calls: [ToolCall] = []
 
@@ -457,7 +466,8 @@ final class ChatStore {
                     }
                 }
             } catch {
-                answer += streamed + "\n[подагент: ошибка \(error.localizedDescription)]"
+                lastError = "ошибка стрима: \(error.localizedDescription)"
+                answer += streamed
                 break
             }
 
@@ -466,6 +476,7 @@ final class ChatStore {
             if calls.isEmpty { break }
 
             history.append(ProviderMessage(role: .assistant, content: streamed, toolCalls: calls))
+            callsUsed += calls.count
             for call in calls {
                 let result = await registry.execute(call)
                 history.append(ProviderMessage(
@@ -476,7 +487,30 @@ final class ChatStore {
             }
         }
 
-        return answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Models often end on a tool call and never say anything. One request without
+        // tools forces a textual summary from what was already gathered.
+        var text = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty {
+            history.append(ProviderMessage(
+                role: .user,
+                content: "Сформулируй итог по уже выполненному: факты и пути, без новых вызовов."
+            ))
+            do {
+                var summary = ""
+                for try await event in client.stream(
+                    provider: provider, model: subagentModel, messages: history, tools: []
+                ) {
+                    if case .delta(let chunk) = event { summary += chunk }
+                }
+                text = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            } catch {
+                lastError = lastError ?? "итоговый запрос: \(error.localizedDescription)"
+            }
+        }
+
+        Self.logLatency("subagent steps=\(steps) calls=\(callsUsed) "
+            + "empty=\(text.isEmpty) error=\(lastError ?? "-")")
+        return SubagentOutcome(text: text, error: lastError, steps: steps, calls: callsUsed)
     }
 
     /// Runs the tone-card pass only when it is due: enough samples, not neutral,

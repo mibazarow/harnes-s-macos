@@ -22,6 +22,9 @@ extension ToolRegistry {
             return .fail("Нужен patch или patch_file")
         }
 
+        if TruncationGuard.isPlaceholder(patch) {
+            return .fail("Патч обрезан сверху, применение отменено: \(TruncationGuard.excerpt(patch))")
+        }
         let url = resolve(path)
         if let refusal = writeGuard(url) { return refusal }
         guard FileManager.default.fileExists(atPath: url.path) else {

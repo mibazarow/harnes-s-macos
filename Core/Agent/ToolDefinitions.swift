@@ -198,8 +198,12 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "webfetch",
-            description: "LAST RESORT for static pages only, after scrapling and browser failed. Fetch a URL and return readable text (HTML stripped).",
-            parameters: schema(["url": ["type": "string"]], required: ["url"])
+            description: "LAST RESORT for static pages only, after scrapling and browser failed. Extracts readable text (drops nav, footer, scripts, duplicate lines) and supports pagination.",
+            parameters: schema([
+                "url": ["type": "string"],
+                "offset": ["type": "integer", "description": "Skip this many characters, default 0"],
+                "limit": ["type": "integer", "description": "Max characters, default 30000"]
+            ], required: ["url"])
         ),
         ToolDefinition(
             name: "websearch",
@@ -219,8 +223,18 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "screenshot",
-            description: "Capture the whole screen or a window to ~/HARNES_S_DATA/artifacts.",
-            parameters: schema(["window_id": ["type": "integer"]], required: [])
+            description: "Capture the screen, a window, or a rectangle; returns the file path for image_read/ocr.",
+            parameters: schema([
+                "window_id": ["type": "integer"],
+                "clip": [
+                    "type": "object",
+                    "properties": [
+                        "x": ["type": "integer"], "y": ["type": "integer"],
+                        "width": ["type": "integer"], "height": ["type": "integer"]
+                    ]
+                ],
+                "save_to": ["type": "string", "description": "Output path, .png added if missing"]
+            ], required: [])
         ),
         ToolDefinition(
             name: "ocr",
@@ -253,6 +267,16 @@ extension ToolRegistry {
             ], required: ["path"])
         ),
         ToolDefinition(
+            name: "app_logs",
+            description: "Read the app's own log files (latency, MCP, cleanup) with filters, without bash.",
+            parameters: schema([
+                "name": ["type": "string", "description": "One log file, default all *.log"],
+                "level": ["type": "string", "description": "Case-insensitive substring filter"],
+                "since": ["type": "string", "description": "ISO8601 or relative span like 30m, 2h, 1d"],
+                "limit": ["type": "integer", "description": "Max lines from the end, default 200"]
+            ], required: [])
+        ),
+        ToolDefinition(
             name: "image_read",
             description: "Inspect or transform an image or a PDF page (EXIF orientation, crop, rotate, resize) and return a PNG the chat can display. No external tools needed.",
             parameters: schema([
@@ -276,12 +300,13 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "schedule_add",
-            description: "Create a recurring task that sends a prompt on an interval (in minutes).",
+            description: "Schedule a prompt: repeat every N minutes, or fire once at an absolute time.",
             parameters: schema([
                 "title": ["type": "string"],
                 "prompt": ["type": "string"],
-                "interval_minutes": ["type": "integer"]
-            ], required: ["title", "prompt", "interval_minutes"])
+                "interval_minutes": ["type": "integer", "description": "Repeat every N minutes"],
+                "at": ["type": "string", "description": "One-shot ISO8601 time, e.g. 2026-11-15T15:00:00Z"]
+            ], required: ["title", "prompt"])
         ),
         ToolDefinition(
             name: "schedule_list",

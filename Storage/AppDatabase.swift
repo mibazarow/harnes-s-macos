@@ -279,6 +279,14 @@ final class AppDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("v11_schedule_one_shot") { db in
+            // A one-shot reminder needs an absolute firing time; interval_minutes alone
+            // cannot express "tomorrow at 15:00".
+            if try !db.columns(in: "schedules").contains(where: { $0.name == "fires_at" }) {
+                try db.execute(sql: "ALTER TABLE schedules ADD COLUMN fires_at TEXT;")
+            }
+        }
+
         return migrator
     }
 }

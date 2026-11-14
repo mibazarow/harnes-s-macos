@@ -33,6 +33,39 @@ final class SchedulerTests: XCTestCase {
         XCTAssertTrue(try scheduler.due().isEmpty)
     }
 
+    func testOneShotFiresOnceAndDisappears() async throws {
+        let database = try AppDatabase()
+        let scheduler = SchedulerService(database: database)
+        let at = Date().addingTimeInterval(3_600)
+
+        let task = try scheduler.add(title: "напомни", prompt: "позвонить", intervalMinutes: 0, firesAt: at)
+
+        XCTAssertTrue(task.isOneShot)
+        XCTAssertEqual(try scheduler.list().count, 1)
+        XCTAssertTrue(try scheduler.due().isEmpty, "одноразовая задача не должна срабатывать раньше времени")
+
+        // Force it due and fire it the way the scheduler does.
+        try await database.queue.write { db in
+            try db.execute(
+                sql: "UPDATE schedules SET next_run_at = ? WHERE id = ?",
+                arguments: [Date().addingTimeInterval(-1).ISO8601Format(), task.id]
+            )
+        }
+        let due = try scheduler.due()
+        XCTAssertEqual(due.count, 1)
+        try scheduler.markRun(due[0], result: "ok")
+
+        XCTAssertTrue(try scheduler.list().isEmpty, "одноразовая задача удаляется после запуска")
+    }
+
+    func testOneShotRejectsATimeInThePast() async throws {
+        let scheduler = SchedulerService(database: try AppDatabase())
+        XCTAssertThrowsError(
+            try scheduler.add(title: "past", prompt: "x", intervalMinutes: 0,
+                              firesAt: Date().addingTimeInterval(-60))
+        )
+    }
+
     func testChunkingSplitsLongText() {
         let long = String(repeating: "а", count: 5_000)
         let chunks = WorkspaceIndexer.chunk(long, size: 1_000)

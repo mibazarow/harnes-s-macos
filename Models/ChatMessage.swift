@@ -173,7 +173,7 @@ struct ToolExchange: Sendable, Equatable {
         self.arguments = Self.sanitizedArguments(arguments)
         self.output = output.count > Self.historyOutputLimit
             ? String(output.prefix(Self.historyOutputLimit))
-                + "\n…[обрезано \(output.count - Self.historyOutputLimit) символов при сохранении]"
+                + "\n" + TruncationGuard.placeholder(length: output.count - Self.historyOutputLimit)
             : output
         self.isError = isError
     }
@@ -196,7 +196,10 @@ struct ToolExchange: Sendable, Equatable {
         switch value {
         case let string as String:
             guard string.count > argumentValueLimit else { return string }
-            return "[обрезано при сохранении: \(string.count) символов]"
+            // Unmistakable on purpose: this string is replayed inside tool_calls on
+            // every later turn, and a plausible-looking "[обрезано: N]" was copied back
+            // into a later fs_write, which wrote the placeholder into the file.
+            return TruncationGuard.placeholder(length: string.count)
         case let array as [Any]:
             return array.map(truncatePayloads(in:))
         case let dictionary as [String: Any]:

@@ -64,6 +64,10 @@ struct AgentLoop: Sendable {
                     /// Every tool message index in this run, oldest first, so the output
                     /// budget can stub from the front.
                     var toolMessageIndices: [Int] = []
+                    // Plan drift counter: nudging only after the model itself opted into
+                    // a plan avoids nagging runs that never used todowrite.
+                    var sawTodo = false
+                    var callsSinceTodoUpdate = 0
                     while true {
                         if Task.isCancelled { break }
 
@@ -160,6 +164,19 @@ struct AgentLoop: Sendable {
                             )
                             messages.append(toolMessage)
                             toolMessageIndices.append(messages.count - 1)
+                        }
+
+                        if calls.contains(where: { $0.name == "todowrite" }) {
+                            sawTodo = true
+                            callsSinceTodoUpdate = 0
+                        } else {
+                            callsSinceTodoUpdate += calls.count
+                        }
+                        if sawTodo, callsSinceTodoUpdate >= 12,
+                           let nudge = registry.todoNudge(callsSinceUpdate: callsSinceTodoUpdate),
+                           let lastTool = toolMessageIndices.last, lastTool < messages.count {
+                            messages[lastTool].content += "\n\n" + nudge
+                            callsSinceTodoUpdate = 0
                         }
 
                         Self.trimRunOutput(&messages, toolIndices: toolMessageIndices, budget: runOutputBudget)

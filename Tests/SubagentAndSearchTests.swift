@@ -29,7 +29,7 @@ final class SubagentContextTests: XCTestCase {
             mcp: nil,
             subagent: { prompt, _ in
                 await box.set(prompt)
-                return "готово"
+                return SubagentOutcome(text: "готово")
             }
         )
 
@@ -44,6 +44,31 @@ final class SubagentContextTests: XCTestCase {
         XCTAssertTrue(prompt.contains("найди обработчик"), "исходный промпт должен сохраниться")
         XCTAssertTrue(prompt.contains("маркер-в-файле"), "содержимое файла должно уйти подагенту")
         XCTAssertTrue(prompt.contains("не искать заново"))
+    }
+
+    func testEmptySubagentAnswerIsAnError() async throws {
+        let root = try workspace()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let tools = ToolRegistry(
+            workspace: root,
+            memory: nil,
+            embeddings: nil,
+            secrets: nil,
+            skills: nil,
+            mcp: nil,
+            subagent: { _, _ in SubagentOutcome(text: "", error: "лимит шагов", steps: 12, calls: 9) }
+        )
+
+        let result = await tools.execute(ToolCall(
+            id: "1",
+            name: "task",
+            arguments: #"{"prompt":"перечисли файлы"}"#
+        ))
+
+        XCTAssertTrue(result.isError, result.output)
+        XCTAssertTrue(result.output.contains("лимит шагов"), result.output)
+        XCTAssertFalse(result.output.contains("(подагент ничего не вернул)"), result.output)
     }
 
     func testTaskPassesFolderListing() async throws {
@@ -64,7 +89,7 @@ final class SubagentContextTests: XCTestCase {
             mcp: nil,
             subagent: { prompt, _ in
                 await box.set(prompt)
-                return "ok"
+                return SubagentOutcome(text: "ok")
             }
         )
 
@@ -92,7 +117,7 @@ final class SubagentContextTests: XCTestCase {
             mcp: nil,
             subagent: { prompt, _ in
                 await box.set(prompt)
-                return "ok"
+                return SubagentOutcome(text: "ok")
             }
         )
 

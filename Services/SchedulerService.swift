@@ -11,6 +11,10 @@ struct ScheduledTask: Identifiable, Sendable, Equatable {
     var nextRunAt: String
     var enabled: Bool
     var lastResult: String?
+    /// Absolute firing time for a one-shot task; nil means a repeating interval.
+    var firesAt: String?
+
+    var isOneShot: Bool { firesAt != nil }
 }
 
 /// Interval-based scheduler persisted in SQLite. No cron parsing: keep it dumb.
@@ -36,16 +40,28 @@ final class SchedulerService: @unchecked Sendable {
     }
 
     @discardableResult
-    func add(title: String, prompt: String, intervalMinutes: Int) throws -> ScheduledTask {
-        let minutes = max(intervalMinutes, 1)
-        let next = Date().addingTimeInterval(Double(minutes) * 60)
+    func add(
+        title: String,
+        prompt: String,
+        intervalMinutes: Int,
+        firesAt: Date? = nil
+    ) throws -> ScheduledTask {
+        if let firesAt, firesAt <= Date() {
+            throw NSError(domain: "Harness", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Время запуска уже прошло: \(firesAt.ISO8601Format())"
+            ])
+        }
+        // A one-shot keeps interval_minutes = 0: it never repeats and the column is
+        // NOT NULL, so the value must be something, and 0 reads as "not periodic".
+        let minutes = firesAt == nil ? max(intervalMinutes, 1) : 0
+        let next = firesAt ?? Date().addingTimeInterval(Double(minutes) * 60)
         let nextString = next.ISO8601Format()
 
         let id: Int64 = try database.queue.write { db in
             try db.execute(sql: """
-                INSERT INTO schedules (title, prompt, interval_minutes, next_run_at, enabled)
-                VALUES (?, ?, ?, ?, 1)
-                """, arguments: [title, prompt, minutes, nextString])
+                INSERT INTO schedules (title, prompt, interval_minutes, next_run_at, enabled, fires_at)
+                VALUES (?, ?, ?, ?, 1, ?)
+                """, arguments: [title, prompt, minutes, nextString, firesAt?.ISO8601Format()])
             return db.lastInsertedRowID
         }
 
@@ -57,7 +73,8 @@ final class SchedulerService: @unchecked Sendable {
             lastRunAt: nil,
             nextRunAt: nextString,
             enabled: true,
-            lastResult: nil
+            lastResult: nil,
+            firesAt: firesAt?.ISO8601Format()
         )
     }
 
@@ -88,6 +105,14 @@ final class SchedulerService: @unchecked Sendable {
     }
 
     func markRun(_ task: ScheduledTask, result: String) throws {
+        // One-shot tasks delete themselves after firing: keeping a row whose time has
+        // passed would make `due()` return it forever.
+        if task.isOneShot {
+            try database.queue.write { db in
+                try db.execute(sql: "DELETE FROM schedules WHERE id = ?", arguments: [task.id])
+            }
+            return
+        }
         let next = Date().addingTimeInterval(Double(task.intervalMinutes) * 60)
         try database.queue.write { db in
             try db.execute(sql: """
@@ -132,7 +157,8 @@ final class SchedulerService: @unchecked Sendable {
             lastRunAt: row["last_run_at"],
             nextRunAt: row["next_run_at"],
             enabled: (row["enabled"] as Int) == 1,
-            lastResult: row["last_result"]
+            lastResult: row["last_result"],
+            firesAt: row["fires_at"]
         )
     }
 }
