@@ -144,6 +144,21 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertTrue(result.output.contains("обрезано на 20 000"), result.output.suffix(120).description)
     }
 
+    func testJsonDecodedArgumentsKeepTheirTypes() throws {
+        // The real path: JSONSerialization turns every number into NSNumber, and
+        // NSNumber(1) bridges to Bool. The coercion helpers must tell them apart.
+        let args = try XCTUnwrap(ToolRegistry.decodeArguments(
+            #"{"limit":1,"offset":2,"ratio":0.5,"replace_all":true,"name":"x"}"#
+        ))
+
+        XCTAssertEqual(ToolRegistry.int(args, "limit"), 1)
+        XCTAssertEqual(ToolRegistry.int(args, "offset"), 2)
+        XCTAssertEqual(ToolRegistry.double(args, "ratio"), 0.5)
+        XCTAssertEqual(ToolRegistry.bool(args, "replace_all"), true)
+        XCTAssertNil(ToolRegistry.int(args, "replace_all"))
+        XCTAssertEqual(ToolRegistry.string(args, "name"), "x")
+    }
+
     // MARK: - usage stats
 
     func testToolUsageStatsCountStepsAndRuns() {

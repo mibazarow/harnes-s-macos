@@ -283,8 +283,8 @@ final class AgentSafetyTests: XCTestCase {
             name: "fs_grep",
             arguments: #"{"pattern":"needle","before":1,"after":1}"#
         ))
-        XCTAssertFalse(result.isError)
-        XCTAssertTrue(result.output.contains("line two"))
-        XCTAssertTrue(result.output.contains("line four"))
+        XCTAssertFalse(result.isError, result.output)
+        XCTAssertTrue(result.output.contains("line two"), result.output)
+        XCTAssertTrue(result.output.contains("line four"), result.output)
     }
 }
