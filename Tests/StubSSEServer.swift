@@ -6,18 +6,22 @@ final class StubSSEServer: @unchecked Sendable {
     private let listener: NWListener
     /// One entry per request; the last entry is reused once the list runs out.
     private let responses: [[String]]
+    /// Artificial latency before the response is sent. Used by tests that need to prove
+    /// two calls overlap in time.
+    private let delayMs: Int
     private var requestCount = 0
     private let queue = DispatchQueue(label: "stub-sse")
     private(set) var port: UInt16 = 0
     private(set) var receivedBodies: [String] = []
     private let lock = NSLock()
 
-    convenience init(chunks: [String]) throws {
-        try self.init(responses: [chunks])
+    convenience init(chunks: [String], delayMs: Int = 0) throws {
+        try self.init(responses: [chunks], delayMs: delayMs)
     }
 
-    init(responses: [[String]]) throws {
+    init(responses: [[String]], delayMs: Int = 0) throws {
         self.responses = responses
+        self.delayMs = delayMs
         self.listener = try NWListener(using: .tcp, on: .any)
     }
 
@@ -101,9 +105,18 @@ final class StubSSEServer: @unchecked Sendable {
         var payload = Data(head.utf8)
         payload.append(Data(body.utf8))
 
-        connection.send(content: payload, isComplete: true, completion: .contentProcessed { _ in
-            connection.cancel()
-        })
+        let send = {
+            connection.send(content: payload, isComplete: true, completion: .contentProcessed { _ in
+                connection.cancel()
+            })
+        }
+        if delayMs > 0 {
+            // Delayed off the receive path on purpose: blocking this serial queue would
+            // serialize the connections and hide the very overlap the test measures.
+            queue.asyncAfter(deadline: .now() + .milliseconds(delayMs), execute: send)
+        } else {
+            send()
+        }
     }
 
     private static func contentLength(in headers: String) -> Int {

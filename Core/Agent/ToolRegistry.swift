@@ -16,7 +16,11 @@ struct ToolDefinition: Sendable {
     let parameters: [String: AnySendable]
 }
 
-actor ToolRegistry {
+/// Stateless dispatcher: every dependency is an injected actor or a value.
+///
+/// Declared as a struct, not an actor, so independent read-only calls can actually
+/// run in parallel — an actor serializes even `await`ed method calls.
+struct ToolRegistry: Sendable {
     let workspace: URL
     let memory: MemoryService?
     let embeddings: EmbeddingsService?

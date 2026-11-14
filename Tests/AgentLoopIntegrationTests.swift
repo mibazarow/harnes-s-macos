@@ -193,6 +193,65 @@ final class AgentLoopIntegrationTests: XCTestCase {
         XCTAssertEqual(loop.maxSteps, 300)
     }
 
+    func testReadOnlyCallsInOneStepRunInParallel() async throws {
+        let server = try StubSSEServer(chunks: [#"{"choices":[]}"#], delayMs: 400)
+        try server.start()
+        defer { server.stop() }
+
+        let registry = ToolRegistry(
+            workspace: FileManager.default.temporaryDirectory,
+            memory: nil,
+            embeddings: nil,
+            secrets: nil,
+            skills: nil,
+            mcp: nil
+        )
+        let calls = (0..<2).map { index in
+            ToolCall(
+                id: "call_\(index)",
+                name: "webfetch",
+                arguments: #"{"url":"http://127.0.0.1:\#(server.port)/p\#(index)"}"#
+            )
+        }
+
+        let start = Date()
+        let results = await AgentLoop.runCalls(calls, registry: registry)
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertEqual(results.compactMap { $0 }.count, 2)
+        // Two 400 ms requests: sequential is ~0.8 s, parallel ~0.4 s.
+        XCTAssertLessThan(elapsed, 0.7, "read-only calls did not overlap: \(elapsed) s")
+    }
+
+    func testMutatingCallSplitsTheBatchIntoABarrier() async throws {
+        let server = try StubSSEServer(chunks: [#"{"choices":[]}"#], delayMs: 300)
+        try server.start()
+        defer { server.stop() }
+
+        let registry = ToolRegistry(
+            workspace: FileManager.default.temporaryDirectory,
+            memory: nil,
+            embeddings: nil,
+            secrets: nil,
+            skills: nil,
+            mcp: nil
+        )
+        let calls = [
+            ToolCall(id: "1", name: "webfetch", arguments: #"{"url":"http://127.0.0.1:\#(server.port)/a"}"#),
+            ToolCall(id: "2", name: "bash", arguments: #"{"command":"true"}"#),
+            ToolCall(id: "3", name: "webfetch", arguments: #"{"url":"http://127.0.0.1:\#(server.port)/b"}"#)
+        ]
+
+        let start = Date()
+        let results = await AgentLoop.runCalls(calls, registry: registry)
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertEqual(results.compactMap { $0 }.count, 3)
+        // The batch is read → write → read: the two fetches cannot overlap across the
+        // barrier, so the floor is two 300 ms requests.
+        XCTAssertGreaterThanOrEqual(elapsed, 0.55, "the mutating call did not act as a barrier")
+    }
+
     func testHTTPErrorIsReported() async throws {
         let server = try StubSSEServer(chunks: [])
         try server.start()

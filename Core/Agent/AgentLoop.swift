@@ -131,12 +131,15 @@ struct AgentLoop: Sendable {
 
                         var outcome: [(name: String, isError: Bool, output: String)] = []
 
+                        // Read-only calls cannot affect each other, and providers often
+                        // return several at once. Anything mutating is a barrier: a write
+                        // must still see the read that came before it in the same batch.
                         for call in calls {
-                            if Task.isCancelled { break }
-                            let summary = Self.summary(for: call)
-                            continuation.yield(.toolStarted(name: call.name, summary: summary))
-
-                            let result = await registry.execute(call)
+                            continuation.yield(.toolStarted(name: call.name, summary: Self.summary(for: call)))
+                        }
+                        let results = await Self.runCalls(calls, registry: registry)
+                        for (index, call) in calls.enumerated() {
+                            guard let result = results[index] else { break }
                             outcome.append((call.name, result.isError, result.output))
                             let imagePath = Self.imagePath(from: result.output)
 
@@ -144,7 +147,7 @@ struct AgentLoop: Sendable {
                                 callID: call.id,
                                 name: call.name,
                                 arguments: call.arguments,
-                                summary: result.isError ? Self.firstLine(result.output) : summary,
+                                summary: result.isError ? Self.firstLine(result.output) : Self.summary(for: call),
                                 output: result.output,
                                 isError: result.isError,
                                 imagePath: imagePath
@@ -204,6 +207,42 @@ struct AgentLoop: Sendable {
                 task.cancel()
             }
         }
+    }
+
+    /// Read-only tools that can run concurrently. Consecutive runs of these execute in
+    /// one task group; a mutating call splits the batch and runs alone, so ordering
+    /// between a read and a later write is preserved.
+    static let parallelSafeTools: Set<String> = [
+        "fs_read", "fs_list", "fs_grep", "fs_glob", "fs_tree", "read_many",
+        "search_code", "memory_search", "websearch", "webfetch"
+    ]
+
+    /// Results in call order; `nil` means the run was cancelled before that call.
+    static func runCalls(_ calls: [ToolCall], registry: ToolRegistry) async -> [ToolResult?] {
+        var results = [ToolResult?](repeating: nil, count: calls.count)
+        var index = 0
+        while index < calls.count {
+            if Task.isCancelled { break }
+            if parallelSafeTools.contains(calls[index].name) {
+                var end = index
+                while end < calls.count, parallelSafeTools.contains(calls[end].name) { end += 1 }
+                let batch = Array(calls[index..<end])
+                let base = index
+                await withTaskGroup(of: (Int, ToolResult).self) { group in
+                    for (offset, call) in batch.enumerated() {
+                        group.addTask { (base + offset, await registry.execute(call)) }
+                    }
+                    for await (slot, result) in group {
+                        results[slot] = result
+                    }
+                }
+                index = end
+            } else {
+                results[index] = await registry.execute(calls[index])
+                index += 1
+            }
+        }
+        return results
     }
 
     /// Prefix for a failed tool result.
