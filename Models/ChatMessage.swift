@@ -149,6 +149,13 @@ struct ToolTrace: Identifiable, Sendable, Equatable {
 struct ToolExchange: Sendable, Equatable {
     let callID: String
     let name: String
+    /// Truncated, but still valid JSON.
+    ///
+    /// Arguments replay inside `assistant(tool_calls)` on every later turn, so a
+    /// 200 KB `apply_patch` payload would otherwise be a permanent tax on the request.
+    /// Cutting the raw string would leave invalid JSON and make the provider reject the
+    /// replayed turn, so long string values are replaced in place and the object is
+    /// re-encoded.
     let arguments: String
     /// Truncated: history needs the gist, not the whole file. The current turn already
     /// sends up to 30 000 characters; older turns get less.
@@ -156,15 +163,47 @@ struct ToolExchange: Sendable, Equatable {
     let isError: Bool
 
     static let historyOutputLimit = 4_000
+    static let historyArgumentLimit = 8_000
+    /// A string value longer than this is a payload, not a parameter, and gets replaced.
+    private static let argumentValueLimit = 2_000
 
     init(callID: String, name: String, arguments: String, output: String, isError: Bool) {
         self.callID = callID
         self.name = name
-        self.arguments = arguments
+        self.arguments = Self.sanitizedArguments(arguments)
         self.output = output.count > Self.historyOutputLimit
-            ? String(output.prefix(Self.historyOutputLimit)) + "\n…[обрезано]"
+            ? String(output.prefix(Self.historyOutputLimit))
+                + "\n…[обрезано \(output.count - Self.historyOutputLimit) символов при сохранении]"
             : output
         self.isError = isError
+    }
+
+    static func sanitizedArguments(_ raw: String) -> String {
+        guard raw.count > argumentValueLimit else { return raw }
+        guard let data = raw.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let shortened = truncatePayloads(in: object) as? [String: Any],
+              let out = try? JSONSerialization.data(withJSONObject: shortened, options: [.sortedKeys]),
+              let text = String(data: out, encoding: .utf8) else {
+            // Unparseable: leave it alone rather than replace valid arguments with
+            // something the provider would reject.
+            return raw
+        }
+        return text.count < raw.count ? text : raw
+    }
+
+    private static func truncatePayloads(in value: Any) -> Any {
+        switch value {
+        case let string as String:
+            guard string.count > argumentValueLimit else { return string }
+            return "[обрезано при сохранении: \(string.count) символов]"
+        case let array as [Any]:
+            return array.map(truncatePayloads(in:))
+        case let dictionary as [String: Any]:
+            return dictionary.mapValues(truncatePayloads(in:))
+        default:
+            return value
+        }
     }
 }
 

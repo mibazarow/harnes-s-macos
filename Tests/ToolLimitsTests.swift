@@ -144,6 +144,37 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertTrue(result.output.contains("обрезано на 20 000"), result.output.suffix(120).description)
     }
 
+    // MARK: - tool traces in history
+
+    func testToolExchangeKeepsArgumentsValidJSONWhenClippingPayloads() throws {
+        let payload = String(repeating: "x", count: 100_000)
+        let raw = #"{"path":"a.txt","content":""# + payload + #""}"#
+
+        let exchange = ToolExchange(
+            callID: "call_1", name: "fs_write", arguments: raw, output: "ok", isError: false
+        )
+
+        XCTAssertLessThan(exchange.arguments.count, 8_500)
+        let data = try XCTUnwrap(exchange.arguments.data(using: .utf8))
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(object["path"] as? String, "a.txt")
+        XCTAssertTrue((object["content"] as? String)?.contains("обрезано") == true)
+    }
+
+    func testToolExchangeLeavesSmallArgumentsAlone() {
+        let raw = #"{"path":"a.txt","content":"hi"}"#
+        let exchange = ToolExchange(callID: "1", name: "fs_write", arguments: raw, output: "ok", isError: false)
+        XCTAssertEqual(exchange.arguments, raw)
+    }
+
+    func testToolExchangeSaysHowMuchOutputWasCut() {
+        let output = String(repeating: "y", count: 100_000)
+        let exchange = ToolExchange(callID: "1", name: "bash", arguments: "{}", output: output, isError: false)
+
+        XCTAssertTrue(exchange.output.contains("обрезано 96000 символов"), exchange.output.suffix(80).description)
+        XCTAssertLessThan(exchange.output.count, 4_100)
+    }
+
     // MARK: - shell
 
     func testGrepReportsABadPatternAsAnError() async throws {
