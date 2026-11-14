@@ -144,6 +144,16 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertTrue(result.output.contains("обрезано на 20 000"), result.output.suffix(120).description)
     }
 
+    // MARK: - schema budget
+
+    func testToolSchemaCostStaysInsideItsBudget() {
+        // Measured 2026-11-14: 3 635 tokens for 46 tools by the app's own estimator.
+        // The ceiling keeps ~10% headroom: a tool that pushes the catalog past it has to
+        // make that trade explicitly instead of hiding it in a new description.
+        let cost = ToolRegistry.schemasTokenCost()
+        XCTAssertLessThanOrEqual(cost, 4_000, "\(cost) токенов на \(ToolRegistry.definitions.count) инструментов")
+    }
+
     // MARK: - argument coercion
 
     func testStringNumbersAreAcceptedAsIntegers() async throws {

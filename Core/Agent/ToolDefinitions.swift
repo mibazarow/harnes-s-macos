@@ -328,5 +328,25 @@ extension ToolRegistry {
             "properties": AnySendable(properties),
             "required": AnySendable(required)
         ]
-}
+    }
+
+    /// Cost of the whole catalog in context tokens, not characters.
+    ///
+    /// Schemas are sent with every request, so their size is a permanent tax on the
+    /// context window and on the cached prefix. Measuring with the same estimator the
+    /// context plan uses keeps the number comparable to the budget instead of a
+    /// chars/4 guess.
+    static func schemasTokenCost(_ definitions: [ToolDefinition] = ToolRegistry.definitions) -> Int {
+        definitions.reduce(0) { total, definition in
+            let payload: [String: Any] = [
+                "name": definition.name,
+                "description": definition.description,
+                "parameters": definition.parameters.mapValues(\.value)
+            ]
+            guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
+                return total + TokenEstimator.tokens(in: definition.description)
+            }
+            return total + TokenEstimator.tokens(in: String(decoding: data, as: UTF8.self))
+        }
+    }
 }
