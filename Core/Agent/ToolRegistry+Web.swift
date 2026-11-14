@@ -142,7 +142,7 @@ extension ToolRegistry {
         let name = "screen-\(Int(Date().timeIntervalSince1970)).png"
         let path = AppPaths.artifactsDirectory.appendingPathComponent(name)
         var command = "screencapture -x"
-        if let windowID = args["window_id"] as? Int {
+        if let windowID = Self.int(args, "window_id") {
             command += " -o -l \(windowID)"
         }
         command += " \(Self.shellQuote(path.path))"

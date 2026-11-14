@@ -34,7 +34,7 @@ extension ToolRegistry {
 
     func restoreTrashed(_ args: [String: Any]) async throws -> ToolResult {
         guard let fileSafety else { return .fail("Корзина недоступна") }
-        guard let id = (args["id"] as? Int).map(Int64.init) ?? (args["id"] as? Double).map({ Int64($0) }) else {
+        guard let id = Self.int(args, "id").map(Int64.init) else {
             return .fail("Нужен id")
         }
         let path = try await fileSafety.restore(id)

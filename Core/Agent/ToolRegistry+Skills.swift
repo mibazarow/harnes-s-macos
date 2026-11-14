@@ -23,7 +23,7 @@ extension ToolRegistry {
         guard let skills else { return .fail("Скиллы недоступны") }
         guard let source = args["source"] as? String else { return .fail("source обязателен") }
         do {
-            let record = try await skills.install(from: source, force: (args["force"] as? Bool) ?? false)
+            let record = try await skills.install(from: source, force: Self.bool(args, "force") ?? false)
             return .ok("Скилл установлен: \(record.name)")
         } catch {
             return .fail(error.localizedDescription)

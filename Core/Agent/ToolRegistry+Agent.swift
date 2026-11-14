@@ -7,7 +7,7 @@ extension ToolRegistry {
         guard let prompt = args["prompt"] as? String, !prompt.isEmpty else {
             return .fail("prompt обязателен")
         }
-        let readOnly = (args["read_only"] as? Bool) ?? true
+        let readOnly = Self.bool(args, "read_only") ?? true
 
         // Paths the caller already found are passed along verbatim. Without this the
         // subagent starts from zero and re-searches the whole workspace.
@@ -65,12 +65,12 @@ extension ToolRegistry {
     }
 
     func gitDiff(_ args: [String: Any]) async throws -> ToolResult {
-        let staged = (args["staged"] as? Bool) ?? false
+        let staged = Self.bool(args, "staged") ?? false
         return try await git(staged ? ["diff", "--staged", "--stat", "-p"] : ["diff", "--stat", "-p"])
     }
 
     func gitLog(_ args: [String: Any]) async throws -> ToolResult {
-        let limit = max(1, min((args["limit"] as? Int) ?? 10, 100))
+        let limit = max(1, min(Self.int(args, "limit") ?? 10, 100))
         return try await git(["log", "--oneline", "-n", "\(limit)"])
     }
 
@@ -79,7 +79,7 @@ extension ToolRegistry {
         guard let scheduler else { return .fail("Планировщик недоступен") }
         guard let title = args["title"] as? String,
               let prompt = args["prompt"] as? String,
-              let minutes = (args["interval_minutes"] as? Int) ?? (args["interval_minutes"] as? Double).map(Int.init) else {
+              let minutes = Self.int(args, "interval_minutes") else {
             return .fail("Нужны title, prompt и interval_minutes")
         }
 
@@ -100,7 +100,7 @@ extension ToolRegistry {
 
     func scheduleRemove(_ args: [String: Any]) throws -> ToolResult {
         guard let scheduler else { return .fail("Планировщик недоступен") }
-        guard let id = (args["id"] as? Int).map(Int64.init) ?? (args["id"] as? Double).map({ Int64($0) }) else {
+        guard let id = Self.int(args, "id").map(Int64.init) else {
             return .fail("Нужен id")
         }
         try scheduler.remove(id: id)

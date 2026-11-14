@@ -54,8 +54,8 @@ extension ToolRegistry {
         guard let paths = args["paths"] as? [String], !paths.isEmpty else {
             return .fail("paths обязателен")
         }
-        let limit = max(1, min((args["limit"] as? Int) ?? 200, 1_000))
-        let offset = max((args["offset"] as? Int) ?? 1, 1)
+        let limit = max(1, min(Self.int(args, "limit") ?? 200, 1_000))
+        let offset = max(Self.int(args, "offset") ?? 1, 1)
 
         var blocks: [String] = []
         var failures = 0
@@ -115,7 +115,7 @@ extension ToolRegistry {
         guard let query = args["query"] as? String, !query.isEmpty else {
             return .fail("query обязателен")
         }
-        let limit = max(1, min((args["limit"] as? Int) ?? 8, 30))
+        let limit = max(1, min(Self.int(args, "limit") ?? 8, 30))
 
         if let embeddings {
             let hits = await HybridSearch(memory: memory, embeddings: embeddings).search(query, limit: limit)
@@ -208,7 +208,7 @@ extension ToolRegistry {
         let root = resolve(args["path"] as? String ?? ".")
         // 4 по умолчанию: local/components/vendor.name/templates/.default/ — как раз
         // типовая глубина битриксового компонента, иначе шаблоны не видно.
-        let depth = max(1, min((args["depth"] as? Int) ?? 4, 8))
+        let depth = max(1, min(Self.int(args, "depth") ?? 4, 8))
         return .ok(Self.renderTree(root: root, depth: depth, display: display))
     }
 

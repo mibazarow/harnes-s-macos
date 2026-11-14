@@ -20,7 +20,7 @@ extension ToolRegistry {
     func memoryAdd(_ args: [String: Any]) async throws -> ToolResult {
         guard let memory else { return .fail("Память недоступна") }
         guard let text = args["text"] as? String else { return .fail("text обязателен") }
-        let pinned = (args["pinned"] as? Bool) ?? false
+        let pinned = Self.bool(args, "pinned") ?? false
         let item = try await memory.add(
             text,
             kind: (args["kind"] as? String) ?? "fact",

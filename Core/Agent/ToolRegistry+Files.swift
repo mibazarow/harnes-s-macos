@@ -27,8 +27,8 @@ extension ToolRegistry {
     func readFile(_ args: [String: Any]) throws -> ToolResult {
         guard let path = args["path"] as? String else { return .fail("path обязателен") }
         let url = resolve(path)
-        let offset = max((args["offset"] as? Int) ?? 1, 1)
-        let limit = min(max((args["limit"] as? Int) ?? 400, 1), 2_000)
+        let offset = max(Self.int(args, "offset") ?? 1, 1)
+        let limit = min(max(Self.int(args, "limit") ?? 400, 1), 2_000)
         let content = try String(contentsOf: url, encoding: .utf8)
         let lines = content.components(separatedBy: "\n")
         let slice = lines.dropFirst(offset - 1).prefix(limit)
@@ -64,7 +64,7 @@ extension ToolRegistry {
             // character. Refusing is the only sane answer.
             return .fail("old_text не может быть пустым")
         }
-        let replaceAll = args["replace_all"] as? Bool ?? false
+        let replaceAll = Self.bool(args, "replace_all") ?? false
         let url = resolve(path)
         if let refusal = writeGuard(url) { return refusal }
         var content = try String(contentsOf: url, encoding: .utf8)
@@ -95,8 +95,8 @@ extension ToolRegistry {
 
     func grep(_ args: [String: Any]) async throws -> ToolResult {
         guard let pattern = args["pattern"] as? String else { return .fail("pattern обязателен") }
-        let before = max(0, min((args["before"] as? Int) ?? 0, 10))
-        let after = max(0, min((args["after"] as? Int) ?? 0, 20))
+        let before = max(0, min(Self.int(args, "before") ?? 0, 10))
+        let after = max(0, min(Self.int(args, "after") ?? 0, 20))
         let glob = (args["glob"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let target = Self.shellQuote(display(resolve(args["path"] as? String ?? ".")))
 

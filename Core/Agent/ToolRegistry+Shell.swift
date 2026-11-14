@@ -11,7 +11,7 @@ extension ToolRegistry {
 
     func runShell(_ args: [String: Any]) async throws -> ToolResult {
         guard let command = args["command"] as? String else { return .fail("command обязателен") }
-        let timeout = TimeInterval(min(max((args["timeout_ms"] as? Int) ?? 60_000, 1_000), 600_000)) / 1_000
+        let timeout = TimeInterval(min(max(Self.int(args, "timeout_ms") ?? 60_000, 1_000), 600_000)) / 1_000
         let cancellation = ProcessCancellation()
         let workspace = self.workspace
 

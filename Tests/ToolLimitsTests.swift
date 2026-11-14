@@ -144,6 +144,38 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertTrue(result.output.contains("обрезано на 20 000"), result.output.suffix(120).description)
     }
 
+    // MARK: - argument coercion
+
+    func testStringNumbersAreAcceptedAsIntegers() async throws {
+        let body = (1...100).map(String.init).joined(separator: "\n")
+        let url = try write("coerce.txt", body)
+
+        let result = try await registry().readFile(["path": url.path, "limit": "10"])
+
+        XCTAssertTrue(result.output.contains("offset=11"), result.output)
+    }
+
+    func testFloatNumbersAreAcceptedAsIntegers() async throws {
+        let body = (1...100).map(String.init).joined(separator: "\n")
+        let url = try write("coerce-float.txt", body)
+
+        let result = try await registry().readFile(["path": url.path, "offset": 11.0, "limit": 5.0])
+
+        XCTAssertTrue(result.output.hasPrefix("11: 11"), result.output)
+        XCTAssertTrue(result.output.contains("offset=16"), result.output)
+    }
+
+    func testStringBooleanIsAccepted() async throws {
+        let url = try write("coerce-bool.txt", "foo foo")
+
+        let result = try await registry().editFile([
+            "path": url.path, "old_text": "foo", "new_text": "bar", "replace_all": "true"
+        ])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "bar bar")
+    }
+
     // MARK: - tool traces in history
 
     func testToolExchangeKeepsArgumentsValidJSONWhenClippingPayloads() throws {
