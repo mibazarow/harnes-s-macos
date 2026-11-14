@@ -65,19 +65,28 @@ actor ToolRegistry {
         "fs_write", "edit_file", "apply_patch", "trash_paths", "restore_trashed", "restore_version",
         "git_commit", "git_stash",
         "bash", "schedule_add", "schedule_remove", "memory_add", "memory_forget", "secret_save",
-        "skill_install", "index_workspace", "todowrite", "mcp__"
+        "skill_install", "index_workspace", "todowrite"
     ]
 
-    private func isMutating(_ name: String) -> Bool {
-        if name.hasPrefix("mcp__") { return true }
+    /// Unknown MCP servers count as mutating: the base list cannot describe them, and
+    /// guessing "read" would let an unknown tool write in plan mode. A server whose
+    /// config says `isReadOnly` keeps its tools available.
+    private func isMutating(_ name: String) async -> Bool {
+        if name.hasPrefix("mcp__") {
+            guard let mcpManager else { return true }
+            return !(await mcpManager.isReadOnly(toolNamed: name))
+        }
         return Self.mutatingTools.contains(name)
     }
 
 // MARK: - Catalog and dispatch
     func schemas() async -> [ProviderToolSchema] {
-        var result = Self.definitions
-            .filter { !readOnly || !isMutating($0.name) }
-            .map {
+        var allowed: [ToolDefinition] = []
+        for definition in Self.definitions {
+            if readOnly, await isMutating(definition.name) { continue }
+            allowed.append(definition)
+        }
+        var result = allowed.map {
             ProviderToolSchema(name: $0.name, description: $0.description, parameters: $0.parameters)
         }
 
@@ -106,7 +115,7 @@ actor ToolRegistry {
     }
 
     func execute(_ call: ToolCall) async -> ToolResult {
-        if readOnly, isMutating(call.name) {
+        if readOnly, await isMutating(call.name) {
             return .fail("Инструмент \(call.name) недоступен: активен режим только-чтение.")
         }
 

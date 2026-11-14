@@ -37,8 +37,41 @@ final class MCPClientTests: XCTestCase {
         XCTAssertEqual(tool.qualifiedName, "mcp__bxmcp__bitrix_call")
     }
 
-    func testManagerRejectsUnknownServer() async {
-        let manager = MCPManager(configService: MCPService(
+    func testReadOnlyServerKeepsItsToolsInPlanMode() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mcp-ro-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let service = MCPService(configURL: root.appendingPathComponent("mcp.json"))
+        try await service.add(MCPServerConfig(
+            name: "docs", transport: .stdio, command: "docs-server", isReadOnly: true
+        ))
+        try await service.add(MCPServerConfig(
+            name: "shell", transport: .stdio, command: "shell-server"
+        ))
+
+        let manager = MCPManager(configService: service)
+        let docs = await manager.isReadOnly(toolNamed: "mcp__docs__search")
+        let shell = await manager.isReadOnly(toolNamed: "mcp__shell__run")
+        let builtin = await manager.isReadOnly(toolNamed: "fs_read")
+
+        XCTAssertTrue(docs)
+        XCTAssertFalse(shell)
+        XCTAssertFalse(builtin)
+    }
+
+    func testConfigWithoutReadOnlyFlagStillDecodes() throws {
+        let json = #"""
+        {"servers":[{"name":"old","transport":"stdio","command":"x","exposure":"deferred","enabled":true,"scope":"global"}]}
+        """#
+        let file = try JSONDecoder().decode(MCPConfigFile.self, from: Data(json.utf8))
+
+        XCTAssertEqual(file.servers.count, 1)
+        XCTAssertFalse(file.servers[0].isReadOnly)
+    }
+
+    func testManagerRejectsUnknownServer() async {        let manager = MCPManager(configService: MCPService(
             configURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("missing-\(UUID().uuidString).json")
         ))

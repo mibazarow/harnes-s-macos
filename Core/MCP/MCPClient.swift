@@ -6,6 +6,8 @@ struct MCPToolDescriptor: Sendable {
     let description: String
     let inputSchema: [String: AnySendable]
     var exposure: String = "full"
+    /// Mirrors the server config: a read-only server keeps its tools in plan mode.
+    var isReadOnly: Bool = false
 
     var qualifiedName: String { "mcp__\(server)__\(name)" }
 
@@ -237,7 +239,8 @@ actor MCPSession {
                     name: name,
                     description: (tool["description"] as? String) ?? "",
                     inputSchema: schema.mapValues { AnySendable($0) },
-                    exposure: config.exposure
+                    exposure: config.exposure,
+                    isReadOnly: config.isReadOnly
                 ))
             }
             cursor = result["nextCursor"] as? String
@@ -346,6 +349,25 @@ actor MCPManager {
 
     func invalidateTools() {
         cachedDescriptors = nil
+    }
+
+    /// Whether the server behind a qualified tool name is read-only.
+    ///
+    /// Reads the config file instead of starting the server: in plan mode `schemas()`
+    /// never fetches MCP descriptors, so a cache lookup would force a process start
+    /// just to answer a permission question.
+    func isReadOnly(toolNamed qualifiedName: String) async -> Bool {
+        guard let server = Self.serverName(from: qualifiedName),
+              let servers = try? await configService.list() else { return false }
+        return servers.first { $0.name == server }?.isReadOnly ?? false
+    }
+
+    /// `mcp__<server>__<tool>` → `<server>`.
+    private static func serverName(from qualifiedName: String) -> String? {
+        guard qualifiedName.hasPrefix("mcp__") else { return nil }
+        let rest = qualifiedName.dropFirst("mcp__".count)
+        guard let cut = rest.range(of: "__") else { return nil }
+        return String(rest[rest.startIndex..<cut.lowerBound])
     }
 
     private func fetchTools() async -> [MCPToolDescriptor] {

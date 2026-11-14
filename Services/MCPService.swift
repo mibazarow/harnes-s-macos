@@ -16,6 +16,9 @@ struct MCPServerConfig: Codable, Identifiable, Sendable, Equatable {
     var exposure: String
     var enabled: Bool
     var scope: String
+    /// Servers that only read (docs search, web lookups) stay available in plan mode.
+    /// Defaults to false: an unknown server is treated as able to mutate.
+    var isReadOnly: Bool
 
     var id: String { name }
 
@@ -28,7 +31,8 @@ struct MCPServerConfig: Codable, Identifiable, Sendable, Equatable {
         env: [String: String]? = nil,
         exposure: String = "deferred",
         enabled: Bool = true,
-        scope: String = "global"
+        scope: String = "global",
+        isReadOnly: Bool = false
     ) {
         self.name = name
         self.transport = transport
@@ -39,6 +43,23 @@ struct MCPServerConfig: Codable, Identifiable, Sendable, Equatable {
         self.exposure = exposure
         self.enabled = enabled
         self.scope = scope
+        self.isReadOnly = isReadOnly
+    }
+
+    /// Hand-written because `isReadOnly` is newer than the config files on disk:
+    /// `decodeIfPresent` keeps existing configs loadable and defaults to "can mutate".
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        transport = try container.decode(MCPTransport.self, forKey: .transport)
+        command = try container.decodeIfPresent(String.self, forKey: .command)
+        args = try container.decodeIfPresent([String].self, forKey: .args)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        env = try container.decodeIfPresent([String: String].self, forKey: .env)
+        exposure = try container.decodeIfPresent(String.self, forKey: .exposure) ?? "deferred"
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        scope = try container.decodeIfPresent(String.self, forKey: .scope) ?? "global"
+        isReadOnly = try container.decodeIfPresent(Bool.self, forKey: .isReadOnly) ?? false
     }
 
     var summary: String {
