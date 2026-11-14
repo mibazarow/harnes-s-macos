@@ -9,6 +9,8 @@ final class StubSSEServer: @unchecked Sendable {
     /// Artificial latency before the response is sent. Used by tests that need to prove
     /// two calls overlap in time.
     private let delayMs: Int
+    /// Per-request status codes; the last one is reused. Empty means 200 for every reply.
+    private let statusCodes: [Int]
     private var requestCount = 0
     private let queue = DispatchQueue(label: "stub-sse")
     private(set) var port: UInt16 = 0
@@ -19,9 +21,10 @@ final class StubSSEServer: @unchecked Sendable {
         try self.init(responses: [chunks], delayMs: delayMs)
     }
 
-    init(responses: [[String]], delayMs: Int = 0) throws {
+    init(responses: [[String]], delayMs: Int = 0, statusCodes: [Int] = []) throws {
         self.responses = responses
         self.delayMs = delayMs
+        self.statusCodes = statusCodes
         self.listener = try NWListener(using: .tcp, on: .any)
     }
 
@@ -88,16 +91,21 @@ final class StubSSEServer: @unchecked Sendable {
     }
 
     private func respond(_ connection: NWConnection) {
-        var head = "HTTP/1.1 200 OK\r\n"
-        head += "Content-Type: text/event-stream\r\n"
-        head += "Cache-Control: no-cache\r\n"
-        head += "Connection: close\r\n"
-        head += "\r\n"
-
         lock.lock()
         let index = min(requestCount, max(responses.count - 1, 0))
         requestCount += 1
         lock.unlock()
+
+        let status = statusCodes.isEmpty ? 200 : statusCodes[min(index, statusCodes.count - 1)]
+        var head = "HTTP/1.1 \(status) \(status == 200 ? "OK" : "Error")\r\n"
+        if status == 200 {
+            head += "Content-Type: text/event-stream\r\n"
+        } else {
+            head += "Content-Type: application/json\r\n"
+        }
+        head += "Cache-Control: no-cache\r\n"
+        head += "Connection: close\r\n"
+        head += "\r\n"
 
         let chunks = responses.isEmpty ? [] : responses[index]
         let body = chunks.map { "data: \($0)\n\n" }.joined() + "data: [DONE]\n\n"

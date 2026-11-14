@@ -167,3 +167,90 @@ final class ProviderClientTests: XCTestCase {
         XCTAssertFalse(text.contains("x()"))
     }
 }
+final class ProviderRetryTests: XCTestCase {
+    private func provider(_ baseURL: String) -> ProviderModel {
+        ProviderModel(
+            name: "Stub",
+            baseURL: baseURL,
+            apiKey: "test",
+            models: ["m"],
+            defaultModel: "m",
+            contextWindow: 32_000,
+            reasoningLevel: .off
+        )
+    }
+
+    func testRetriesRateLimitsBeforeAnyByte() async throws {
+        let server = try StubSSEServer(
+            responses: [
+                [#"{"error":"slow down"}"#],
+                [#"{"error":"slow down"}"#],
+                [
+                    #"{"choices":[{"delta":{"content":"ок"}}]}"#,
+                    #"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#
+                ]
+            ],
+            statusCodes: [429, 429, 200]
+        )
+        try server.start()
+        defer { server.stop() }
+
+        var text = ""
+        let client = ProviderClient(retryDelays: [0.01, 0.01, 0.01])
+        for try await event in client.stream(
+            provider: provider(server.baseURL),
+            model: "m",
+            messages: [ProviderMessage(role: .user, content: "hi")]
+        ) {
+            if case .delta(let chunk) = event { text += chunk }
+        }
+
+        XCTAssertEqual(text, "ок")
+        XCTAssertEqual(server.bodies.count, 3)
+    }
+
+    func testDoesNotRetryClientErrors() async throws {
+        let server = try StubSSEServer(responses: [[#"{"error":"bad"}"#]], statusCodes: [400])
+        try server.start()
+        defer { server.stop() }
+
+        let client = ProviderClient(retryDelays: [0.01, 0.01, 0.01])
+        do {
+            for try await _ in client.stream(
+                provider: provider(server.baseURL),
+                model: "m",
+                messages: [ProviderMessage(role: .user, content: "hi")]
+            ) {}
+            XCTFail("400 не должен считаться успехом")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("400"), error.localizedDescription)
+        }
+        XCTAssertEqual(server.bodies.count, 1)
+    }
+
+    func testGivesUpAfterTheRetryLadder() async throws {
+        let server = try StubSSEServer(responses: [[#"{"error":"down"}"#]], statusCodes: [503])
+        try server.start()
+        defer { server.stop() }
+
+        let client = ProviderClient(retryDelays: [0.01, 0.01])
+        do {
+            for try await _ in client.stream(
+                provider: provider(server.baseURL),
+                model: "m",
+                messages: [ProviderMessage(role: .user, content: "hi")]
+            ) {}
+            XCTFail("503 не должен считаться успехом")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("503"), error.localizedDescription)
+        }
+        XCTAssertEqual(server.bodies.count, 3)
+    }
+
+    func testTransientStatusClassification() {
+        XCTAssertTrue(ProviderClient.isTransient(status: 429))
+        XCTAssertTrue(ProviderClient.isTransient(status: 502))
+        XCTAssertFalse(ProviderClient.isTransient(status: 400))
+        XCTAssertFalse(ProviderClient.isTransient(status: 401))
+    }
+}

@@ -116,6 +116,13 @@ struct AnySendable: @unchecked Sendable {
 }
 
 struct ProviderClient: Sendable {
+    /// Backoff between retries of a transient HTTP failure, in seconds.
+    ///
+    /// Tests pass short values; the defaults are 1 → 2 → 4 s. Retrying is only safe
+    /// before the first streamed byte: after that the model has already spoken, and a
+    /// retry would duplicate text.
+    var retryDelays: [TimeInterval] = [1, 2, 4]
+
     /// One session for every request: keeps the connection to the provider alive
     /// between turns, so only the first request pays DNS and TLS.
     private static let session: URLSession = {
@@ -169,6 +176,7 @@ struct ProviderClient: Sendable {
 
                     var bytes: URLSession.AsyncBytes
                     var response: URLResponse
+                    var retries = 0
 
                     while true {
                         (bytes, response) = try await Self.session.bytes(for: request)
@@ -197,6 +205,21 @@ struct ProviderClient: Sendable {
                                 sampling: options
                             )
                             request.httpBody = body
+                            continue
+                        }
+
+                        // A rate limit or a gateway hiccup is not a reason to lose the
+                        // work of the whole run. Nothing has been streamed yet, so a
+                        // retry cannot duplicate output.
+                        if Self.isTransient(status: http.statusCode), retries < retryDelays.count {
+                            let delay = Self.retryDelay(
+                                attempt: retries,
+                                response: http,
+                                configured: retryDelays
+                            )
+                            retries += 1
+                            try? await Task.sleep(for: .seconds(delay))
+                            if Task.isCancelled { throw CancellationError() }
                             continue
                         }
                         throw ProviderError.http(status: http.statusCode, body: String(text.prefix(400)))
@@ -359,6 +382,23 @@ struct ProviderClient: Sendable {
             return array.map { unwrap($0) }
         }
         return value
+    }
+
+    /// 408/409/425/429 and every 5xx are worth another attempt; 400/401/403/404/422
+    /// will fail the same way forever.
+    static func isTransient(status: Int) -> Bool {
+        [408, 409, 425, 429].contains(status) || (500...599).contains(status)
+    }
+
+    /// `Retry-After` wins when the provider sends it; the exponential ladder is the
+    /// fallback. Capped at 30 s so a hostile header cannot stall the run.
+    static func retryDelay(attempt: Int, response: HTTPURLResponse, configured: [TimeInterval]) -> TimeInterval {
+        if let raw = response.value(forHTTPHeaderField: "Retry-After"),
+           let seconds = TimeInterval(raw.trimmingCharacters(in: .whitespaces)) {
+            return min(max(seconds, 0), 30)
+        }
+        guard attempt < configured.count else { return 30 }
+        return min(configured[attempt], 30)
     }
 
     /// True when a 400 body complains about one of the sampling fields rather than
