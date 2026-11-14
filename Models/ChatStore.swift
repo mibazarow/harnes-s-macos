@@ -428,6 +428,10 @@ final class ChatStore {
             ProviderMessage(role: .user, content: prompt)
         ]
 
+        // Read-only investigation is exactly the work a cheap model can do: no edits to
+        // get wrong, and the parent only sees the summary.
+        let subagentModel = readOnly ? (provider.cheapModel ?? model) : model
+
         var answer = ""
         for _ in 0..<8 {
             var streamed = ""
@@ -435,7 +439,7 @@ final class ChatStore {
 
             let stream = client.stream(
                 provider: provider,
-                model: model,
+                model: subagentModel,
                 messages: history,
                 tools: await registry.schemas()
             )
@@ -494,7 +498,7 @@ final class ChatStore {
         guard let card = await extractor.extract(
             transcript: sample.text,
             provider: provider,
-            model: model
+            model: provider.cheapModel ?? model
         ) else { return }
 
         await services.style.setCard(card)

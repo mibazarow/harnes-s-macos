@@ -278,6 +278,19 @@ struct ProviderEditorView: View {
                         .pickerStyle(.menu)
                     }
 
+                    if !provider.models.isEmpty {
+                        Picker("Дешёвая модель", selection: cheapModelBinding) {
+                            Text("как основная").tag("")
+                            ForEach(provider.models, id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        Text("Для подагентов только-чтение и разбора стиля: работы много, правок нет.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     HStack(spacing: 10) {
                         Text("Окно контекста")
                         TextField("", value: $provider.contextWindow, format: .number)
@@ -383,6 +396,14 @@ struct ProviderEditorView: View {
         Binding(
             get: { provider.defaultModel ?? provider.models.first ?? "" },
             set: { provider.defaultModel = $0 }
+        )
+    }
+
+    /// Empty selection means "same as the main model", stored as nil.
+    private var cheapModelBinding: Binding<String> {
+        Binding(
+            get: { provider.cheapModel ?? "" },
+            set: { provider.cheapModel = $0.isEmpty ? nil : $0 }
         )
     }
 

@@ -447,6 +447,7 @@ final class StorageTests: XCTestCase {
             apiKey: "token",
             models: ["model-a", "model-b"],
             defaultModel: "model-a",
+            cheapModel: "model-b",
             contextWindow: 128_000,
             reasoningLevel: .maximum,
             temperature: 0.7
@@ -458,6 +459,7 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(list.first?.name, "Local")
         XCTAssertEqual(list.first(where: { $0.id == second.id })?.reasoningLevel, .maximum)
         XCTAssertEqual(list.first(where: { $0.id == second.id })?.temperature, 0.7)
+        XCTAssertEqual(list.first(where: { $0.id == second.id })?.cheapModel, "model-b")
         XCTAssertEqual(list.first(where: { $0.id == first.id })?.temperature, ProviderModel.defaultTemperature)
 
         try await providers.setDefault(id: second.id)

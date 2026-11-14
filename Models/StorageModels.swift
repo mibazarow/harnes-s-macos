@@ -37,6 +37,9 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
     var apiKey: String
     var models: [String]
     var defaultModel: String?
+    /// Optional cheaper model for background work (read-only subagents, style card).
+    /// Nil means "use `defaultModel`".
+    var cheapModel: String?
     var contextWindow: Int
     var reasoningLevel: ReasoningLevel
     /// Sampling temperature for this provider. Individual per provider: a chatty
@@ -59,6 +62,7 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
         apiKey: String = "",
         models: [String] = [],
         defaultModel: String? = nil,
+        cheapModel: String? = nil,
         contextWindow: Int = 128_000,
         reasoningLevel: ReasoningLevel = .off,
         temperature: Double = ProviderModel.defaultTemperature,
@@ -76,6 +80,7 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
         self.apiKey = apiKey
         self.models = models
         self.defaultModel = defaultModel
+        self.cheapModel = cheapModel
         self.contextWindow = contextWindow
         self.reasoningLevel = reasoningLevel
         self.temperature = temperature
