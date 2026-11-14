@@ -180,6 +180,15 @@ struct ContextComposer: Sendable {
         )
     }
 
+    /// True when the whole history fits the budget without folding anything.
+    ///
+    /// Compaction is not free: it spends a model request and replaces live messages
+    /// with a summary. The boundary for that decision must be the full budget, not the
+    /// tail share — using `tailBudget` here collapsed histories that fit entirely.
+    func fits(_ messages: [ContextMessage], budget: Int) -> Bool {
+        messages.reduce(0) { $0 + $1.tokens } <= budget
+    }
+
     /// Index of the first message that stays verbatim for a tail of `budget` tokens,
     /// aligned forward to a user message. Manual compaction uses it so the split is the
     /// same one an automatic pass would pick.

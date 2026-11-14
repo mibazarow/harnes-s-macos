@@ -143,6 +143,49 @@ final class ContextTailTests: XCTestCase {
         XCTAssertEqual(composer.tailBudget(available: 100), composer.minimumTailTokens)
         XCTAssertGreaterThan(composer.tailBudget(available: 200_000), composer.minimumTailTokens)
     }
+
+    // MARK: - fits
+
+    func testFitsWhenTheWholeHistoryIsInsideTheBudget() {
+        let composer = ContextComposer()
+        let history = (0..<10).map {
+            ContextMessage(id: $0, role: "user", text: String(repeating: "я", count: 300))
+        }
+
+        XCTAssertTrue(composer.fits(history, budget: 100_000))
+    }
+
+    func testDoesNotFitWhenTheHistoryExceedsTheBudget() {
+        let composer = ContextComposer()
+        let history = (0..<400).map {
+            ContextMessage(id: $0, role: "user", text: String(repeating: "я", count: 3_000))
+        }
+
+        XCTAssertFalse(composer.fits(history, budget: 100_000))
+    }
+
+    func testTwoHundredShortMessagesAreReportedAsFitting() {
+        let composer = ContextComposer()
+        let history = (0..<200).map { index in
+            ContextMessage(id: index, role: index.isMultiple(of: 2) ? "user" : "assistant",
+                           text: "короткая реплика номер \(index)")
+        }
+        let system = String(repeating: "s", count: 3_000)
+        let window = 128_000
+        let threshold = 80.0
+        let available = Int(Double(window) * threshold / 100) - composer.reserveTokens
+        let budget = max(available - TokenEstimator.tokens(in: system), 2_000)
+
+        // Regression for /compact: the boundary must be the whole budget, and the old
+        // tail-only boundary shows why the bug used to trigger on this exact shape.
+        XCTAssertTrue(composer.fits(history, budget: budget))
+        let oldBoundary = composer.tailStart(
+            messages: history,
+            budget: composer.tailBudget(available: available)
+        )
+        XCTAssertLessThan(oldBoundary, history.count,
+                          "the old tail-based boundary must be shorter than the history, otherwise this test proves nothing")
+    }
 }
 
 final class OverflowDetectionTests: XCTestCase {

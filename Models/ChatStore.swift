@@ -1303,7 +1303,20 @@ final class ChatStore {
         // The tail is measured in tokens, not messages: six short replies and six long
         // ones are very different amounts of live context.
         let available = Int(Double(provider.contextWindow) * compactionThreshold / 100) - composer.reserveTokens
-        let start = composer.tailStart(messages: completed, budget: composer.tailBudget(available: max(available, 2_000)))
+        // Everything that is sent but is not a history message: system prompt and the
+        // existing checkpoint. Without subtracting them the boundary is optimistic.
+        let system = await buildSystemPrompt(services: services)
+        let fixed = TokenEstimator.tokens(in: system) + TokenEstimator.tokens(in: checkpointSummary)
+        let budget = max(available - fixed, 2_000)
+
+        // Compaction costs a request and destroys detail. If the history already fits,
+        // there is nothing to buy: report the numbers and leave storage alone.
+        if composer.fits(completed, budget: budget) {
+            let used = completed.reduce(0) { $0 + $1.tokens }
+            return "Сжимать нечего: вся история помещается в контекст (\(used) токенов из \(budget))."
+        }
+
+        let start = composer.tailStart(messages: completed, budget: composer.tailBudget(available: budget))
         let toCompact = Array(completed.prefix(start))
         guard !toCompact.isEmpty else {
             return "Сжимать нечего: вся история уже в пределах хвоста."
