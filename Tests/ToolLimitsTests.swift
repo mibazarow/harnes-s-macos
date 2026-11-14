@@ -146,6 +146,29 @@ final class ToolLimitsTests: XCTestCase {
 
     // MARK: - shell
 
+    func testGrepReportsABadPatternAsAnError() async throws {
+        _ = try write("hit.txt", "needle")
+
+        let result = try await registry().grep(["pattern": "[unclosed", "path": sandbox.path])
+
+        XCTAssertTrue(result.isError, result.output)
+    }
+
+    func testGrepKeepsALiteralExitLineInItsOutput() async throws {
+        _ = try write("exit.txt", "exit 1\nneedle")
+
+        let result = try await registry().grep(["pattern": "exit", "path": sandbox.path])
+
+        XCTAssertFalse(result.isError)
+        XCTAssertTrue(result.output.contains("exit 1"), result.output)
+    }
+
+    func testGitFailureIsAnErrorNotAnEmptyResult() async throws {
+        let result = try await registry().git(["status", "--short"])
+
+        XCTAssertTrue(result.isError, result.output)
+    }
+
     func testShellTimeoutKillsTheWholeProcessTree() async throws {
         let pidFile = sandbox.appendingPathComponent("child.pid")
         // The backgrounded sleep is a grandchild of zsh: terminate() used to leave it

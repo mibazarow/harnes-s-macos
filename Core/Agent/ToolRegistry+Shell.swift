@@ -163,6 +163,30 @@ extension ToolRegistry {
         return text
     }
 
+    /// Runs a short command off the cooperative pool.
+    ///
+    /// `runSync` blocks until the process exits. Called directly from an async tool it
+    /// pins a pool thread for up to a minute, and several such calls starve the rest of
+    /// the run. `runShell` already detaches; every other command tool goes through here.
+    static func runDetached(_ command: String, cwd: URL, timeout: TimeInterval) async throws -> String {
+        try await Task.detached(priority: .userInitiated) {
+            try runSync(command, cwd: cwd, timeout: timeout)
+        }.value
+    }
+
+    /// Splits the `exit N` header off `runSync` output.
+    ///
+    /// Stripping the text with `replacingOccurrences` used to remove a legitimate
+    /// `exit 1` line from the command's own output as well.
+    static func splitExit(_ output: String) -> (status: Int32, body: String) {
+        let parts = output.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let first = parts.first, first.hasPrefix("exit "),
+              let code = Int32(first.dropFirst(5)) else {
+            return (0, output)
+        }
+        return (code, parts.count > 1 ? String(parts[1]) : "")
+    }
+
     /// Absolute paths first: a GUI app does not inherit the shell's PATH, so a bare
     /// `rg` works in Terminal and fails inside the app.
     static let ripgrepPath: String? = {

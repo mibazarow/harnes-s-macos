@@ -54,20 +54,24 @@ extension ToolRegistry {
         return .ok(todos.summary)
     }
 
-    func git(_ args: [String]) throws -> ToolResult {
+    func git(_ args: [String]) async throws -> ToolResult {
         let command = "git " + args.joined(separator: " ")
-        let output = try Self.runSync(command, cwd: workspace, timeout: 30)
-        return .ok(output)
+        let result = Self.splitExit(try await Self.runDetached(command, cwd: workspace, timeout: 30))
+        // A failing git command (not a repository, bad revision) is an error the model
+        // has to see, not an empty successful answer.
+        return result.status == 0
+            ? .ok(result.body.isEmpty ? "(пусто)" : result.body)
+            : .fail("git \(args.first ?? ""): \(result.body)")
     }
 
-    func gitDiff(_ args: [String: Any]) throws -> ToolResult {
+    func gitDiff(_ args: [String: Any]) async throws -> ToolResult {
         let staged = (args["staged"] as? Bool) ?? false
-        return try git(staged ? ["diff", "--staged", "--stat", "-p"] : ["diff", "--stat", "-p"])
+        return try await git(staged ? ["diff", "--staged", "--stat", "-p"] : ["diff", "--stat", "-p"])
     }
 
-    func gitLog(_ args: [String: Any]) throws -> ToolResult {
+    func gitLog(_ args: [String: Any]) async throws -> ToolResult {
         let limit = max(1, min((args["limit"] as? Int) ?? 10, 100))
-        return try git(["log", "--oneline", "-n", "\(limit)"])
+        return try await git(["log", "--oneline", "-n", "\(limit)"])
     }
 
 // MARK: - Scheduler

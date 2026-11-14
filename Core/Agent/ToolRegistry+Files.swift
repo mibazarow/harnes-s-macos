@@ -93,7 +93,7 @@ extension ToolRegistry {
         return .ok("Изменено: \(display(url))")
     }
 
-    func grep(_ args: [String: Any]) throws -> ToolResult {
+    func grep(_ args: [String: Any]) async throws -> ToolResult {
         guard let pattern = args["pattern"] as? String else { return .fail("pattern обязателен") }
         let before = max(0, min((args["before"] as? Int) ?? 0, 10))
         let after = max(0, min((args["after"] as? Int) ?? 0, 20))
@@ -119,23 +119,30 @@ extension ToolRegistry {
             command = parts.joined(separator: " ")
         }
 
-        let result = try Self.runSync(command, cwd: workspace, timeout: 30)
-        let body = result.replacingOccurrences(of: "exit 1\n", with: "")
-        return .ok(body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "Совпадений нет."
-            : ToolTruncation.characters(body, limit: 20_000, note: ToolTruncation.narrowRequest))
+        let result = try await Self.runDetached(command, cwd: workspace, timeout: 30)
+        let (status, body) = Self.splitExit(result)
+        // ripgrep and grep: 1 means "no matches", anything above is a real failure such
+        // as a malformed pattern. Reporting that as "no matches" hides the cause.
+        if status == 1 || body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .ok("Совпадений нет.")
+        }
+        if status > 1 {
+            return .fail("grep завершился с кодом \(status): \(String(body.prefix(500)))")
+        }
+        return .ok(ToolTruncation.characters(body, limit: 20_000, note: ToolTruncation.narrowRequest))
     }
 
-    func glob(_ args: [String: Any]) throws -> ToolResult {
+    func glob(_ args: [String: Any]) async throws -> ToolResult {
         guard let pattern = args["pattern"] as? String else { return .fail("pattern обязателен") }
         // One line over the limit, so a full page is distinguishable from a cut one.
         let command = "find . -type f -name \(Self.shellQuote(pattern)) -not -path '*/.git/*' | head -201"
-        let result = try Self.runSync(command, cwd: workspace, timeout: 30)
-        guard !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let result = try await Self.runDetached(command, cwd: workspace, timeout: 30)
+        let body = Self.splitExit(result).body
+        guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return .ok("Файлов не найдено.")
         }
-        let lines = result.split(separator: "\n", omittingEmptySubsequences: false)
-        guard lines.count > 200 else { return .ok(result) }
+        let lines = body.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count > 200 else { return .ok(body) }
         return .ok(lines.prefix(200).joined(separator: "\n")
             + "\n[показаны первые 200 файлов; сузь pattern]")
     }

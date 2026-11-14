@@ -123,7 +123,7 @@ extension ToolRegistry {
             guard !codeHits.isEmpty else {
                 // No index yet: still answer, by scanning the working folder for the
                 // query words. Telling the user "run index_workspace" wastes a turn.
-                return try literalSearch(query, limit: limit)
+                return try await literalSearch(query, limit: limit)
             }
             return .ok(codeHits.map { hit in
                 "#\(hit.item.id) \(hit.item.snippet)"
@@ -131,12 +131,12 @@ extension ToolRegistry {
         }
 
         let hits = (try? await memory.search(query, limit: limit)) ?? []
-        guard !hits.isEmpty else { return try literalSearch(query, limit: limit) }
+        guard !hits.isEmpty else { return try await literalSearch(query, limit: limit) }
         return .ok(hits.map { "#\($0.id) \($0.snippet)" }.joined(separator: "\n"))
     }
 
     /// Plain `rg` over the workspace for a query that the index does not know yet.
-    func literalSearch(_ query: String, limit: Int) throws -> ToolResult {
+    func literalSearch(_ query: String, limit: Int) async throws -> ToolResult {
         let words = query
             .split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "_" })
             .map(String.init)
@@ -148,7 +148,7 @@ extension ToolRegistry {
         } else {
             command = "grep -rn --color=never -m \(limit) -E \(Self.shellQuote(pattern)) ."
         }
-        let result = try Self.runSync(command, cwd: workspace, timeout: 30)
+        let result = try await Self.runDetached(command, cwd: workspace, timeout: 30)
         // runSync prefixes the exit status; it is noise in a search result.
         let body = result
             .split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
@@ -162,26 +162,36 @@ extension ToolRegistry {
             + ToolTruncation.characters(body, limit: 20_000, note: ToolTruncation.narrowRequest))
     }
 
-    func gitCommit(_ args: [String: Any]) throws -> ToolResult {
+    func gitCommit(_ args: [String: Any]) async throws -> ToolResult {
         guard let message = args["message"] as? String, !message.isEmpty else {
             return .fail("message обязателен")
         }
         let paths = (args["paths"] as? [String]) ?? []
 
         var outputs: [String] = []
+        let addCommand: String
         if paths.isEmpty {
-            outputs.append(try Self.runSync("git add -A", cwd: workspace, timeout: 60))
+            addCommand = "git add -A"
         } else {
             let quoted = paths.map { Self.shellQuote(resolve($0).path) }.joined(separator: " ")
-            outputs.append(try Self.runSync("git add \(quoted)", cwd: workspace, timeout: 60))
+            addCommand = "git add \(quoted)"
         }
+        let add = Self.splitExit(try await Self.runDetached(addCommand, cwd: workspace, timeout: 60))
+        if add.status != 0 { return .fail("git add: \(add.body)") }
+        outputs.append(add.body)
 
-        outputs.append(try Self.runSync("git commit -m \(Self.shellQuote(message))", cwd: workspace, timeout: 120))
-        outputs.append(try Self.runSync("git log --oneline -1", cwd: workspace, timeout: 30))
-        return .ok(outputs.joined(separator: "\n"))
+        let commit = Self.splitExit(try await Self.runDetached(
+            "git commit -m \(Self.shellQuote(message))", cwd: workspace, timeout: 120
+        ))
+        if commit.status != 0 { return .fail("git commit: \(commit.body)") }
+        outputs.append(commit.body)
+
+        let log = Self.splitExit(try await Self.runDetached("git log --oneline -1", cwd: workspace, timeout: 30))
+        outputs.append(log.body)
+        return .ok(outputs.filter { !$0.isEmpty }.joined(separator: "\n"))
     }
 
-    func gitStash(_ args: [String: Any]) throws -> ToolResult {
+    func gitStash(_ args: [String: Any]) async throws -> ToolResult {
         guard let action = args["action"] as? String else { return .fail("action обязателен") }
         let command: String
         switch action {
@@ -190,7 +200,8 @@ extension ToolRegistry {
         case "list": command = "git stash list"
         default: return .fail("action: push | pop | list")
         }
-        return .ok(try Self.runSync(command, cwd: workspace, timeout: 60))
+        let result = Self.splitExit(try await Self.runDetached(command, cwd: workspace, timeout: 60))
+        return result.status == 0 ? .ok(result.body) : .fail("git stash: \(result.body)")
     }
 
     func tree(_ args: [String: Any]) throws -> ToolResult {
