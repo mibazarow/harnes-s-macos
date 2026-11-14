@@ -82,6 +82,35 @@ final class TranscriptGroupingTests: XCTestCase {
         XCTAssertEqual(shown[0].state, .streaming, "a live run must keep looking live")
     }
 
+    func testTrimCountsDisplayGroupsNotRawSteps() {
+        var history: [ChatMessage] = []
+        for run in 0..<2 {
+            history.append(ChatMessage(role: .user, text: "задача \(run)"))
+            for _ in 0..<150 {
+                history.append(toolOnly(["bash"]))
+            }
+            history.append(ChatMessage(role: .assistant, text: "готово \(run)"))
+        }
+
+        // Six display groups in 304 raw messages: nothing has to be dropped.
+        XCTAssertEqual(ChatMessage.groupedForDisplay(history).count, 6)
+        XCTAssertEqual(ChatMessage.trimToDisplayLimit(history, limit: 200), 0)
+    }
+
+    func testTrimDropsWholeToolRuns() {
+        let history = [
+            ChatMessage(role: .user, text: "раз"),
+            toolOnly(["bash"]),
+            toolOnly(["bash"]),
+            ChatMessage(role: .user, text: "два")
+        ]
+
+        // One bubble allowed: the last user message survives, the run before it goes.
+        let drop = ChatMessage.trimToDisplayLimit(history, limit: 1)
+        XCTAssertEqual(drop, 3)
+        XCTAssertEqual(ChatMessage.groupedForDisplay(Array(history.dropFirst(drop))).count, 1)
+    }
+
     func testAssistantWithoutToolsIsNotGrouped() {
         let history = [
             ChatMessage(role: .assistant, text: "просто текст"),

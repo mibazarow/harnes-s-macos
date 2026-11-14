@@ -1031,10 +1031,15 @@ final class ChatStore {
         releaseUserAttachments()
 
         // Keep the in-memory view bounded. Storage keeps everything; a restart restores
-        // the tail, so nothing is actually lost.
-        let cap = Self.transcriptCap
-        if messages.count > cap {
-            messages.removeFirst(messages.count - cap)
+        // the tail, so nothing is actually lost. The cap counts what the user sees:
+        // steps are collapsed into runs for display, so raw bubbles are not the right
+        // unit. A hard raw ceiling still guards against one pathological run.
+        let drop = ChatMessage.trimToDisplayLimit(messages, limit: Self.transcriptCap)
+        if drop > 0 {
+            messages.removeFirst(drop)
+        }
+        if messages.count > Self.rawMessageCeiling {
+            messages.removeFirst(messages.count - Self.rawMessageCeiling)
         }
 
         isStreaming = false
@@ -1052,6 +1057,9 @@ final class ChatStore {
     /// Messages held in the view at once. Storage keeps everything; this is only how
     /// much the list keeps in memory. Scrolling up pulls older pages.
     static let transcriptCap = 200
+    /// Absolute ceiling on raw bubbles, independent of grouping. A single run that
+    /// never ends would otherwise grow the array without bound while showing one group.
+    static let rawMessageCeiling = 1_000
     /// One page of history, both on launch and on every scroll-up.
     static let pageSize = 200
 

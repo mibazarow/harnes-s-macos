@@ -323,4 +323,30 @@ extension ChatMessage {
         if let run { result.append(run) }
         return result
     }
+
+    /// Number of leading messages to drop so the grouped view keeps at most `limit`
+    /// bubbles.
+    ///
+    /// A long run produces one message per step, so trimming by raw count pushed a
+    /// normal conversation out of the window after two tasks. The user sees groups, so
+    /// the window should be counted in groups; runs are dropped whole.
+    static func trimToDisplayLimit(_ messages: [ChatMessage], limit: Int) -> Int {
+        guard limit > 0, messages.count > limit else { return 0 }
+        var groups = 0
+        var index = messages.count - 1
+        while index >= 0 {
+            let start: Int
+            if messages[index].isToolOnly {
+                var beginning = index
+                while beginning > 0, messages[beginning - 1].isToolOnly { beginning -= 1 }
+                start = beginning
+            } else {
+                start = index
+            }
+            groups += 1
+            if groups > limit { return index + 1 }
+            index = start - 1
+        }
+        return 0
+    }
 }
