@@ -548,6 +548,67 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertTrue(result.output.contains("# Title"), result.output)
     }
 
+    // MARK: - paths and schema
+
+    func testGrepWorksOnAPathUnderHome() async throws {
+        // Regression: the tool passed `display(url)` into the shell, which shortens the
+        // home directory to "~". A quoted "~" is a literal byte, so rg failed with
+        // "IO error (os error 2)" on every path under /Users/….
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let directory = home.appendingPathComponent("harness-grep-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try "needle in the haystack".write(
+            to: directory.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8
+        )
+
+        let result = try await registry().grep(["pattern": "needle", "path": directory.path])
+
+        XCTAssertFalse(result.isError, result.output)
+        XCTAssertTrue(result.output.contains("needle in the haystack"), result.output)
+    }
+
+    func testDollarHomeIsExpandedInPaths() async throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let directory = home.appendingPathComponent("harness-home-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try "hello from home".write(
+            to: directory.appendingPathComponent("f.txt"), atomically: true, encoding: .utf8
+        )
+
+        let result = try await registry().readFile(["path": "$HOME/\(directory.lastPathComponent)/f.txt"])
+
+        XCTAssertFalse(result.isError, result.output)
+        XCTAssertTrue(result.output.contains("hello from home"), result.output)
+    }
+
+    func testSchemasExposeTheDocumentedParameters() throws {
+        // Silent drift between implementation and schema is how `fs_grep mode` shipped
+        // without ever being callable. This test makes the contract explicit.
+        func fields(_ name: String) throws -> [String] {
+            let definition = try XCTUnwrap(ToolRegistry.definitions.first { $0.name == name })
+            // `parameters` is a whole JSON schema, not a flat bag of field names.
+            let properties = try XCTUnwrap(definition.parameters["properties"]?.value as? [String: Any])
+            return Array(properties.keys)
+        }
+
+        XCTAssertTrue(try fields("fs_grep").contains("mode"))
+        XCTAssertTrue(try fields("fs_grep").contains("limit"))
+        XCTAssertTrue(try fields("fs_grep").contains("ignore_case"))
+        XCTAssertTrue(try fields("fs_read").contains("offset"))
+        XCTAssertTrue(try fields("edit_file").contains("start"))
+        XCTAssertTrue(try fields("edit_file").contains("pattern"))
+        XCTAssertTrue(try fields("bash").contains("full"))
+        XCTAssertTrue(try fields("image_read").contains("page"))
+        XCTAssertTrue(try fields("doc_read").contains("page_from"))
+    }
+
+    func testVerifiedWriteRejectsAMissingDirectory() throws {
+        let target = sandbox.appendingPathComponent("nope/deeper/f.txt")
+        XCTAssertThrowsError(try ToolRegistry.verifiedWrite(Data("x".utf8), to: target))
+    }
+
     // MARK: - shell
 
     func testGrepReportsABadPatternAsAnError() async throws {

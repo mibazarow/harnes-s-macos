@@ -168,13 +168,17 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "fs_grep",
-            description: "Regex search inside files of a directory.",
+            description: "Search with ripgrep. mode=matches shows lines with context, count totals per file, outline returns only headings and declarations (a cheap map of the code).",
             parameters: schema([
                 "pattern": ["type": "string"],
-                "path": ["type": "string", "description": "Directory, default '.'"],
+                "path": ["type": "string", "description": "Directory or file, default '.'"],
                 "glob": ["type": "string", "description": "Optional file glob, e.g. '*.swift'"],
+                "mode": ["type": "string", "enum": ["matches", "count", "outline"], "description": "Default matches"],
+                "ignore_case": ["type": "boolean"],
+                "literal": ["type": "boolean", "description": "Treat pattern as plain text"],
                 "before": ["type": "integer", "description": "Context lines before a match (0-10)"],
-                "after": ["type": "integer", "description": "Context lines after a match (0-20)"]
+                "after": ["type": "integer", "description": "Context lines after a match (0-20)"],
+                "limit": ["type": "integer", "description": "Max result lines, default 100"]
             ], required: ["pattern"])
         ),
         ToolDefinition(
@@ -234,6 +238,7 @@ extension ToolRegistry {
                 "path": ["type": "string"],
                 "page_from": ["type": "integer", "description": "PDF first page, 1-based"],
                 "page_to": ["type": "integer", "description": "PDF last page, inclusive"],
+                "formulas": ["type": "boolean", "description": "XLSX: return formulas instead of cached values"],
                 "offset": ["type": "integer", "description": "For plain text: first line"],
                 "limit": ["type": "integer", "description": "For plain text: max lines"]
             ], required: ["path"])
@@ -249,9 +254,10 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "image_read",
-            description: "Inspect or transform an image (EXIF orientation, crop, rotate, resize) and return a PNG the chat can display. No external tools needed.",
+            description: "Inspect or transform an image or a PDF page (EXIF orientation, crop, rotate, resize) and return a PNG the chat can display. No external tools needed.",
             parameters: schema([
-                "path": ["type": "string"],
+                "path": ["type": "string", "description": "Image or PDF"],
+                "page": ["type": "integer", "description": "PDF page, default 1"],
                 "info": ["type": "boolean", "description": "Only report size and orientation"],
                 "width": ["type": "integer", "description": "Target width, keeps aspect"],
                 "height": ["type": "integer", "description": "Target height, keeps aspect"],

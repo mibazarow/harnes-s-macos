@@ -30,7 +30,7 @@ extension ToolRegistry {
         case "pptx":
             return try readPptx(url)
         case "xlsx":
-            return try readXlsx(url)
+            return try readXlsx(url, formulas: Self.bool(args, "formulas") ?? false)
         case "rtf":
             guard let textutil = Self.which("textutil") else {
                 return .fail("textutil недоступен")
@@ -67,6 +67,19 @@ extension ToolRegistry {
         let (status, body) = Self.splitExit(result)
         guard status == 0 else { return .fail("pdftotext: \(String(body.prefix(300)))") }
 
+        // A scanned page has no text layer. Render it and OCR automatically instead of
+        // returning an empty page and making the model discover the workaround.
+        if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let rendered = Self.renderPDFPage(url, page: from),
+               let recognized = try? ocr(["path": rendered.path]),
+               !recognized.isError,
+               !recognized.output.isEmpty,
+               recognized.output != "Текст не распознан." {
+                return .ok("PDF, страница \(from) распознана (скан)\n" + Self.clipDocument(recognized.output))
+            }
+            return .ok("PDF: текстовый слой пуст, распознать страницу не удалось (скан?)")
+        }
+
         var header = "PDF"
         if let pages = Self.pdfPageCount(url) { header += ", \(pages) страниц" }
         if to != nil { header += ", страницы \(from)–\(last)" }
@@ -82,6 +95,37 @@ extension ToolRegistry {
             return Int(line.replacingOccurrences(of: "Pages:", with: "").trimmingCharacters(in: .whitespaces))
         }
         return nil
+    }
+
+    /// Renders a PDF page to a PNG in the artifacts folder.
+    ///
+    /// Used by `image_read` (a PDF is a valid image source) and by the scan fallback of
+    /// `doc_read`. CoreGraphics only: no sips or poppler render step to shell out to.
+    static func renderPDFPage(_ url: URL, page: Int, scale: CGFloat = 2) -> URL? {
+        guard let document = CGPDFDocument(url as CFURL),
+              let pdfPage = document.page(at: max(1, page)) else { return nil }
+        let bounds = pdfPage.getBoxRect(.mediaBox)
+        let width = max(1, Int(bounds.width * scale))
+        let height = max(1, Int(bounds.height * scale))
+        guard let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.scaleBy(x: scale, y: scale)
+        context.drawPDFPage(pdfPage)
+        guard let image = context.makeImage() else { return nil }
+
+        try? AppPaths.ensureDirectory(AppPaths.artifactsDirectory)
+        let output = AppPaths.artifactsDirectory
+            .appendingPathComponent("pdf-\(UUID().uuidString.prefix(8)).png")
+        guard let destination = CGImageDestinationCreateWithURL(
+            output as CFURL, UTType.png.identifier as CFString, 1, nil
+        ) else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        return CGImageDestinationFinalize(destination) ? output : nil
     }
 
     // MARK: Zip-based formats
@@ -111,15 +155,16 @@ extension ToolRegistry {
         return .ok(out.isEmpty ? "Текст на слайдах не найден." : Self.clipDocument(out.joined(separator: "\n")))
     }
 
-    private func readXlsx(_ url: URL) throws -> ToolResult {
+    private func readXlsx(_ url: URL, formulas: Bool = false) throws -> ToolResult {
         if let python = Self.which("python3") {
             let tmp = FileManager.default.temporaryDirectory
                 .appendingPathComponent("xlsx-\(UUID().uuidString).py")
             try Self.openpyxlScript.write(to: tmp, atomically: true, encoding: .utf8)
             defer { try? FileManager.default.removeItem(at: tmp) }
             do {
+                let mode = formulas ? "formulas" : "values"
                 let result = try Self.runSync(
-                    "\(python) \(Self.shellQuote(tmp.path)) \(Self.shellQuote(url.path))",
+                    "\(python) \(Self.shellQuote(tmp.path)) \(Self.shellQuote(url.path)) \(mode)",
                     cwd: workspace, timeout: 60
                 )
                 let (status, body) = Self.splitExit(result)
@@ -143,7 +188,7 @@ extension ToolRegistry {
         import openpyxl
     except ImportError:
         sys.exit(2)
-    wb = openpyxl.load_workbook(sys.argv[1], read_only=True, data_only=True)
+    wb = openpyxl.load_workbook(sys.argv[1], read_only=True, data_only=(sys.argv[2] != "formulas"))
     for ws in wb.worksheets:
         print(f"## {ws.title}")
         for row in ws.iter_rows(values_only=True):
@@ -344,9 +389,23 @@ extension ToolRegistry {
     /// tools to install.
     func imageRead(_ args: [String: Any]) async throws -> ToolResult {
         guard let raw = args["path"] as? String else { return .fail("path обязателен") }
-        let url = resolve(raw)
+        let originalURL = resolve(raw)
+        // A PDF is an image source too: render the requested page first, then the same
+        // crop/rotate/resize pipeline applies. `sips` is the user's manual workaround,
+        // not something the model should have to know.
+        let isPDF = originalURL.pathExtension.lowercased() == "pdf"
+        let page = max(1, Self.int(args, "page") ?? 1)
+        let url: URL
+        if isPDF {
+            guard let rendered = Self.renderPDFPage(originalURL, page: page) else {
+                return .fail("Не удалось отрисовать страницу \(page) из \(display(originalURL))")
+            }
+            url = rendered
+        } else {
+            url = originalURL
+        }
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
-            return .fail("Не удалось открыть изображение: \(display(url))")
+            return .fail("Не удалось открыть изображение: \(display(originalURL))")
         }
         guard let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             return .fail("Формат не читается (не изображение?): \(display(url))")
@@ -419,7 +478,9 @@ extension ToolRegistry {
             return .fail("Не удалось записать PNG")
         }
 
-        var note = "image: \(originalWidth)x\(originalHeight) → \(rendered.width)x\(rendered.height)"
+        var note = isPDF
+            ? "PDF стр. \(page): \(rendered.width)x\(rendered.height)"
+            : "image: \(originalWidth)x\(originalHeight) → \(rendered.width)x\(rendered.height)"
         if orientation != .up { note += ", EXIF-поворот применён" }
         if degrees % 360 != 0 { note += ", поворот \(degrees)°" }
         return .ok(note + "\n[image: \(output.path)]")

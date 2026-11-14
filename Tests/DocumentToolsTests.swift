@@ -162,6 +162,45 @@ final class DocumentToolsTests: XCTestCase {
         XCTAssertEqual(image.width, 32)
     }
 
+    func testImageReadRendersTheFirstPDFPage() async throws {
+        let text = path("page.txt")
+        try "PDF page one".write(to: text, atomically: true, encoding: .utf8)
+        let pdf = path("one.pdf")
+        _ = try ToolRegistry.runSync(
+            "/usr/sbin/cupsfilter -m application/pdf \(text.path) > \(pdf.path)",
+            cwd: sandbox, timeout: 60
+        )
+        guard FileManager.default.fileExists(atPath: pdf.path) else {
+            throw XCTSkip("cupsfilter недоступен")
+        }
+
+        let result = try await tool.imageRead(["path": pdf.path])
+
+        XCTAssertFalse(result.isError, result.output)
+        XCTAssertTrue(result.output.contains("PDF стр. 1"), result.output)
+        XCTAssertTrue(result.output.contains("[image: "), result.output)
+    }
+
+    func testDocReadOCRsAScannedPDFPage() async throws {
+        // PNG -> PDF through sips gives a page with no text layer, which is exactly the
+        // scan case: pdftotext is empty, so the tool must render and OCR it itself.
+        let image = try makeTextImage("SCANNED PAGE")
+        let pdf = path("scan.pdf")
+        _ = try ToolRegistry.runSync(
+            "/usr/bin/sips -s format pdf \(image.path) --out \(pdf.path)",
+            cwd: sandbox, timeout: 30
+        )
+        guard FileManager.default.fileExists(atPath: pdf.path) else {
+            throw XCTSkip("sips не собрал PDF")
+        }
+
+        let result = try await tool.docRead(["path": pdf.path])
+
+        XCTAssertFalse(result.isError, result.output)
+        XCTAssertTrue(result.output.contains("распознана"), result.output)
+        XCTAssertTrue(result.output.uppercased().contains("SCANNED"), result.output)
+    }
+
     // MARK: OCR
 
     func testOcrReturnsWordsAndPixelBoxes() async throws {

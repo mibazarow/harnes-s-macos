@@ -262,7 +262,12 @@ struct ToolRegistry: Sendable {
     }
 
     func resolve(_ path: String) -> URL {
+        // Both spellings reach us from models and shell snippets. `expandingTildeInPath`
+        // only knows "~", so "$HOME" was passed through literally.
+        let home = NSHomeDirectory()
         let expanded = (path as NSString).expandingTildeInPath
+            .replacingOccurrences(of: "${HOME}", with: home)
+            .replacingOccurrences(of: "$HOME", with: home)
 
         if expanded.hasPrefix("/") {
             return URL(fileURLWithPath: expanded).standardizedFileURL

@@ -97,6 +97,8 @@ extension ToolRegistry {
             if !existed {
                 FileManager.default.createFile(atPath: url.path, contents: nil)
             }
+            let originalSize = FileLines.fileSize(url)
+            let payload = Data(content.utf8)
             let handle = try FileHandle(forWritingTo: url)
             defer { try? handle.close() }
             try handle.seekToEnd()
@@ -104,6 +106,12 @@ extension ToolRegistry {
             // onto the last line: logs and notes are written line-wise.
             let needsNewline = !before.isEmpty && !before.hasSuffix("\n")
             try handle.write(contentsOf: Data(((needsNewline ? "\n" : "") + content).utf8))
+            try handle.synchronize()
+            let expected = originalSize + payload.count + (needsNewline ? 1 : 0)
+            let actual = FileLines.fileSize(url)
+            guard FileManager.default.fileExists(atPath: url.path), actual == expected else {
+                return .fail("Дописывание не подтвердилось: размер \(actual) ≠ \(expected) байт.")
+            }
             await ledger.note(url)
             let appended = before.isEmpty ? content : (needsNewline ? "\n" : "") + content
             return .ok("Дописано: \(display(url)) (+\(content.count) симв.)\n"
@@ -111,10 +119,32 @@ extension ToolRegistry {
         }
 
         let before = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        try content.write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try Self.verifiedWrite(Data(content.utf8), to: url)
+        } catch {
+            return .fail("Запись не удалась: \(error.localizedDescription)")
+        }
         await ledger.note(url)
         let diff = Self.renderDiff(before: before, after: content, label: "записано")
         return .ok("Записано: \(display(url)) (\(content.count) симв.)\n" + diff)
+    }
+
+    /// Writes and proves it happened.
+    ///
+    /// A live session caught `fs_write` reporting "Записано" for a file that was not on
+    /// disk. Trusting the call alone is not enough — verify existence and byte count,
+    /// and turn a mismatch into an error instead of a false success. `.atomic` writes a
+    /// temp file in the same directory and renames it, so a crash never leaves a
+    /// half-written file behind.
+    static func verifiedWrite(_ data: Data, to url: URL) throws {
+        try data.write(to: url, options: .atomic)
+        let size = FileLines.fileSize(url)
+        guard FileManager.default.fileExists(atPath: url.path), size == data.count else {
+            throw NSError(domain: "Harness", code: 1, userInfo: [
+                NSLocalizedDescriptionKey:
+                    "файла нет на диске или его размер \(size) ≠ \(data.count) байт"
+            ])
+        }
     }
 
     /// Compact diff of only the changed region.
@@ -249,7 +279,9 @@ extension ToolRegistry {
         let literal = Self.bool(args, "literal") ?? false
         let glob = (args["glob"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let targetPath = args["path"] as? String ?? "."
-        let target = Self.shellQuote(display(resolve(targetPath)))
+        // Never pass `display(...)` here: it shortens the home directory to "~",
+        // and a quoted "~" is a literal 0x7E byte that no tool expands.
+        let target = Self.shellQuote(resolve(targetPath).path)
 
         if mode == "outline" {
             return outline(path: targetPath, glob: glob, limit: limit)
