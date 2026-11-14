@@ -92,10 +92,9 @@ Windows-версия — **отдельный репозиторий**, а не 
 | | macOS | Windows |
 |---|---|---|
 | репозиторий | `harnes-s-macos` | `harnes-s-windows` |
-| Gitverse | `git@gitverse.ru:mibazarow/harnes-s-macos.git` | `git@gitverse.ru:mibazarow/harnes-s-windows.git` |
 | GitHub | `https://github.com/mibazarow/harnes-s-macos.git` | `https://github.com/mibazarow/harnes-s-windows.git` |
 
-Правило двух зеркал сохраняется: любой пуш идёт в оба remote параллельно (`git pushall`).
+Один remote на репозиторий: GitHub. Пушим обычным `git push`.
 Оба Windows-репозитория создаются пустыми в момент первого пуша.
 
 ### 2.2 Раскладка Windows-репозитория

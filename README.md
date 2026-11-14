@@ -128,11 +128,11 @@ Swift 6 и SwiftUI, без Electron, без Node.js и npm в рантайме. 
 
 ![Поиск по проекту](DOCS/screenshots/search.png)
 
-### Git: коммит и два зеркала
+### Git: коммит и пуш
 
-Смотрит дифф целиком перед коммитом, пушит в оба remote параллельно и говорит, если одна сторона упала.
+Смотрит дифф целиком перед коммитом, пушит на GitHub и говорит, если пуш упал.
 
-![Коммит в два зеркала](DOCS/screenshots/git.png)
+![Коммит и пуш](DOCS/screenshots/git.png)
 
 ### Веб: собирает данные там, где curl получает заглушку
 
@@ -160,8 +160,7 @@ Swift 6 и SwiftUI, без Electron, без Node.js и npm в рантайме. 
 ### Сборка
 
 ```bash
-git clone git@gitverse.ru:mibazarow/harnes-s-macos.git
-# зеркало: https://github.com/mibazarow/harnes-s-macos
+git clone https://github.com/mibazarow/harnes-s-macos.git
 cd harnes-s-macos
 xcodegen generate
 xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Debug -derivedDataPath .build build
@@ -186,7 +185,7 @@ xattr -dr com.apple.quarantine /Applications/Harness.app
 open /Applications/Harness.app
 ```
 
-Пуш идёт в оба зеркала одной командой — `git pushall` (алиас на `Scripts/push_all.sh`).
+Пуш идёт в один репозиторий — `git push` (`origin` → GitHub).
 
 ### Первый запуск
 

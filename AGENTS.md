@@ -4,20 +4,14 @@ Native macOS Swift AI agent app. Data folder is `~/HARNES_S_DATA/`, never inside
 
 ## Pushing
 
-The repo has two mirrors and they must stay identical:
+Single remote: GitHub.
 
 | remote | URL |
 |---|---|
-| `origin` | `git@gitverse.ru:mibazarow/harnes-s-macos.git` |
-| `github` | `https://github.com/mibazarow/harnes-s-macos.git` |
+| `origin` | `https://github.com/mibazarow/harnes-s-macos.git` |
 
-When the user asks to push, push to **both, in parallel**:
-
-```bash
-git pushall          # alias for Scripts/push_all.sh
-```
-
-Never push to one side only. If one side fails, say which one and why.
+When the user asks to push: `git push origin master` (or plain `git push`).
+Do not add a second remote or a mirror.
 
 The GitHub token lives in `DOCS/github-token.md` (gitignored, mode 0600) and is read
 by `/Users/mb/.config/github/credential-helper.sh`. Never print it, never commit it.

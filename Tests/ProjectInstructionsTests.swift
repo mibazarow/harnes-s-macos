@@ -20,12 +20,12 @@ final class ProjectInstructionsTests: XCTestCase {
     }
 
     func testLoadsAgentsFileFromTheWorkspace() async throws {
-        try write("AGENTS.md", "Build with xcodebuild, push to both mirrors.")
+        try write("AGENTS.md", "Build with xcodebuild, push to origin.")
 
         let items = await ProjectInstructions.shared.load(workspace: sandbox)
 
         XCTAssertEqual(items.count, 1)
-        XCTAssertEqual(items[0].text, "Build with xcodebuild, push to both mirrors.")
+        XCTAssertEqual(items[0].text, "Build with xcodebuild, push to origin.")
         XCTAssertTrue(items[0].path.hasSuffix("AGENTS.md"))
     }
 
