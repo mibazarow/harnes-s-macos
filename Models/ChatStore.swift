@@ -1042,6 +1042,14 @@ final class ChatStore {
             messages.removeFirst(messages.count - Self.rawMessageCeiling)
         }
 
+        // One line per run in the same file as the latency numbers: the measurement
+        // Правка 3 asks for, without a schema or a second source of truth.
+        let stats = ToolUsageStats.analyze(messages)
+        if !stats.isEmpty {
+            Self.logLatency("tool_stats steps=\(stats.steps) calls=\(stats.toolCalls) "
+                + "longest=\(stats.longestRunTool ?? "-")x\(stats.longestRun)")
+        }
+
         isStreaming = false
         streamTask = nil
         dequeueNext()
@@ -1240,6 +1248,12 @@ final class ChatStore {
 
         if input == "/compact" {
             runCompaction()
+            return
+        }
+
+        if input == "/stats" {
+            let stats = ToolUsageStats.analyze(messages)
+            messages.append(ChatMessage(role: .assistant, text: stats.summary))
             return
         }
 

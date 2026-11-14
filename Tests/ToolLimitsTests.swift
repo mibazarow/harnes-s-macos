@@ -144,6 +144,38 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertTrue(result.output.contains("обрезано на 20 000"), result.output.suffix(120).description)
     }
 
+    // MARK: - usage stats
+
+    func testToolUsageStatsCountStepsAndRuns() {
+        func exchange(_ name: String) -> ToolExchange {
+            ToolExchange(callID: UUID().uuidString, name: name, arguments: "{}", output: "ok", isError: false)
+        }
+        func step(_ exchanges: [ToolExchange]) -> ChatMessage {
+            ChatMessage(role: .assistant, text: "", exchanges: exchanges)
+        }
+
+        let messages = [
+            ChatMessage(role: .user, text: "сделай"),
+            step([exchange("fs_read"), exchange("fs_read")]),
+            ChatMessage(role: .assistant, text: "", tools: [ToolTrace(name: "fs_read", summary: "x", isRunning: false)]),
+            step([exchange("bash"), exchange("fs_read")])
+        ]
+
+        let stats = ToolUsageStats.analyze(messages)
+
+        XCTAssertEqual(stats.steps, 3)
+        XCTAssertEqual(stats.toolCalls, 5)
+        XCTAssertEqual(stats.perTool["fs_read"], 4)
+        XCTAssertEqual(stats.longestRun, 3)
+        XCTAssertEqual(stats.longestRunTool, "fs_read")
+    }
+
+    func testToolUsageStatsIsEmptyWithoutCalls() {
+        let stats = ToolUsageStats.analyze([ChatMessage(role: .user, text: "привет")])
+        XCTAssertTrue(stats.isEmpty)
+        XCTAssertEqual(stats.summary, "Вызовов инструментов пока не было.")
+    }
+
     // MARK: - secrets
 
     func testSecretGetMasksTheValueUnlessRevealed() async throws {
