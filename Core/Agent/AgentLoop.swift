@@ -7,11 +7,16 @@ struct AgentLoop: Sendable {
     let registry: ToolRegistry
     let client = ProviderClient()
 
-    /// Soft ceiling. LoopGuard catches an identical repeat, but a model that varies
-    /// each call slightly would slip past it and burn tokens forever. 100 steps is far
-    /// beyond any real task; hitting it means something is wrong, and the user can
-    /// simply continue. Pass nil to remove the ceiling entirely.
-    var maxSteps: Int? = 100
+    /// Last-resort ceiling, not a loop detector.
+    ///
+    /// `LoopGuard` is the real detector: it compares calls AND result progress, so
+    /// legitimate repetition with changed results, cycles and tool hammering all stop
+    /// long before this. The old value of 100 was picked without measurements and sat
+    /// below the length of real multi-file tasks; runs that were making progress died
+    /// on it. 300 is three times that ceiling and still bounded — after the tool-layer
+    /// fixes (error marking, `replace_all`, truncation hints) real runs stay far below
+    /// it. Pass nil to remove the ceiling entirely.
+    var maxSteps: Int? = 300
 
     /// Ceiling on the tool output kept inside one run, in characters (~40k tokens).
     ///
@@ -172,9 +177,13 @@ struct AgentLoop: Sendable {
                         }
 
                         if let maxSteps, step >= maxSteps - 1 {
+                            // This is not a loop: LoopGuard above already ruled that out.
+                            // Saying "похоже, задача идёт по кругу" on a run that was
+                            // making progress trained the user to ignore a real warning,
+                            // so the fuse gets its own honest wording.
                             continuation.yield(.delta(
-                                "\n\n_Остановился на \(maxSteps) шагах: похоже, задача идёт по кругу. "
-                                + "Напиши, что делать дальше, и я продолжу._"
+                                "\n\n_Дошёл до предохранителя в \(maxSteps) шагов. "
+                                + "Работа не завершена — напиши «продолжай», и я продолжу с этого места._"
                             ))
                             break
                         }

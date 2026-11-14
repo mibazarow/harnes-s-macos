@@ -132,6 +132,67 @@ final class AgentLoopIntegrationTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.appendingPathComponent("x.txt").path))
     }
 
+    func testStepCeilingHasItsOwnMessageAndIsNotALoopWarning() async throws {
+        let responses = (0..<3).map { index in
+            [
+                #"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_\#(index)","function":{"name":"fs_read","arguments":"{\"path\":\"f\#(index).txt\"}"}}]}}]}"#,
+                #"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#
+            ]
+        }
+        let server = try StubSSEServer(responses: responses)
+        try server.start()
+        defer { server.stop() }
+
+        let sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("harness-steps-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+        // Distinct content per file: identical results would trip LoopGuard's thrash
+        // detector, and this test is about the fuse, not the detector.
+        for index in 0..<3 {
+            try "line \(index)".write(
+                to: sandbox.appendingPathComponent("f\(index).txt"), atomically: true, encoding: .utf8
+            )
+        }
+
+        let registry = ToolRegistry(
+            workspace: sandbox,
+            memory: nil,
+            embeddings: nil,
+            secrets: nil,
+            skills: nil,
+            mcp: nil
+        )
+        var loop = AgentLoop(provider: provider(baseURL: server.baseURL), model: "stub-model", registry: registry)
+        loop.maxSteps = 3
+
+        var text = ""
+        for try await event in loop.run(history: [ProviderMessage(role: .user, content: "read them")]) {
+            if case .delta(let chunk) = event { text += chunk }
+        }
+
+        XCTAssertEqual(server.bodies.count, 3)
+        XCTAssertTrue(text.contains("предохранителя в 3 шагов"), text)
+        XCTAssertFalse(text.contains("по кругу"), text)
+    }
+
+    func testDefaultStepCeilingIsThreeHundred() {
+        let registry = ToolRegistry(
+            workspace: FileManager.default.temporaryDirectory,
+            memory: nil,
+            embeddings: nil,
+            secrets: nil,
+            skills: nil,
+            mcp: nil
+        )
+        let loop = AgentLoop(
+            provider: provider(baseURL: "http://127.0.0.1:1/v1"),
+            model: "m",
+            registry: registry
+        )
+        XCTAssertEqual(loop.maxSteps, 300)
+    }
+
     func testHTTPErrorIsReported() async throws {
         let server = try StubSSEServer(chunks: [])
         try server.start()
