@@ -44,16 +44,27 @@ extension ToolRegistry {
         return .ok("Патч применён: \(display(url)) (\(before) → \(after) строк)")
     }
 
+    /// Ceiling on one read_many reply. Twenty files of a thousand lines each would
+    /// otherwise return megabytes: AgentLoop cuts the final tool message at 30k, but by
+    /// then the whole payload has been built, copied and written to the transcript.
+    /// 60k is two full tool messages, enough for a real multi-file review.
+    static let readManyBudget = 60_000
+
     func readMany(_ args: [String: Any]) throws -> ToolResult {
         guard let paths = args["paths"] as? [String], !paths.isEmpty else {
             return .fail("paths обязателен")
         }
         let limit = max(1, min((args["limit"] as? Int) ?? 200, 1_000))
+        let offset = max((args["offset"] as? Int) ?? 1, 1)
 
         var blocks: [String] = []
         var failures = 0
+        var read = 0
+        var used = 0
         let attempted = Array(paths.prefix(20))
+
         for path in attempted {
+            guard used < Self.readManyBudget else { break }
             let url = resolve(path)
             guard let content = try? String(contentsOf: url, encoding: .utf8) else {
                 failures += 1
@@ -63,16 +74,32 @@ extension ToolRegistry {
                 continue
             }
             let lines = content.components(separatedBy: "\n")
-            let shown = lines.prefix(limit)
+            let slice = lines.dropFirst(offset - 1).prefix(limit)
+            let end = offset - 1 + slice.count
             var block = "=== \(display(url)) (\(lines.count) строк)\n"
-            block += shown.enumerated().map { "\($0.offset + 1): \($0.element)" }.joined(separator: "\n")
-            if lines.count > limit {
-                block += "\n… ещё \(lines.count - limit) строк"
+            block += slice.enumerated().map { "\(offset + $0.offset): \($0.element)" }.joined(separator: "\n")
+            if lines.count > end {
+                block += "\n… [обрезано: строки \(offset)–\(end) из \(lines.count); "
+                    + "продолжение — offset=\(end + 1)]"
+            }
+
+            let remaining = Self.readManyBudget - used
+            if block.count > remaining {
+                blocks.append(String(block.prefix(remaining)) + "\n[вывод обрезан по бюджету вызова]")
+                used = Self.readManyBudget
+                break
             }
             blocks.append(block)
+            used += block.count
+            read += 1
         }
+
         if failures == attempted.count {
             return .fail(blocks.joined(separator: "\n\n"))
+        }
+        if read + failures < attempted.count {
+            blocks.append("[read_many: прочитано \(read) из \(attempted.count) файлов, "
+                + "лимит \(Self.readManyBudget) символов; разбей запрос на части]")
         }
         return .ok(blocks.joined(separator: "\n\n"))
     }
@@ -131,7 +158,8 @@ extension ToolRegistry {
         guard !body.isEmpty, !result.hasPrefix("exit 1") else {
             return .ok("Ничего не найдено ни в индексе, ни в файлах.")
         }
-        return .ok("Поиск без индекса (совпадения по словам запроса):\n" + String(body.prefix(20_000)))
+        return .ok("Поиск без индекса (совпадения по словам запроса):\n"
+            + ToolTruncation.characters(body, limit: 20_000, note: ToolTruncation.narrowRequest))
     }
 
     func gitCommit(_ args: [String: Any]) throws -> ToolResult {
@@ -207,6 +235,9 @@ extension ToolRegistry {
                 if isDir {
                     walk(entry, prefix: prefix + "  ", level: level + 1)
                 }
+            }
+            if sorted.count > 200 {
+                lines.append(prefix + "… ещё \(sorted.count - 200) записей")
             }
         }
 

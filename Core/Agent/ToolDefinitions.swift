@@ -47,9 +47,10 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "read_many",
-            description: "Read several files in one call. Returns each file with line numbers and a size cap.",
+            description: "Read several files in one call. Returns each file with line numbers; the reply says what was cut and which offset continues it.",
             parameters: schema([
                 "paths": ["type": "array", "items": ["type": "string"]],
+                "offset": ["type": "integer", "description": "First line in every file, 1-based"],
                 "limit": ["type": "integer", "description": "Max lines per file, default 200"]
             ], required: ["paths"])
         ),

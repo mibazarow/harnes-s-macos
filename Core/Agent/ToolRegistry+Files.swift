@@ -12,10 +12,14 @@ extension ToolRegistry {
         .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
 
         var lines = ["\(display(url)) — \(entries.count) записей"]
-        for entry in entries.prefix(400) {
+        let shown = entries.prefix(400)
+        for entry in shown {
             let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
             let size = (try? entry.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             lines.append(isDir ? "  \(entry.lastPathComponent)/" : "  \(entry.lastPathComponent)  \(size) B")
+        }
+        if entries.count > shown.count {
+            lines.append("[показаны \(shown.count) из \(entries.count) записей; сузь путь или используй fs_glob]")
         }
         return .ok(lines.joined(separator: "\n"))
     }
@@ -29,8 +33,10 @@ extension ToolRegistry {
         let lines = content.components(separatedBy: "\n")
         let slice = lines.dropFirst(offset - 1).prefix(limit)
         var out = slice.enumerated().map { "\(offset + $0.offset): \($0.element)" }.joined(separator: "\n")
-        if lines.count > offset - 1 + limit {
-            out += "\n… (всего \(lines.count) строк)"
+        let end = offset - 1 + slice.count
+        if lines.count > end {
+            out += "\n… [обрезано: строки \(offset)–\(end) из \(lines.count); "
+                + "продолжение — offset=\(end + 1)]"
         }
         return .ok(out.isEmpty ? "(пусто)" : out)
     }
@@ -117,13 +123,20 @@ extension ToolRegistry {
         let body = result.replacingOccurrences(of: "exit 1\n", with: "")
         return .ok(body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Совпадений нет."
-            : String(body.prefix(20_000)))
+            : ToolTruncation.characters(body, limit: 20_000, note: ToolTruncation.narrowRequest))
     }
 
     func glob(_ args: [String: Any]) throws -> ToolResult {
         guard let pattern = args["pattern"] as? String else { return .fail("pattern обязателен") }
-        let command = "find . -type f -name \(Self.shellQuote(pattern)) -not -path '*/.git/*' | head -200"
+        // One line over the limit, so a full page is distinguishable from a cut one.
+        let command = "find . -type f -name \(Self.shellQuote(pattern)) -not -path '*/.git/*' | head -201"
         let result = try Self.runSync(command, cwd: workspace, timeout: 30)
-        return .ok(result.isEmpty ? "Файлов не найдено." : result)
+        guard !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .ok("Файлов не найдено.")
+        }
+        let lines = result.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count > 200 else { return .ok(result) }
+        return .ok(lines.prefix(200).joined(separator: "\n")
+            + "\n[показаны первые 200 файлов; сузь pattern]")
     }
 }
