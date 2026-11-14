@@ -92,6 +92,46 @@ final class AgentLoopIntegrationTests: XCTestCase {
         XCTAssertEqual(calls[0].arguments, #"{"path":"AGENTS.md"}"#)
     }
 
+    func testFailedToolResultIsMarkedForTheModel() async throws {
+        let server = try StubSSEServer(responses: [
+            [
+                #"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"fs_write","arguments":"{\"path\":\"x.txt\",\"content\":\"hi\"}"}}]}}]}"#,
+                #"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#
+            ],
+            [
+                #"{"choices":[{"delta":{"content":"ок"}}]}"#,
+                #"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#
+            ]
+        ])
+        try server.start()
+        defer { server.stop() }
+
+        let sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("harness-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+
+        // Read-only mode turns every mutating call into a failure, which is exactly the
+        // case the model otherwise cannot tell from a success.
+        let registry = ToolRegistry(
+            workspace: sandbox,
+            memory: nil,
+            embeddings: nil,
+            secrets: nil,
+            skills: nil,
+            mcp: nil,
+            readOnly: true
+        )
+        let loop = AgentLoop(provider: provider(baseURL: server.baseURL), model: "stub-model", registry: registry)
+
+        for try await _ in loop.run(history: [ProviderMessage(role: .user, content: "write it")]) {}
+
+        XCTAssertEqual(server.bodies.count, 2)
+        XCTAssertTrue(server.bodies[1].contains(AgentLoop.toolErrorPrefix))
+        XCTAssertTrue(server.bodies[1].contains("только-чтение"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.appendingPathComponent("x.txt").path))
+    }
+
     func testHTTPErrorIsReported() async throws {
         let server = try StubSSEServer(chunks: [])
         try server.start()

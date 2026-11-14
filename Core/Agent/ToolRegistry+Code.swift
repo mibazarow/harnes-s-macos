@@ -51,10 +51,15 @@ extension ToolRegistry {
         let limit = max(1, min((args["limit"] as? Int) ?? 200, 1_000))
 
         var blocks: [String] = []
-        for path in paths.prefix(20) {
+        var failures = 0
+        let attempted = Array(paths.prefix(20))
+        for path in attempted {
             let url = resolve(path)
             guard let content = try? String(contentsOf: url, encoding: .utf8) else {
-                blocks.append("=== \(path) — не читается")
+                failures += 1
+                // Mark it as an error in the text as well: a partial read_many is still
+                // a successful call, and the model has to see which file it must retry.
+                blocks.append("=== \(path) — ОШИБКА: файл не читается (нет файла или не UTF-8)")
                 continue
             }
             let lines = content.components(separatedBy: "\n")
@@ -65,6 +70,9 @@ extension ToolRegistry {
                 block += "\n… ещё \(lines.count - limit) строк"
             }
             blocks.append(block)
+        }
+        if failures == attempted.count {
+            return .fail(blocks.joined(separator: "\n\n"))
         }
         return .ok(blocks.joined(separator: "\n\n"))
     }

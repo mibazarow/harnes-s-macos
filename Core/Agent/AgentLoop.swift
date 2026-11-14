@@ -147,7 +147,7 @@ struct AgentLoop: Sendable {
 
                             let toolMessage = ProviderMessage(
                                 role: .tool,
-                                content: String(result.output.prefix(30_000)),
+                                content: Self.toolContent(for: result),
                                 toolCallID: call.id
                             )
                             messages.append(toolMessage)
@@ -195,6 +195,20 @@ struct AgentLoop: Sendable {
                 task.cancel()
             }
         }
+    }
+
+    /// Prefix for a failed tool result.
+    ///
+    /// The provider protocol has no error flag on a `tool` message: the model sees only
+    /// `content`. Without a marker a failure like "path обязателен" reads as ordinary
+    /// output, so the model retries the same call with a different argument instead of
+    /// fixing the cause. Marking happens here, not in `ToolResult`, because the UI
+    /// already renders `isError` and would otherwise show the prefix twice.
+    static let toolErrorPrefix = "ОШИБКА: "
+
+    static func toolContent(for result: ToolResult) -> String {
+        let text = String(result.output.prefix(30_000))
+        return result.isError ? toolErrorPrefix + text : text
     }
 
     /// Stubs the oldest tool results once the run's output exceeds the budget.
