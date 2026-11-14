@@ -65,7 +65,7 @@ extension ToolRegistry {
         posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
         posix_spawn_file_actions_addopen(&actions, 1, outURL.path, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
         posix_spawn_file_actions_addopen(&actions, 2, errURL.path, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
-        posix_spawn_file_actions_addchdir_np(&actions, cwd.path)
+        posix_spawn_file_actions_addchdir(&actions, cwd.path)
 
         var attributes: posix_spawnattr_t?
         posix_spawnattr_init(&attributes)
