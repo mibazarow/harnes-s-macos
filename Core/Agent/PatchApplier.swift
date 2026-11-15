@@ -8,6 +8,33 @@ struct PatchApplier: Sendable {
         var errorDescription: String? { message }
     }
 
+    /// What the patch would do, before it does it: hunks, added and removed lines.
+    /// Single-file by design — `apply_patch` takes one `path` — so the file count is
+    /// implicit and the summary names line changes only (R16.4).
+    struct Stats: Sendable, Equatable {
+        var hunks: Int
+        var added: Int
+        var removed: Int
+
+        var summary: String { "хунков \(hunks), +\(added) −\(removed)" }
+    }
+
+    static func stats(_ patch: String) -> Stats {
+        let hunks = parseHunks(patch)
+        var added = 0
+        var removed = 0
+        for hunk in hunks {
+            for line in hunk.lines {
+                switch line.kind {
+                case .add: added += 1
+                case .remove: removed += 1
+                case .context: break
+                }
+            }
+        }
+        return Stats(hunks: hunks.count, added: added, removed: removed)
+    }
+
     static func apply(_ patch: String, to original: String) throws -> String {
         let originalLines = original.components(separatedBy: "\n")
         var result: [String] = []

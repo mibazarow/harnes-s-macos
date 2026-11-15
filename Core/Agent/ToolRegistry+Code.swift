@@ -45,7 +45,12 @@ extension ToolRegistry {
 
         let before = original.components(separatedBy: "\n").count
         let after = updated.components(separatedBy: "\n").count
-        return .ok("Патч применён: \(display(url)) (\(before) → \(after) строк)")
+        let stats = PatchApplier.stats(patch)
+        // Autopilot has no confirmation dialog, so the preview goes to the log instead:
+        // the operator can still see what a run changed before reading the transcript.
+        interceptors.log("patch files=1 added=\(stats.added) removed=\(stats.removed) "
+            + "hunks=\(stats.hunks)")
+        return .ok("Патч применён: \(display(url)) (\(before) → \(after) строк; \(stats.summary))")
     }
 
     /// Ceiling on one read_many reply. Twenty files of a thousand lines each would

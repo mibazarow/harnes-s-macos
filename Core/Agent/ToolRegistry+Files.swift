@@ -47,6 +47,13 @@ extension ToolRegistry {
         }
 
         var out = window.lines.map { "\($0.number): \($0.text)" }.joined(separator: "\n")
+        // A version check on read, not only on write: after an external change the
+        // numbers in the transcript point at the wrong lines, and the model has to know
+        // before it edits by them (R16.4).
+        if await ledger.status(of: url) == .changed {
+            out = "[Файл изменился после прошлого чтения — номера строк могли сдвинуться. "
+                + "Перед edit_file опирайся на этот текст.]\n" + out
+        }
         if let total = window.total {
             if offset < 0 {
                 out += "\n… [показаны последние \(window.lines.count) строк из \(total)]"
