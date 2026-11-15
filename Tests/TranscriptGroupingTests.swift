@@ -111,6 +111,31 @@ final class TranscriptGroupingTests: XCTestCase {
         XCTAssertEqual(ChatMessage.groupedForDisplay(Array(history.dropFirst(drop))).count, 1)
     }
 
+    /// Trimming on every turn shifted the first bubble and rebuilt the whole list.
+    /// With slack, a window just past the cap is left alone; only a clearly oversized
+    /// one is cut, and then back to the cap.
+    func testSlackLeavesASlightlyOversizedWindowAlone() {
+        let history = (0..<240).map { ChatMessage(role: .user, text: "сообщение \($0)") }
+
+        XCTAssertEqual(
+            ChatMessage.trimToDisplayLimit(history, limit: 200, slack: 50), 0,
+            "240 групп при кэпе 200 и запасе 50 — ещё в пределах"
+        )
+    }
+
+    func testSlackStillCutsBackToTheCapEventually() {
+        let history = (0..<260).map { ChatMessage(role: .user, text: "сообщение \($0)") }
+
+        let drop = ChatMessage.trimToDisplayLimit(history, limit: 200, slack: 50)
+        XCTAssertEqual(drop, 60, "после запаса окно возвращается ровно к кэпу")
+        XCTAssertEqual(ChatMessage.groupedForDisplay(Array(history.dropFirst(drop))).count, 200)
+    }
+
+    func testZeroSlackKeepsTheOldBehaviour() {
+        let history = (0..<201).map { ChatMessage(role: .user, text: "сообщение \($0)") }
+        XCTAssertEqual(ChatMessage.trimToDisplayLimit(history, limit: 200), 1)
+    }
+
     func testAssistantWithoutToolsIsNotGrouped() {
         let history = [
             ChatMessage(role: .assistant, text: "просто текст"),

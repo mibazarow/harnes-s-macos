@@ -360,8 +360,23 @@ extension ChatMessage {
     /// A long run produces one message per step, so trimming by raw count pushed a
     /// normal conversation out of the window after two tasks. The user sees groups, so
     /// the window should be counted in groups; runs are dropped whole.
-    static func trimToDisplayLimit(_ messages: [ChatMessage], limit: Int) -> Int {
+    /// `slack` makes the trim hysteretic. Trimming to exactly the cap on every turn
+    /// removed the first bubble almost every time, which shifted every `ForEach` id and
+    /// made SwiftUI rebuild the whole transcript right after a tool batch — the second
+    /// jank source from the UI analysis. Now the window may grow `slack` groups past the
+    /// cap before it is cut back to the cap, so the rebuild happens once per ~`slack`
+    /// turns instead of every turn.
+    static func trimToDisplayLimit(_ messages: [ChatMessage], limit: Int, slack: Int = 0) -> Int {
         guard limit > 0, messages.count > limit else { return 0 }
+        let slack = max(slack, 0)
+        if cutIndex(messages, keepGroups: limit + slack) == 0 { return 0 }
+        return cutIndex(messages, keepGroups: limit)
+    }
+
+    /// Leading messages to drop so at most `keepGroups` display bubbles remain;
+    /// `0` when they already fit.
+    static func cutIndex(_ messages: [ChatMessage], keepGroups: Int) -> Int {
+        guard keepGroups > 0 else { return messages.count }
         var groups = 0
         var index = messages.count - 1
         while index >= 0 {
@@ -374,7 +389,7 @@ extension ChatMessage {
                 start = index
             }
             groups += 1
-            if groups > limit { return index + 1 }
+            if groups > keepGroups { return index + 1 }
             index = start - 1
         }
         return 0

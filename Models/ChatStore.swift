@@ -1023,7 +1023,9 @@ final class ChatStore {
         // the tail, so nothing is actually lost. The cap counts what the user sees:
         // steps are collapsed into runs for display, so raw bubbles are not the right
         // unit. A hard raw ceiling still guards against one pathological run.
-        let drop = ChatMessage.trimToDisplayLimit(messages, limit: Self.transcriptCap)
+        let drop = ChatMessage.trimToDisplayLimit(
+            messages, limit: Self.transcriptCap, slack: Self.transcriptSlack
+        )
         if drop > 0 {
             messages.removeFirst(drop)
         }
@@ -1054,6 +1056,9 @@ final class ChatStore {
     /// Messages held in the view at once. Storage keeps everything; this is only how
     /// much the list keeps in memory. Scrolling up pulls older pages.
     static let transcriptCap = 200
+    /// How far past the cap the window may drift before it is cut back. Trimming on
+    /// every turn rebuilt the whole transcript because the first bubble changed.
+    static let transcriptSlack = 50
     /// Absolute ceiling on raw bubbles, independent of grouping. A single run that
     /// never ends would otherwise grow the array without bound while showing one group.
     static let rawMessageCeiling = 1_000
