@@ -216,7 +216,7 @@ final class ChatStore {
             ledger: services.fileLedger,
             skillScope: services.skillScope,
             interceptors: ToolInterceptorChain(
-                [ArgumentRulesInterceptor()],
+                [ArgumentRulesInterceptor(), BrowserGuardInterceptor()],
                 log: { line in ChatStore.logLatency(line) }
             )
         )
@@ -453,7 +453,7 @@ final class ChatStore {
             readOnly: readOnly,
             subagent: nil,
             interceptors: ToolInterceptorChain(
-                [ArgumentRulesInterceptor()],
+                [ArgumentRulesInterceptor(), BrowserGuardInterceptor()],
                 log: { line in ChatStore.logLatency(line) }
             )
         )
