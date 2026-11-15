@@ -23,11 +23,8 @@ actor CompactionService {
 
     func loadCheckpoint(database: AppDatabase) throws -> Checkpoint? {
         try database.queue.read { db in
-            guard let raw = try String.fetchOne(
-                db,
-                sql: "SELECT value FROM app_state WHERE key = ?",
-                arguments: [Self.key]
-            ), let data = raw.data(using: .utf8) else {
+            guard let raw = try AppStateStore.read(db, key: Self.key),
+                  let data = raw.data(using: .utf8) else {
                 return nil
             }
             return try? JSONDecoder().decode(Checkpoint.self, from: data)
@@ -39,10 +36,7 @@ actor CompactionService {
         let raw = String(data: data, encoding: .utf8) ?? "{}"
 
         try database.queue.write { db in
-            try db.execute(sql: """
-                INSERT INTO app_state (key, value) VALUES (?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """, arguments: [Self.key, raw])
+            try AppStateStore.write(db, key: Self.key, value: raw)
         }
     }
 

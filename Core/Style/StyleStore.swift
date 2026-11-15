@@ -27,11 +27,8 @@ actor StyleStore {
 
     func load() throws -> StyleProfile {
         try database.queue.read { db in
-            guard let raw = try String.fetchOne(
-                db,
-                sql: "SELECT value FROM app_state WHERE key = ?",
-                arguments: [Self.key]
-            ), let data = raw.data(using: .utf8),
+            guard let raw = try AppStateStore.read(db, key: Self.key),
+                  let data = raw.data(using: .utf8),
                let profile = try? JSONDecoder().decode(StyleProfile.self, from: data) else {
                 return StyleProfile()
             }
@@ -45,10 +42,7 @@ actor StyleStore {
               let raw = String(data: data, encoding: .utf8) else { return }
 
         try? database.queue.write { db in
-            try db.execute(sql: """
-                INSERT INTO app_state (key, value) VALUES (?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """, arguments: [Self.key, raw])
+            try AppStateStore.write(db, key: Self.key, value: raw)
         }
     }
 

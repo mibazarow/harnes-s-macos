@@ -80,23 +80,20 @@ actor UsageService {
     // MARK: - app_state helpers
 
     private static func int(_ db: Database, _ key: String) -> Int {
-        guard let raw = try? String.fetchOne(db, sql: "SELECT value FROM app_state WHERE key = ?", arguments: [key]) else {
+        guard let raw = try? AppStateStore.read(db, key: key) else {
             return 0
         }
         return Int(raw) ?? 0
     }
 
     private static func double(_ db: Database, _ key: String) -> Double {
-        guard let raw = try? String.fetchOne(db, sql: "SELECT value FROM app_state WHERE key = ?", arguments: [key]) else {
+        guard let raw = try? AppStateStore.read(db, key: key) else {
             return 0
         }
         return Double(raw) ?? 0
     }
 
     private static func set(_ db: Database, _ key: String, _ value: String) {
-        try? db.execute(sql: """
-            INSERT INTO app_state (key, value) VALUES (?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            """, arguments: [key, value])
+        try? AppStateStore.write(db, key: key, value: value)
     }
 }
