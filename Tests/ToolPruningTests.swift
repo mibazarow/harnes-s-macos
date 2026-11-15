@@ -171,5 +171,55 @@ final class ToolPruningTests: XCTestCase {
         XCTAssertEqual(tools.count, 15 + 6)
         XCTAssertEqual(tools.filter { $0.content.hasPrefix("[pruned:") }.count, 15)
         XCTAssertEqual(chat.messages[1].exchanges[0].output, output, "в базе текст остался полным")
+
+        // R14.8: the call and its result leave together.
+        let assistantCalls = history.filter { $0.role == .assistant }.flatMap(\.toolCalls)
+        let prunedCall = try XCTUnwrap(assistantCalls.first { $0.id == "old_0_0" })
+        let recentCall = try XCTUnwrap(assistantCalls.first { $0.id == "recent_0" })
+        XCTAssertEqual(prunedCall.arguments, ToolOutputPruner.prunedArguments)
+        XCTAssertEqual(recentCall.arguments, "{}", "нетронутый вызов сохраняет аргументы")
+    }
+
+    func testTrivialStatusIsPrunedBelowTheBatchThreshold() {
+        let messages = [
+            step([exchange("t1", output: "готово")])
+        ]
+
+        let plan = ToolOutputPruner.plan(
+            messages: messages, mode: .budget, threshold: 100_000, protectedSteps: 0
+        )
+
+        XCTAssertEqual(Array(plan.replacements.keys), ["t1"])
+        XCTAssertEqual(plan.trivialCount, 1)
+    }
+
+    func testStubShowsTheOriginalLength() {
+        let exchange = ToolExchange(
+            callID: "c1", name: "bash", arguments: "{}",
+            output: String(repeating: "x", count: 10_000), isError: false
+        )
+        let stub = ToolOutputPruner.stub(
+            name: exchange.name, output: exchange.output,
+            isError: exchange.isError, originalLength: exchange.originalLength
+        )
+
+        XCTAssertTrue(stub.contains("из 10000 символов"), stub)
+        XCTAssertLessThan(exchange.output.count, 5_000, "в хранилище текст урезан")
+    }
+
+    func testRetainedUserConditionsSurviveTheFold() {
+        let messages = [
+            ContextMessage(id: 0, role: "user", text: "первое условие"),
+            ContextMessage(id: 1, role: "assistant", text: "ok"),
+            ContextMessage(id: 2, role: "user", text: "важное условие из середины: не трогать прод"),
+            ContextMessage(id: 3, role: "assistant", text: "ok"),
+            ContextMessage(id: 4, role: "user", text: "последнее условие")
+        ]
+
+        let retained = ChatStore.retainedUserMessages(messages, budget: 30)
+
+        XCTAssertTrue(retained.contains("последнее условие"), retained)
+        XCTAssertTrue(retained.contains("из середины"), retained)
+        XCTAssertFalse(retained.contains("первое условие"), "старое вытесняется бюджетом")
     }
 }

@@ -161,21 +161,48 @@ struct ToolExchange: Sendable, Equatable {
     /// sends up to 30 000 characters; older turns get less.
     let output: String
     let isError: Bool
+    /// Length before the 4 000-character cut, so a stub can say how much was really
+    /// there. Nil on rows written before the field existed.
+    let originalLength: Int
+    /// A status line ("готово", "ok") with no data in it: safe to leave out of the
+    /// request first, because nothing refers to its content.
+    let isTrivial: Bool
 
     static let historyOutputLimit = 4_000
     static let historyArgumentLimit = 8_000
     /// A string value longer than this is a payload, not a parameter, and gets replaced.
     private static let argumentValueLimit = 2_000
 
-    init(callID: String, name: String, arguments: String, output: String, isError: Bool) {
+    init(
+        callID: String,
+        name: String,
+        arguments: String,
+        output: String,
+        isError: Bool,
+        originalLength: Int? = nil,
+        isTrivial: Bool? = nil
+    ) {
         self.callID = callID
         self.name = name
         self.arguments = Self.sanitizedArguments(arguments)
+        self.originalLength = originalLength ?? output.count
         self.output = output.count > Self.historyOutputLimit
             ? String(output.prefix(Self.historyOutputLimit))
                 + "\n" + TruncationGuard.placeholder(length: output.count - Self.historyOutputLimit)
             : output
         self.isError = isError
+        self.isTrivial = isTrivial ?? Self.looksTrivial(output)
+    }
+
+    /// One short line that only reports success carries no content worth replaying.
+    static func looksTrivial(_ output: String) -> Bool {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count < 200 else { return false }
+        guard !trimmed.contains("\n"), !trimmed.contains("/") else { return false }
+        guard trimmed.rangeOfCharacter(from: .decimalDigits) == nil else { return false }
+        let lower = trimmed.lowercased()
+        return ["готово", "ok", "done", "success", "успешно", "записано", "выполнено", "вывода нет"]
+            .contains { lower.contains($0) }
     }
 
     static func sanitizedArguments(_ raw: String) -> String {

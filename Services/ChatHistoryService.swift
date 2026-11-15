@@ -48,9 +48,19 @@ actor ChatHistoryService {
             let arguments: String
             let output: String
             let isError: Bool
+            let originalLength: Int
+            let isTrivial: Bool
         }
         let rows = exchanges.map {
-            Row(callID: $0.callID, name: $0.name, arguments: $0.arguments, output: $0.output, isError: $0.isError)
+            Row(
+                callID: $0.callID,
+                name: $0.name,
+                arguments: $0.arguments,
+                output: $0.output,
+                isError: $0.isError,
+                originalLength: $0.originalLength,
+                isTrivial: $0.isTrivial
+            )
         }
         guard let data = try? JSONEncoder().encode(rows) else { return nil }
         return String(data: data, encoding: .utf8)
@@ -64,10 +74,20 @@ actor ChatHistoryService {
             let arguments: String
             let output: String
             let isError: Bool
+            let originalLength: Int?
+            let isTrivial: Bool?
         }
         guard let rows = try? JSONDecoder().decode([Row].self, from: data) else { return [] }
         return rows.map {
-            ToolExchange(callID: $0.callID, name: $0.name, arguments: $0.arguments, output: $0.output, isError: $0.isError)
+            ToolExchange(
+                callID: $0.callID,
+                name: $0.name,
+                arguments: $0.arguments,
+                output: $0.output,
+                isError: $0.isError,
+                originalLength: $0.originalLength,
+                isTrivial: $0.isTrivial
+            )
         }
     }
 

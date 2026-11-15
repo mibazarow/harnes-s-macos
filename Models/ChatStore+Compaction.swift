@@ -56,6 +56,36 @@ extension ChatStore {
         }
     }
 
+    /// Newest user messages from the folded range, verbatim, up to `budget` tokens.
+    ///
+    /// A hard fold used to drop everything below the checkpoint except the first three
+    /// messages; a condition stated halfway through a long session disappeared silently.
+    static func retainedUserMessages(_ messages: [ContextMessage], budget: Int) -> String {
+        var picked: [String] = []
+        var used = 0
+        for message in messages.reversed() where message.role == "user" {
+            let text = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            let cost = TokenEstimator.tokens(in: text)
+            if used + cost > budget, !picked.isEmpty { break }
+            let clipped = cost > budget ? cutToParagraph(text, budget: budget) : text
+            picked.insert(clipped, at: 0)
+            used += TokenEstimator.tokens(in: clipped)
+        }
+        return picked.joined(separator: "\n\n")
+    }
+
+    /// Cuts at a paragraph boundary; a sentence cut loses the condition's qualifiers.
+    private static func cutToParagraph(_ text: String, budget: Int) -> String {
+        var result = ""
+        for paragraph in text.components(separatedBy: "\n\n") {
+            let next = result.isEmpty ? paragraph : result + "\n\n" + paragraph
+            if TokenEstimator.tokens(in: next) > budget { break }
+            result = next
+        }
+        return result.isEmpty ? String(text.prefix(max(200, budget * 2))) : result
+    }
+
     /// A task closed when the model answered without calling a tool. Everything before
     /// this point belongs to finished work: its tool output may be pruned from the next
     /// request, and a long task is folded into the checkpoint once.
@@ -97,7 +127,10 @@ extension ChatStore {
                       !message.text.isEmpty || !message.exchanges.isEmpty else { continue }
                 let extraTokens = message.exchanges.reduce(0) { sum, exchange in
                     sum + ToolCost.exchange(
-                        name: exchange.name, arguments: exchange.arguments, output: exchange.output
+                        name: exchange.name,
+                        arguments: exchange.arguments,
+                        output: exchange.output,
+                        id: exchange.callID
                     )
                 }
                 items.append(ContextMessage(
@@ -133,7 +166,10 @@ extension ChatStore {
             let extraTokens = message.exchanges.reduce(0) { sum, exchange in
                 let output = stubs[exchange.callID] ?? exchange.output
                 return sum + ToolCost.exchange(
-                    name: exchange.name, arguments: exchange.arguments, output: output
+                    name: exchange.name,
+                    arguments: exchange.arguments,
+                    output: output,
+                    id: exchange.callID
                 )
             }
             return ContextMessage(
@@ -171,12 +207,20 @@ extension ChatStore {
         let beforeTokens = promptMessages.reduce(0) { $0 + $1.tokens }
 
         do {
-            let summary = try await services.compaction.summarize(
+            var summary = try await services.compaction.summarize(
                 messages: contextMessages,
                 provider: provider,
                 model: model,
                 previousSummary: checkpointSummary.isEmpty ? nil : checkpointSummary
             )
+            // User conditions stated mid-session are not always captured by a summary.
+            // Keep the newest ones verbatim, within a small budget, before the checkpoint.
+            let retained = Self.retainedUserMessages(
+                contextMessages, budget: Tuning.retainedUserTokens
+            )
+            if !retained.isEmpty, !summary.contains("Условия, поставленные пользователем") {
+                summary += "\n\n## Условия, поставленные пользователем по ходу работы\n" + retained
+            }
             checkpointSummary = summary
             checkpointCovered += contextMessages.count
             if let lastCompacted = contextMessages.last {
@@ -368,7 +412,15 @@ extension ChatStore {
                     role: .assistant,
                     content: message.text,
                     toolCalls: message.exchanges.map {
-                        ToolCall(id: $0.callID, name: $0.name, arguments: $0.arguments)
+                        ToolCall(
+                            id: $0.callID,
+                            name: $0.name,
+                            // A pruned result and its call leave together: a stub saying
+                            // "output removed" next to a two-kilobyte patch is noise.
+                            arguments: stubs[$0.callID] == nil
+                                ? $0.arguments
+                                : ToolOutputPruner.prunedArguments
+                        )
                     }
                 ))
                 for exchange in message.exchanges {
@@ -407,6 +459,18 @@ extension ChatStore {
         }
 
         history.append(ProviderMessage(role: .user, content: userText, images: images))
+
+        // One line per request: the parts sum to `total_est`, and the next line in the
+        // log is the provider's own `prompt_tokens` for the same request.
+        let breakdown = PromptBreakdown(
+            system: TokenEstimator.tokens(in: prepared.system),
+            tools: schemaTokens,
+            summary: TokenEstimator.tokens(in: checkpointSummary),
+            history: prepared.included.reduce(0) { $0 + $1.tokens },
+            images: images.count * Tuning.imageTokenEstimate,
+            messages: history.count
+        )
+        Self.logLatency(breakdown.line)
         return history
     }
 

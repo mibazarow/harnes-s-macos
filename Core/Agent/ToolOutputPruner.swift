@@ -27,27 +27,38 @@ enum ToolOutputPruner {
     static let protectedRecentSteps = 6
     /// How much of the original output the stub keeps.
     static let stubVisibleChars = 400
+    /// Marker that replaces the arguments of a pruned call. Kept as valid JSON: the
+    /// provider rejects a replayed assistant turn whose `tool_calls` arguments do not
+    /// parse.
+    static let prunedArguments = #"{"pruned":true}"#
 
     struct Plan: Sendable {
         var replacements: [String: String] = [:]
         var savedTokens = 0
         var firstPrunedIndex: Int?
         var candidates = 0
+        var trivialCount = 0
 
         var isEmpty: Bool { replacements.isEmpty }
     }
 
     /// Stub for one result: tool name, status and size, so the model knows the call ran,
     /// plus the first line as a hint.
-    static func stub(name: String, output: String, isError: Bool) -> String {
+    static func stub(
+        name: String,
+        output: String,
+        isError: Bool,
+        originalLength: Int? = nil
+    ) -> String {
         let status = isError ? "error" : "ok"
+        let real = originalLength ?? output.count
         let visible = String(output.prefix(stubVisibleChars))
         let firstLine = visible
             .components(separatedBy: .newlines)
             .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }?
             .trimmingCharacters(in: .whitespaces) ?? ""
         let line = firstLine.count > 120 ? String(firstLine.prefix(120)) + "…" : firstLine
-        return "[pruned: \(name), \(status), \(visible.count) из \(output.count) символов] \(line)"
+        return "[pruned: \(name), \(status), показано \(visible.count) из \(real) символов] \(line)"
     }
 
     /// Decides what to prune. Pure, so the rules are testable without a chat store.
@@ -80,15 +91,32 @@ enum ToolOutputPruner {
             guard message.role == .assistant, !message.exchanges.isEmpty else { continue }
 
             for exchange in message.exchanges where !exchange.isError {
-                guard exchange.output.count > stubVisibleChars else { continue }
+                guard exchange.output.count > stubVisibleChars || exchange.isTrivial else { continue }
                 // Consumed results are the safe ones to cut: a later answer already
                 // refers to them, so the model has what it needed. Unread output stays.
-                guard wasUsed(exchange, laterText: laterText) else { continue }
+                // A status line with no data in it is safe without a reference.
+                if !exchange.isTrivial, !wasUsed(exchange, laterText: laterText) { continue }
 
-                let replacement = stub(
-                    name: exchange.name, output: exchange.output, isError: exchange.isError
-                )
+                let replacement = exchange.isTrivial
+                    ? "[\(exchange.name): \(exchange.isError ? "error" : "ok")]"
+                    : stub(
+                        name: exchange.name,
+                        output: exchange.output,
+                        isError: exchange.isError,
+                        originalLength: exchange.originalLength
+                    )
                 let gain = ToolCost.result(exchange.output) - ToolCost.result(replacement)
+                if exchange.isTrivial {
+                    // The point is a cleaner history, not a token win: a status line
+                    // can be shorter than any stub.
+                    guard result.replacements[exchange.callID] == nil else { continue }
+                    result.replacements[exchange.callID] = replacement
+                    result.savedTokens += max(0, gain)
+                    result.candidates += 1
+                    result.trivialCount += 1
+                    result.firstPrunedIndex = index + 1
+                    continue
+                }
                 guard gain > 0 else { continue }
                 if result.replacements[exchange.callID] == nil {
                     result.replacements[exchange.callID] = replacement
@@ -99,7 +127,9 @@ enum ToolOutputPruner {
             }
         }
 
-        guard result.savedTokens >= threshold else { return Plan() }
+        // Trivial status lines are pruned even below the batch threshold: they carry
+        // no data, and leaving them only makes the history look busy.
+        guard result.savedTokens >= threshold || result.trivialCount > 0 else { return Plan() }
         return result
     }
 
