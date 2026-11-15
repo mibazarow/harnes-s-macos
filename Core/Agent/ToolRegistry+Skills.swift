@@ -12,8 +12,33 @@ extension ToolRegistry {
     func skillRead(_ args: [String: Any]) async -> ToolResult {
         guard let skills else { return .fail("Скиллы недоступны") }
         guard let name = args["name"] as? String, !name.isEmpty else { return .fail("name обязателен") }
+        let offset = max(0, Self.int(args, "offset") ?? 0)
         do {
-            return .ok(try await skills.read(name: name))
+            let reading: SkillReading
+            if let file = args["file"] as? String, !file.isEmpty {
+                reading = try await skills.read(name: name, file: file, offset: offset)
+            } else {
+                reading = try await skills.read(name: name, offset: offset)
+            }
+            // The manifest's `allowed-tools` is a contract: enforce it for the rest of
+            // the turn instead of parsing it and forgetting.
+            if reading.allowedTools.isEmpty {
+                await skillScope?.clear()
+            } else {
+                await skillScope?.activate(skill: reading.name, allowedTools: reading.allowedTools)
+            }
+            return .ok(reading.text)
+        } catch {
+            return .fail(error.localizedDescription)
+        }
+    }
+
+    func skillRemove(_ args: [String: Any]) async -> ToolResult {
+        guard let skills else { return .fail("Скиллы недоступны") }
+        guard let name = args["name"] as? String, !name.isEmpty else { return .fail("name обязателен") }
+        do {
+            try await skills.remove(name: name)
+            return .ok("Скилл удалён: \(name)")
         } catch {
             return .fail(error.localizedDescription)
         }
@@ -22,7 +47,12 @@ extension ToolRegistry {
     func skillInstall(_ args: [String: Any]) async -> ToolResult {
         guard let skills else { return .fail("Скиллы недоступны") }
         guard let source = args["source"] as? String else { return .fail("source обязателен") }
+        let isRemote = source.hasPrefix("http://") || source.hasPrefix("https://")
+        let confirmed = Self.bool(args, "confirm") ?? false
         do {
+            if isRemote, !confirmed {
+                return .ok(try await skills.preview(from: source))
+            }
             let record = try await skills.install(from: source, force: Self.bool(args, "force") ?? false)
             return .ok("Скилл установлен: \(record.name)")
         } catch {

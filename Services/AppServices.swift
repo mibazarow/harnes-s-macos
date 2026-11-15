@@ -22,6 +22,8 @@ struct AppServices: Sendable {
     let mcpManager: MCPManager
     /// Session-scoped "read before write" state shared by every turn.
     let fileLedger = FileReadingLedger()
+    /// Tool restriction from the last skill read in this session/turn.
+    let skillScope = ActiveSkillScope()
     /// Installs the embedding model into the data folder after a fresh install.
     let modelInstaller: EmbeddingModelInstaller?
 

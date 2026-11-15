@@ -172,7 +172,7 @@ struct AgentLoop: Sendable {
                         } else {
                             callsSinceTodoUpdate += calls.count
                         }
-                        if sawTodo, callsSinceTodoUpdate >= 12,
+                        if sawTodo,
                            let nudge = registry.todoNudge(callsSinceUpdate: callsSinceTodoUpdate),
                            let lastTool = toolMessageIndices.last, lastTool < messages.count {
                             messages[lastTool].content += "\n\n" + nudge

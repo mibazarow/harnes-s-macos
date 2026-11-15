@@ -59,28 +59,55 @@ extension ToolRegistry {
 
     func todoWrite(_ args: [String: Any]) -> ToolResult {
         guard let todos else { return .fail("План недоступен") }
+        do {
+            let outcome: TodoStore.Outcome
+            if let updates = (args["update"] as? [[String: Any]]) ?? (args["updates"] as? [[String: Any]]) {
+                outcome = try todos.update(updates)
+            } else if let complete = args["complete"] as? [Any] {
+                let indices = complete.compactMap { Coerce.int($0) }
+                guard !indices.isEmpty else {
+                    return .fail("complete: нужен массив номеров шагов, считая с единицы")
+                }
+                outcome = try todos.complete(indices: indices)
+            } else {
+                // `so far` list replacement. Empty items clears the plan.
+                let payload: Any = args["items"] ?? args["todos"] ?? args["tasks"] ?? args
+                outcome = try todos.set(json: payload)
+            }
 
-        let payload: Any = args["items"] ?? args["todos"] ?? args["tasks"] ?? args
-        todos.set(json: payload)
+            if todos.items.isEmpty { return .ok("План очищен.") }
 
-        guard !todos.items.isEmpty else {
-            return .fail("План не принят: у элементов нет поля text. Пример: \"items\": [{\"text\": \"шаг\", \"status\": \"pending\"}]")
+            var notes: [String] = []
+            if !outcome.demoted.isEmpty {
+                notes.append("Активным оставлен последний шаг; в pending переведены: "
+                    + outcome.demoted.joined(separator: ", "))
+            }
+            if !outcome.doneWithoutEvidence.isEmpty {
+                notes.append("Отмечены done без evidence: "
+                    + outcome.doneWithoutEvidence.joined(separator: ", ")
+                    + ". Для проверяемых шагов добавь evidence, что именно сделано.")
+            }
+            let suffix = notes.isEmpty ? "" : "\n\n" + notes.joined(separator: "\n")
+            return .ok("План обновлён:\n" + todos.summary + suffix)
+        } catch {
+            return .fail(error.localizedDescription)
         }
-        return .ok("План обновлён:\n" + todos.summary)
     }
 
-    /// Called by the loop after a stretch of work. Returns nil unless the plan has an
-    /// open step that has not been touched for a while.
-    ///
-    /// 12 tool calls without a status change is long enough to be real drift and short
-    /// enough that the plan still helps the model recover.
+    /// Called by the loop after a stretch of work. The threshold comes from the plan
+    /// size (`TodoStore.nudgeThreshold`), so the number lives in one place.
     func todoNudge(callsSinceUpdate: Int) -> String? {
-        guard let todos, callsSinceUpdate >= 12 else { return nil }
-        let open = todos.items.filter { $0.status == "active" || $0.status == "pending" }
+        guard let todos, callsSinceUpdate >= todos.nudgeThreshold else { return nil }
+        let open = todos.openItems
         guard !open.isEmpty else { return nil }
-        let current = todos.items.first(where: { $0.status == "active" })?.text ?? open[0].text
-        return "[напоминание: \(callsSinceUpdate) вызовов без обновления плана; "
-            + "открыт шаг «\(current)» — отметь прогресс через todowrite]"
+        let active = todos.items.filter { $0.status == "active" }
+        let current = active.first?.text ?? open[0].text
+        var note = "[напоминание: \(callsSinceUpdate) вызовов без обновления плана"
+        if active.count > 1 {
+            note += "; активных шагов \(active.count) — оставь один"
+        }
+        note += "; открыт шаг «\(current)» — отметь прогресс через todowrite]"
+        return note
     }
 
     func todoRead() -> ToolResult {

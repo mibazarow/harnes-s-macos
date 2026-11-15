@@ -130,21 +130,36 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "todowrite",
-            description: "Publish or update the visible task plan. Use for any multi-step work.",
+            description: "Publish, update or complete the visible plan. Full replace with items; point update with update; quick tick with complete. Indices are 1-based.",
             parameters: schema([
                 "items": [
                     "type": "array",
-                    "description": "List of {text, status}; status = pending | active | done | cancelled",
+                    "description": "Full list of {text, status, evidence}; replaces the plan",
                     "items": [
                         "type": "object",
                         "properties": [
                             "text": ["type": "string"],
-                            "status": ["type": "string"]
+                            "status": ["type": "string", "enum": ["pending", "active", "done", "cancelled"]],
+                            "evidence": ["type": "string"]
                         ],
                         "required": ["text"]
                     ]
-                ]
-            ], required: ["items"])
+                ],
+                "update": [
+                    "type": "array",
+                    "description": "Point updates, e.g. 3 -> done with evidence",
+                    "items": [
+                        "type": "object",
+                        "properties": [
+                            "index": ["type": "integer"],
+                            "status": ["type": "string"],
+                            "evidence": ["type": "string"]
+                        ],
+                        "required": ["index"]
+                    ]
+                ],
+                "complete": ["type": "array", "items": ["type": "integer"], "description": "1-based indices to mark done"]
+            ], required: [])
         ),
         ToolDefinition(
             name: "todo_read",
@@ -373,16 +388,26 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "skill_read",
-            description: "Load the full instructions of an installed skill by name. Read the skill before starting a task it covers.",
-            parameters: schema(["name": ["type": "string"]], required: ["name"])
+            description: "Load a skill's instructions, or one bundled file with `file`. The manifest's allowed-tools is enforced for the rest of the turn.",
+            parameters: schema([
+                "name": ["type": "string"],
+                "file": ["type": "string", "description": "Relative path inside the skill, e.g. references/report.md"],
+                "offset": ["type": "integer", "description": "Continue a long body from this character offset"]
+            ], required: ["name"])
         ),
         ToolDefinition(
             name: "skill_install",
-            description: "Install a skill from a local folder, a SKILL.md path, or a direct URL.",
+            description: "Install a skill from a local folder, a SKILL.md path, or a URL. URL installs preview first and need confirm: true.",
             parameters: schema([
                 "source": ["type": "string"],
-                "force": ["type": "boolean"]
+                "force": ["type": "boolean"],
+                "confirm": ["type": "boolean", "description": "Required for URL sources after reviewing the preview"]
             ], required: ["source"])
+        ),
+        ToolDefinition(
+            name: "skill_remove",
+            description: "Remove an installed skill by name. Built-in skills are read-only.",
+            parameters: schema(["name": ["type": "string"]], required: ["name"])
         ),
         ToolDefinition(
             name: "mcp_list",

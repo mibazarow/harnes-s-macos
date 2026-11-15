@@ -37,6 +37,8 @@ struct ToolRegistry: Sendable {
     /// Session-scoped read state. Shared across turns so "read it first" survives the
     /// step boundary; a subagent gets its own because it has its own context.
     let ledger: FileReadingLedger
+    /// Restriction declared by the last skill that was read.
+    let skillScope: ActiveSkillScope?
 
     init(
         workspace: URL,
@@ -52,7 +54,8 @@ struct ToolRegistry: Sendable {
         todos: TodoStore? = nil,
         readOnly: Bool = false,
         subagent: (@Sendable (String, Bool) async -> SubagentOutcome)? = nil,
-        ledger: FileReadingLedger? = nil
+        ledger: FileReadingLedger? = nil,
+        skillScope: ActiveSkillScope? = nil
     ) {
         self.workspace = workspace
         self.memory = memory
@@ -68,6 +71,7 @@ struct ToolRegistry: Sendable {
         self.readOnly = readOnly
         self.subagent = subagent
         self.ledger = ledger ?? FileReadingLedger()
+        self.skillScope = skillScope
     }
 
     static let mutatingTools: Set<String> = [
@@ -75,7 +79,7 @@ struct ToolRegistry: Sendable {
         "doc_write",
         "git_commit", "git_stash",
         "bash", "schedule_add", "schedule_remove", "memory_add", "memory_forget", "secret_save",
-        "skill_install", "index_workspace", "todowrite"
+        "skill_install", "skill_remove", "index_workspace", "todowrite"
     ]
 
     /// Refuses a blind write.
@@ -112,6 +116,7 @@ struct ToolRegistry: Sendable {
         var allowed: [ToolDefinition] = []
         for definition in Self.definitions {
             if readOnly, await isMutating(definition.name) { continue }
+            if let skillScope, !(await skillScope.allows(definition.name)) { continue }
             allowed.append(definition)
         }
         var result = allowed.map {
@@ -143,6 +148,9 @@ struct ToolRegistry: Sendable {
     }
 
     func execute(_ call: ToolCall) async -> ToolResult {
+        if let denial = await skillScope?.denialReason(call.name) {
+            return .fail(denial)
+        }
         if readOnly, await isMutating(call.name) {
             return .fail("Инструмент \(call.name) недоступен: активен режим только-чтение.")
         }
@@ -209,6 +217,7 @@ struct ToolRegistry: Sendable {
             case "skill_list": return await skillList()
             case "skill_read": return await skillRead(args)
             case "skill_install": return await skillInstall(args)
+            case "skill_remove": return await skillRemove(args)
             case "mcp_list": return await mcpList()
             case "mcp_tools": return await mcpTools(args)
             default:

@@ -423,12 +423,12 @@ final class ToolLimitsTests: XCTestCase {
     // MARK: - schema budget
 
     func testToolSchemaCostStaysInsideItsBudget() {
-        // Measured 2026-11-14: 4 886 tokens for 50 tools by the app's own estimator
-        // (3 635 at 46; 4 405 at 49). The ceiling keeps ~6% headroom: a tool that
-        // pushes the catalog past it has to make that trade explicitly instead of
-        // hiding it in a new description.
+        // Measured 2026-11-15: 5 187 tokens for 51 tools by the app's own estimator
+        // (3 635 at 46; 4 405 at 49; 4 886 at 50). The ceiling keeps ~8% headroom: a
+        // tool that pushes the catalog past it has to make that trade explicitly
+        // instead of hiding it in a new description.
         let cost = ToolRegistry.schemasTokenCost()
-        XCTAssertLessThanOrEqual(cost, 5_200, "\(cost) токенов на \(ToolRegistry.definitions.count) инструментов")
+        XCTAssertLessThanOrEqual(cost, 5_600, "\(cost) токенов на \(ToolRegistry.definitions.count) инструментов")
     }
 
     // MARK: - argument coercion
@@ -669,16 +669,22 @@ final class ToolLimitsTests: XCTestCase {
             skills: nil, mcp: nil, todos: todos
         )
 
-        XCTAssertNil(tool.todoNudge(callsSinceUpdate: 12), "без плана напоминаний нет")
+        XCTAssertNil(tool.todoNudge(callsSinceUpdate: 4), "без плана напоминаний нет")
 
-        todos.set([["text": "шаг", "status": "active"]])
-        XCTAssertNil(tool.todoNudge(callsSinceUpdate: 11))
-        let nudge = tool.todoNudge(callsSinceUpdate: 12)
+        // One open step: threshold is max(4, 1*2) = 4.
+        try todos.set([["text": "шаг", "status": "active"]])
+        XCTAssertNil(tool.todoNudge(callsSinceUpdate: 3))
+        let nudge = tool.todoNudge(callsSinceUpdate: 4)
         XCTAssertNotNil(nudge)
         XCTAssertTrue(nudge?.contains("шаг") == true, nudge ?? "")
 
-        todos.set([["text": "шаг", "status": "done"]])
-        XCTAssertNil(tool.todoNudge(callsSinceUpdate: 12), "закрытый план не трогаем")
+        try todos.set([["text": "шаг", "status": "done"]])
+        XCTAssertNil(tool.todoNudge(callsSinceUpdate: 40), "закрытый план не трогаем")
+
+        // Threshold grows with the plan: ten open steps tolerate 20 calls.
+        try todos.set((1...10).map { ["text": "шаг \($0)", "status": "pending"] })
+        XCTAssertNil(tool.todoNudge(callsSinceUpdate: 19))
+        XCTAssertNotNil(tool.todoNudge(callsSinceUpdate: 20))
     }
 
     func testSecretRevealWritesAnAuditLine() async throws {

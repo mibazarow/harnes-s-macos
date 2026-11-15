@@ -109,7 +109,7 @@ final class ChatStore {
 
         // A plan belongs to the turn that produced it. Keeping it forever left a stale
         // checklist hanging under the transcript after the task was long done.
-        services?.todos.clear()
+        services?.todos.clearIfFinished()
 
         messages.append(ChatMessage(role: .user, text: trimmed, attachments: attachments))
         persistUser(trimmed, attachments: attachments)
@@ -142,6 +142,12 @@ final class ChatStore {
         // reasoning on top of an answer the user has already read.
         var assistantID = initialID
         var stepIndex = 0
+
+        // The plan outlives a turn while steps are open; mark it so the model knows the
+        // checklist is a continuation, not something it wrote in this turn.
+        services?.todos.beginTurn()
+        // A skill restriction lives for the turn that read it.
+        await services?.skillScope.clear()
 
         guard let services else {
             await mockReply(for: text, assistantID: assistantID)
@@ -186,7 +192,8 @@ final class ChatStore {
                     model: model, services: services
                 ) ?? SubagentOutcome(text: "", error: "сессия закрыта")
             },
-            ledger: services.fileLedger
+            ledger: services.fileLedger,
+            skillScope: services.skillScope
         )
 
         let prepStart = ContinuousClock.now
@@ -700,7 +707,9 @@ final class ChatStore {
         }
 
         if let services {
-            let skillIndex = await services.skills.promptIndex()
+            let skillIndex = await services.skills.promptIndex(
+                query: messages.last(where: { $0.role == .user })?.text
+            )
             if !skillIndex.isEmpty {
                 parts.append("""
 
@@ -731,6 +740,14 @@ final class ChatStore {
 
         if !checkpointSummary.isEmpty {
             parts.append("# Conversation checkpoint (older messages)\n" + checkpointSummary)
+        }
+
+        if let services, !services.todos.openItems.isEmpty {
+            parts.append("""
+            # Open plan
+            \(services.todos.summary)
+            Keep it current: mark progress with `todowrite` (items, update or complete).
+            """)
         }
 
         if autopilot {

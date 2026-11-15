@@ -275,7 +275,7 @@ final class StorageTests: XCTestCase {
     func testTodosPersistAndClear() async throws {
         let database = try AppDatabase()
         let todos = TodoStore(database: database)
-        todos.set(json: ["items": [
+        try todos.set(json: ["items": [
             ["text": "первый шаг", "status": "done"],
             ["text": "второй шаг", "status": "pending"]
         ]])

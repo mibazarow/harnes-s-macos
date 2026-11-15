@@ -136,6 +136,8 @@ enum SkillScope: String, Sendable {
 struct SkillRecord: Identifiable, Sendable, Equatable {
     let name: String
     let summary: String
+    /// Frontmatter triggers, used to surface a skill for a matching request.
+    let triggers: [String]
     let scope: SkillScope
     let directory: URL
     let enabled: Bool

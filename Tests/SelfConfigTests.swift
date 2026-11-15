@@ -152,7 +152,7 @@ final class SelfConfigTests: XCTestCase {
             builtinDirectory: builtin
         )
 
-        let text = try await service.read(name: "demo-read")
+        let text = try await service.read(name: "demo-read").text
         let records = await service.list()
         let record = try XCTUnwrap(records.first)
         XCTAssertTrue(text.contains("# Skill: demo-read"))
@@ -199,7 +199,7 @@ final class SelfConfigTests: XCTestCase {
         XCTAssertLessThanOrEqual(index.count, 8000)
         XCTAssertTrue(index.contains("- coding:"))
 
-        let body = try await service.read(name: "coding")
+        let body = try await service.read(name: "coding").text
         XCTAssertTrue(body.contains("Path: "))
         XCTAssertTrue(body.contains("Scope: builtin"))
     }
@@ -218,8 +218,11 @@ final class SelfConfigTests: XCTestCase {
         )
 
         let index = await service.promptIndex()
-        XCTAssertTrue(index.contains("- grp-* (5): a, b, c, d, e"))
-        XCTAssertFalse(index.contains("- grp-a:"))
+        // Group members keep a one-line hint now: names alone made same-prefix skills
+        // indistinguishable. The hint comes from the manifest summary.
+        XCTAssertTrue(index.contains("- grp-* (5):"), index)
+        XCTAssertTrue(index.contains("a (Demo skill for tests)"), index)
+        XCTAssertFalse(index.contains("- grp-a:"), index)
     }
 
     func testSkillIndexNoticesChangesMadeOutsideTheService() async throws {

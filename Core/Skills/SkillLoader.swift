@@ -55,6 +55,29 @@ struct SkillLoader: Sendable {
         return "\(parts.count)|\(parts.joined(separator: ";"))"
     }
 
+    /// Every file in a skill directory, sorted.
+    ///
+    /// Sorting happens before any limit: `enumerator` order is not deterministic, so
+    /// taking the first 40 used to return a different, arbitrary subset each call.
+    func allFiles(in directory: URL) -> [String] {
+        let fileManager = FileManager.default
+        guard let enumerator = fileManager.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
+
+        var result: [String] = []
+        for case let url as URL in enumerator {
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard values?.isDirectory != true else { continue }
+            let relative = url.path.replacingOccurrences(of: directory.path + "/", with: "")
+            guard relative != "SKILL.md" else { continue }
+            result.append(relative)
+        }
+        return result.sorted()
+    }
+
     func record(named name: String) -> SkillRecord? {
         let normalized = name.lowercased()
         return loadAll().first { $0.name.lowercased() == normalized }
@@ -67,27 +90,7 @@ struct SkillLoader: Sendable {
     }
 
     func files(in directory: URL, limit: Int = 40) -> [String] {
-        let fileManager = FileManager.default
-        guard let enumerator = fileManager.enumerator(
-            at: directory,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else {
-            return []
-        }
-
-        var result: [String] = []
-        for case let url as URL in enumerator {
-            guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey]),
-                  values.isDirectory != true else {
-                continue
-            }
-            let relative = url.path.replacingOccurrences(of: directory.path + "/", with: "")
-            guard relative != "SKILL.md" else { continue }
-            result.append(relative)
-            if result.count >= limit { break }
-        }
-        return result.sorted()
+        Array(allFiles(in: directory).prefix(limit))
     }
 
     private func scan(_ directory: URL, scope: SkillScope) -> [SkillRecord] {
@@ -117,6 +120,7 @@ struct SkillLoader: Sendable {
             return SkillRecord(
                 name: manifest.name,
                 summary: manifest.summary,
+                triggers: manifest.triggers,
                 scope: scope,
                 directory: entry,
                 enabled: !fileManager.fileExists(atPath: disabledMarker.path)

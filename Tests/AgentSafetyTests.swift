@@ -85,7 +85,7 @@ final class AgentSafetyTests: XCTestCase {
     func testTodoStore() throws {
         let database = try AppDatabase()
         let todos = TodoStore(database: database)
-        todos.set([
+        try todos.set([
             ["text": "Прочитать файл", "status": "done"],
             ["text": "Починить баг", "status": "active"]
         ])
