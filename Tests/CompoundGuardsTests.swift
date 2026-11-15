@@ -45,6 +45,16 @@ final class CompoundGuardsTests: XCTestCase {
         XCTAssertTrue(NoAttemptGuard.correctiveMessage.contains("инструментами. Если"))
     }
 
+    // MARK: - The prompt is stack-agnostic
+
+    func testSystemPromptHasNoStackSpecificRules() {
+        let lower = Prompts.system.lowercased()
+        for word in ["bitrix", "php -l", "dbconn", "swift", "python", "node.js"] {
+            XCTAssertFalse(lower.contains(word), "промпт не должен быть привязан к стеку: \(word)")
+        }
+        XCTAssertTrue(lower.contains("whatever language the task is written in"))
+    }
+
     // MARK: - Tool traffic is measured as JSON
 
     func testToolTraceCostsMoreThanTheCleanedText() {
