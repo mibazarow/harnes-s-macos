@@ -207,7 +207,6 @@ final class ChatStore {
             fileSafety: services.fileSafety,
             todos: services.todos,
             readOnly: planMode,
-            interceptors: ToolInterceptorChain(log: { line in ChatStore.logLatency(line) }),
             subagent: { [weak self] prompt, readOnly in
                 await self?.runSubagent(
                     prompt: prompt, readOnly: readOnly, provider: provider,
@@ -215,7 +214,8 @@ final class ChatStore {
                 ) ?? SubagentOutcome(text: "", error: "сессия закрыта")
             },
             ledger: services.fileLedger,
-            skillScope: services.skillScope
+            skillScope: services.skillScope,
+            interceptors: ToolInterceptorChain(log: { line in ChatStore.logLatency(line) })
         )
 
         schemaTokens = await registry.schemaTokenCost()
@@ -812,10 +812,12 @@ final class ChatStore {
     /// Kept open between writes: open+seek+close per line was measurable on a long
     /// session. A stat per write keeps the handle honest if the file is rotated or
     /// deleted under us, which is cheaper than reopening every time.
-    private static let latencyLock = NSLock()
-    private static var latencyHandle: FileHandle?
+    nonisolated private static let latencyLock = NSLock()
+    nonisolated(unsafe) private static var latencyHandle: FileHandle?
 
-    static func logLatency(_ line: String) {
+    /// `nonisolated`: the interceptor chain logs from whatever thread a tool call runs
+    /// on. The handle is already guarded by `latencyLock`.
+    nonisolated static func logLatency(_ line: String) {
         let url = AppPaths.logsDirectory.appendingPathComponent("latency.log")
         try? AppPaths.ensureDirectory(AppPaths.logsDirectory)
         let stamped = Data((Timestamps.now() + " " + line + "\n").utf8)
