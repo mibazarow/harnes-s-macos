@@ -323,20 +323,32 @@ extension ChatStore {
         model: String,
         services: AppServices
     ) async {
-        guard let measured = await calibration.lastMeasured(providerID: provider.id, model: model) else { return }
+        guard let sample = await calibration.lastSample(providerID: provider.id, model: model) else { return }
         let usable = composer.budget(
             for: provider.contextWindow, thresholdPercent: compactionThreshold
         ).usable
-        guard measured > Int(Double(usable) * 0.6) else { return }
-        guard !compactionCoolingDown else { return }
-
         let all = promptMessages
         guard all.count > 4 else { return }
+
+        // The measured number belongs to the prompt it measured. If the history has
+        // changed since, the absolute value says nothing about the current one; scale
+        // it by the estimator's own ratio (R15.8: 101k from a 119k prompt meant 32k
+        // for the 38k prompt that was about to be sent, not 101k).
+        let system = await buildSystemPrompt(services: services)
+        let localEstimate = TokenEstimator.tokens(in: system)
+            + TokenEstimator.tokens(in: checkpointSummary)
+            + all.reduce(0) { $0 + $1.tokens }
+        let effective = PromptPressure.scaledMeasured(
+            measured: sample.measured, basis: sample.estimated, estimated: localEstimate
+        )
+        guard effective > Int(Double(usable) * 0.6) else { return }
+        guard !compactionCoolingDown else { return }
+
         let fold = Array(all.prefix(all.count / 2))
         guard !fold.isEmpty else { return }
 
         if await compact(fold, provider: provider, model: model, services: services) {
-            notice("История сжата заранее: \(fold.count) сообщений (\(measured) из \(usable) токенов у провайдера).")
+            notice("История сжата заранее: \(fold.count) сообщений (\(effective) из \(usable) токенов у провайдера).")
         }
     }
 

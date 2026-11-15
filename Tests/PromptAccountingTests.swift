@@ -117,6 +117,29 @@ final class PromptAccountingTests: XCTestCase {
         XCTAssertTrue(decision.overThreshold, "без факта компактация бы не сработала")
     }
 
+    func testProviderMeasurementBelowTheEstimateWins() {
+        // R15.6: the comparison used to ignore a fact below the estimate, so a
+        // 15–26% overestimate never corrected itself.
+        let decision = PromptPressure.decide(
+            estimated: 80_000, measured: 60_000, usable: 108_800, threshold: 87_040
+        )
+        XCTAssertEqual(decision.tokens, 60_000)
+        XCTAssertEqual(decision.source, .measured)
+        XCTAssertFalse(decision.overThreshold)
+    }
+
+    func testStaleMeasurementIsScaledToTheCurrentPrompt() {
+        // R15.8: 101 307 was measured on a 119 192-token prompt; the next prompt was
+        // estimated at 38 534. The absolute 101k is not "the size" any more — 32.7k is.
+        let decision = PromptPressure.decide(
+            estimated: 38_534, measured: 101_307, basis: 119_192,
+            usable: 108_800, threshold: 87_040
+        )
+        XCTAssertEqual(decision.tokens, 32_752, accuracy: 2)
+        XCTAssertEqual(decision.source, .measured)
+        XCTAssertFalse(decision.overThreshold, "лишняя компактация на пустой истории")
+    }
+
     func testSmallDivergenceStaysWithTheEstimate() {
         let decision = PromptPressure.decide(
             estimated: 80_000, measured: 85_000, usable: 108_800, threshold: 87_040

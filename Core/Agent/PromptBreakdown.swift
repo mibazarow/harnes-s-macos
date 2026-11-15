@@ -30,10 +30,11 @@ struct PromptBreakdown: Sendable, Equatable {
 /// Which number decides whether the window is full: the local estimate or the provider's
 /// last measured `prompt_tokens`.
 ///
-/// The estimate is calibrated but still an estimate; when it disagrees with the provider
-/// by more than 10% the measured value wins, because only the provider knows what it
-/// actually charged. The first request of a session has no measurement, so the estimate
-/// stays in charge until there is one.
+/// The estimate is calibrated but still an estimate; when the provider's number, scaled
+/// to the current prompt, disagrees with the estimate by more than 10%, the provider
+/// wins in either direction — it knows what it charged. The comparison used to be
+/// one-sided, so a 15% overestimate was invisible and compaction fired late (R15.6).
+/// The first request of a session has no measurement, so the estimate stays in charge.
 enum PromptPressure {
     enum Source: String, Sendable {
         case estimate
@@ -48,15 +49,33 @@ enum PromptPressure {
 
     static let divergence = 0.10
 
+    /// The provider's volume carried over to another prompt: the ratio is its price
+    /// list, the absolute number is not.
+    static func scaledMeasured(measured: Int, basis: Int, estimated: Int) -> Int {
+        Int((Double(estimated) * Double(measured) / Double(max(basis, 1))).rounded())
+    }
+
+    /// `basis` is the estimate the provider's number was measured against. A measured
+    /// `prompt_tokens` is an absolute volume of one particular prompt; when the history
+    /// has since been pruned or folded into a checkpoint, that absolute number describes
+    /// a request that no longer exists. Scaling it by `measured / basis` keeps the
+    /// provider's calibration while following the prompt that is about to go out.
     static func decide(
         estimated: Int,
         measured: Int?,
+        basis: Int? = nil,
         usable: Int,
         threshold: Int
     ) -> Decision {
-        let gap = measured.map { Double($0) / Double(max(estimated, 1)) } ?? 1
-        let useMeasured = measured != nil && gap > 1 + divergence
-        let tokens = useMeasured ? max(measured ?? 0, estimated) : estimated
+        guard let measured else {
+            return Decision(
+                tokens: estimated, source: .estimate, overThreshold: estimated >= threshold
+            )
+        }
+        let corrected = scaledMeasured(measured: measured, basis: basis ?? estimated, estimated: estimated)
+        let gap = abs(Double(corrected) - Double(estimated)) / Double(max(estimated, 1))
+        let useMeasured = gap > divergence
+        let tokens = max(useMeasured ? corrected : estimated, 0)
         return Decision(
             tokens: tokens,
             source: useMeasured ? .measured : .estimate,

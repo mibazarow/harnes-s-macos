@@ -734,16 +734,19 @@ final class ChatStore {
         // reported a prompt above the threshold. Then the measurement wins.
         if let services {
             let budget = composer.budget(for: contextWindow, thresholdPercent: compactionThreshold)
-            let measured = await calibration.lastMeasured(providerID: provider.id, model: model)
+            let sample = await calibration.lastSample(providerID: provider.id, model: model)
             let decision = PromptPressure.decide(
                 estimated: plan.usedTokens,
-                measured: measured,
+                measured: sample?.measured,
+                basis: sample?.estimated,
                 usable: budget.usable,
                 threshold: budget.thresholdTokens
             )
             if decision.source == .measured {
                 Self.logLatency(
-                    "budget_source=measured estimated=\(plan.usedTokens) measured=\(measured ?? 0)"
+                    "budget_source=measured estimated=\(plan.usedTokens) "
+                        + "measured=\(sample?.measured ?? 0) basis=\(sample?.estimated ?? 0) "
+                        + "scaled=\(decision.tokens)"
                 )
             }
             if decision.overThreshold, plan.compacted.isEmpty, !compactionCoolingDown {
@@ -762,7 +765,7 @@ final class ChatStore {
                         estimateScale: scale,
                         toolTokens: schemaTokens
                     )
-                    notice("История сжата по факту: провайдер сообщил \(measured ?? 0) токенов.")
+                    notice("История сжата по факту: провайдер сообщил \(sample?.measured ?? 0) токенов.")
                 }
             }
         }

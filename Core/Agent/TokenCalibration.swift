@@ -56,6 +56,12 @@ actor TokenCalibration {
         sample(providerID: providerID, model: model)?.measured
     }
 
+    /// The estimate behind `lastMeasured`. Without it the measured number cannot be
+    /// scaled to a prompt whose history has changed since (R15.8).
+    func lastSample(providerID: String, model: String) -> (measured: Int, estimated: Int)? {
+        sample(providerID: providerID, model: model).map { ($0.measured, $0.estimated) }
+    }
+
     func reset(providerID: String, model: String) {
         let key = Self.key(providerID, model)
         cache[key] = nil
