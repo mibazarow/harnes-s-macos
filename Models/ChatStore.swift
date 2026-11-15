@@ -691,7 +691,8 @@ final class ChatStore {
         contextWindow: Int,
         provider: ProviderModel,
         model: String,
-        services: AppServices?
+        services: AppServices?,
+        upcomingImages: Int = 0
     ) async -> (system: String, included: [ContextMessage], stubs: [String: String]) {
         if let lastContextWindow, lastContextWindow > contextWindow {
             Self.logLatency("window \(lastContextWindow) -> \(contextWindow): preflight compaction")
@@ -702,6 +703,11 @@ final class ChatStore {
         var system = await buildSystemPrompt(services: services)
         let scale = await calibration.scale(providerID: provider.id, model: model)
         estimateScale = scale
+
+        // Measured before pruning, on purpose: the line after it describes a smaller
+        // history, and without this one the log cannot say whether the pruner removed
+        // the right amount or the estimate has drifted (R15.8).
+        Self.logLatency(prePruneBreakdown(system: system, upcomingImages: upcomingImages).line)
 
         // Prune before the plan: the window must be sized by what actually goes out, or
         // pruning never moves the compaction threshold and the session still compacts

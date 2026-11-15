@@ -181,6 +181,26 @@ extension ChatStore {
         }
     }
 
+    /// The same request measured before tool output is stubbed. Logged as
+    /// `phase=pre_prune`, so the next `prompt_breakdown` line — and the provider's
+    /// `prompt_tokens` after it — can be compared against the history that was actually
+    /// pruned instead of against a different state of it.
+    ///
+    /// `messages` here counts stored turns, not wire messages: expansion into
+    /// assistant/tool pairs happens later, in `buildHistory`.
+    func prePruneBreakdown(system: String, upcomingImages: Int = 0) -> PromptBreakdown {
+        let all = promptMessages
+        return PromptBreakdown(
+            system: TokenEstimator.tokens(in: system),
+            tools: schemaTokens,
+            summary: TokenEstimator.tokens(in: checkpointSummary),
+            history: all.reduce(0) { $0 + $1.tokens },
+            images: upcomingImages,
+            messages: all.count,
+            phase: "pre_prune"
+        )
+    }
+
     /// One decision for "what can leave the request". Used by the window plan, the
     /// calibration and the request builder, so all three talk about the same volume.
     func plannedPruning() -> ToolOutputPruner.Plan {
@@ -386,7 +406,8 @@ extension ChatStore {
             contextWindow: contextWindow,
             provider: provider,
             model: model,
-            services: services
+            services: services,
+            upcomingImages: attachments.filter { $0.kind == .image }.count
         )
 
         var history: [ProviderMessage] = [ProviderMessage(role: .system, content: prepared.system)]

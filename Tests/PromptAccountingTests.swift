@@ -17,6 +17,53 @@ final class PromptAccountingTests: XCTestCase {
         }
     }
 
+    func testBreakdownWithoutAPhaseKeepsTheOldLine() {
+        let breakdown = PromptBreakdown(
+            system: 1, tools: 2, summary: 3, history: 4, images: 5, messages: 6
+        )
+        XCTAssertFalse(breakdown.line.contains("phase="), breakdown.line)
+    }
+
+    /// R15.8: the pre-prune line must describe a larger history than the plan that
+    /// goes out, and it must say which state it describes.
+    @MainActor
+    func testPrePruneBreakdownIsLargerThanThePrunedPlan() {
+        let output = String(repeating: "z", count: 4_000)
+        let old = (0..<3).map { index in
+            ChatMessage(role: .assistant, text: "шаг", exchanges: (0..<5).map { offset in
+                ToolExchange(
+                    callID: "old_\(index)_\(offset)", name: "bash", arguments: "{}",
+                    output: output, isError: false
+                )
+            })
+        }
+        let recent = (0..<6).map { index in
+            ChatMessage(role: .assistant, text: "шаг", exchanges: [ToolExchange(
+                callID: "recent_\(index)", name: "bash", arguments: "{}",
+                output: String(repeating: "y", count: 500), isError: false
+            )])
+        }
+        var messages: [ChatMessage] = [ChatMessage(role: .user, text: "задача")]
+        messages.append(contentsOf: old)
+        messages.append(ChatMessage(
+            role: .assistant, text: String(repeating: "использовал результаты ", count: 20)
+        ))
+        messages.append(contentsOf: recent)
+        messages.append(ChatMessage(role: .user, text: "продолжай"))
+
+        let chat = ChatStore()
+        chat.messages = messages
+        let plan = chat.plannedPruning()
+        XCTAssertFalse(plan.replacements.isEmpty)
+
+        let pre = chat.prePruneBreakdown(system: "система")
+        let pruned = chat.promptMessages(pruning: plan.replacements).reduce(0) { $0 + $1.tokens }
+
+        XCTAssertGreaterThan(pre.history, pruned, "до прунинга история обязана быть больше")
+        XCTAssertTrue(pre.line.contains("phase=pre_prune"), pre.line)
+        XCTAssertTrue(pre.line.contains("total_est=\(pre.total)"), pre.line)
+    }
+
     func testToolPairEstimateMatchesProviderJSON() throws {
         let id = "call_abc12345"
         let name = "bash"

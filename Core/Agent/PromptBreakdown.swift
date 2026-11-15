@@ -13,12 +13,17 @@ struct PromptBreakdown: Sendable, Equatable {
     var history: Int
     var images: Int
     var messages: Int
+    /// `pre_prune` marks the line logged before tool output is stubbed. Without two
+    /// lines per request the log cannot tell the pruner's own delta from the estimator's
+    /// error, which is exactly the confusion R15.8 had to untangle.
+    var phase: String?
 
     var total: Int { system + tools + summary + history + images }
 
     var line: String {
-        "prompt_breakdown system=\(system) tools=\(tools) summary=\(summary) "
+        let base = "prompt_breakdown system=\(system) tools=\(tools) summary=\(summary) "
             + "history=\(history) images=\(images) total_est=\(total) messages=\(messages)"
+        return phase.map { base + " phase=\($0)" } ?? base
     }
 }
 
