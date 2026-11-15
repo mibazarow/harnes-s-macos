@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Harness
 
@@ -62,6 +63,38 @@ final class PromptAccountingTests: XCTestCase {
         XCTAssertGreaterThan(pre.history, pruned, "до прунинга история обязана быть больше")
         XCTAssertTrue(pre.line.contains("phase=pre_prune"), pre.line)
         XCTAssertTrue(pre.line.contains("total_est=\(pre.total)"), pre.line)
+    }
+
+    // MARK: - Images
+
+    /// R15.7: images are priced by area. The flat 1 100 made every attachment equal.
+    func testImageCostFollowsAreaAndHasACap() {
+        let icon = ImageCost.tokens(width: 32, height: 32)
+        let hd = ImageCost.tokens(width: 1_280, height: 720)
+        let screenshot = ImageCost.tokens(width: 2_560, height: 1_440)
+        let huge = ImageCost.tokens(width: 8_192, height: 8_192)
+
+        XCTAssertEqual(icon, 255)
+        XCTAssertEqual(hd, 1_105)
+        XCTAssertEqual(screenshot, 2_125)
+        XCTAssertLessThan(icon, hd)
+        XCTAssertLessThan(hd, screenshot)
+        XCTAssertEqual(
+            huge, ImageCost.baseTokens + ImageCost.maxTiles * ImageCost.tokensPerTile,
+            "кэп после уменьшения длинной стороны"
+        )
+    }
+
+    func testImageCostReadsThePixelSizeFromPNGData() throws {
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 64, pixelsHigh: 64,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ))
+        let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+
+        XCTAssertEqual(ImageCost.tokens(in: data), ImageCost.tokens(width: 64, height: 64))
+        XCTAssertEqual(ImageCost.tokens(in: Data("not an image".utf8)), Tuning.imageTokenEstimate)
     }
 
     func testToolPairEstimateMatchesProviderJSON() throws {

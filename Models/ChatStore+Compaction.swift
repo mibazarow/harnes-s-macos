@@ -500,7 +500,7 @@ extension ChatStore {
             tools: schemaTokens,
             summary: TokenEstimator.tokens(in: checkpointSummary),
             history: prepared.included.reduce(0) { $0 + $1.tokens },
-            images: images.count * Tuning.imageTokenEstimate,
+            images: images.reduce(0) { $0 + ImageCost.tokens(in: $1) },
             messages: history.count
         )
         Self.logLatency(breakdown.line)

@@ -249,9 +249,9 @@ struct AgentLoop: Sendable {
                     total += ToolCost.call(name: call.name, arguments: call.arguments, id: call.id)
                 }
             }
-            // A provider charges roughly a fixed tile price per image; 1 100 is the
-            // conservative middle for a resized screenshot.
-            total += message.images.count * Tuning.imageTokenEstimate
+            // Images are priced by area, not by count: a screenshot and an icon are not
+            // the same request (R15.7).
+            total += message.images.reduce(0) { $0 + ImageCost.tokens(in: $1) }
         }
         return total + ToolCost.catalog(schemas)
     }

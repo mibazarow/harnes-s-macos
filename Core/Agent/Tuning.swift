@@ -20,6 +20,8 @@ enum Tuning {
 
     /// Token price of one image in a request. Estimation, not measurement: providers
     /// bill by tile and the exact value depends on the model.
+    /// Fallback only: `ImageCost` prices a real image by its tiles. This number is used
+    /// when the attachment cannot be parsed as an image at all.
     static let imageTokenEstimate = 1_100
 
     /// Ceiling for the serialized tool catalog, used by the schema budget test.
