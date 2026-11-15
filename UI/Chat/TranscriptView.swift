@@ -14,6 +14,12 @@ struct TranscriptView: View {
     @State private var follow = true
     @State private var loadingOlder = false
     @State private var lastAutoScroll = Date.distantPast
+    /// `displayed` used to be recomputed on every frame, and during a run the view
+    /// redraws about sixteen times a second: every message in the window was grouped and
+    /// copied that often on the main thread. Now it is rebuilt only when the transcript
+    /// actually changed, keyed by `displaySignature`.
+    @State private var displayedCache: [ChatMessage] = []
+    @State private var displayedCacheSignature: Int?
 
     private let bottomID = "transcript-bottom"
 
@@ -128,8 +134,12 @@ struct TranscriptView: View {
                 guard follow else { return }
                 stick(proxy)
             }
+            .onChange(of: displaySignature) {
+                refreshDisplay()
+            }
             .onAppear {
                 follow = true
+                refreshDisplay()
                 proxy.scrollTo(bottomID, anchor: .bottom)
             }
         }
@@ -153,7 +163,27 @@ struct TranscriptView: View {
     /// Messages as the transcript shows them: runs of tool-only steps collapsed into
     /// one bubble. Storage and the model's replay keep every step separate.
     private var displayed: [ChatMessage] {
-        ChatMessage.groupedForDisplay(chat.messages)
+        if let signature = displayedCacheSignature, signature == displaySignature {
+            return displayedCache
+        }
+        return ChatMessage.groupedForDisplay(chat.messages)
+    }
+
+    /// Everything that changes the grouping: how many messages there are and how the
+    /// newest one changed. Cheap to compute, unlike the grouping itself.
+    private var displaySignature: Int {
+        guard let last = chat.messages.last else { return chat.messages.count }
+        return chat.messages.count
+            &+ last.text.count
+            &+ (last.reasoning?.count ?? 0)
+            &+ last.tools.count
+            &+ last.exchanges.count
+            &+ last.attachments.count
+    }
+
+    private func refreshDisplay() {
+        displayedCache = ChatMessage.groupedForDisplay(chat.messages)
+        displayedCacheSignature = displaySignature
     }
 
     /// Anything that changes the height of the newest message.
