@@ -252,6 +252,65 @@ final class AgentLoopIntegrationTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(elapsed, 0.55, "the mutating call did not act as a barrier")
     }
 
+    func testEventOrderAcrossStepsIsStable() async throws {
+        // The loop's behaviour is defined by the order of events, and only the guards
+        // had tests. A refactor that reorders stepStarted/tool/stepStarted would change
+        // what the user sees without failing anything else.
+        let responses = [
+            [
+                #"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"fs_read","arguments":"{\"path\":\"f.txt\"}"}}]}}]}"#,
+                #"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#
+            ],
+            [
+                #"{"choices":[{"delta":{"content":"готово"}}]}"#,
+                #"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#
+            ]
+        ]
+        let server = try StubSSEServer(responses: responses)
+        try server.start()
+        defer { server.stop() }
+
+        let sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("harness-order-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+        try "line one".write(
+            to: sandbox.appendingPathComponent("f.txt"), atomically: true, encoding: .utf8
+        )
+
+        let registry = ToolRegistry(
+            workspace: sandbox, memory: nil, embeddings: nil, secrets: nil, skills: nil, mcp: nil
+        )
+        let loop = AgentLoop(provider: provider(baseURL: server.baseURL), model: "stub-model", registry: registry)
+
+        var trail: [String] = []
+        for try await event in loop.run(history: [ProviderMessage(role: .user, content: "прочитай")]) {
+            switch event {
+            case .stepStarted(let index): trail.append("step:\(index)")
+            case .delta(let chunk): if !chunk.isEmpty { trail.append("delta:\(chunk)") }
+            case .toolStarted(let name, _): trail.append("toolStarted:\(name)")
+            case .toolFinished(_, let name, _, _, _, _, _):
+                trail.append("toolFinished:\(name)")
+            case .completed: trail.append("completed")
+            default: break
+            }
+        }
+
+        let step0 = try XCTUnwrap(trail.firstIndex(of: "step:0"))
+        let started = try XCTUnwrap(trail.firstIndex(of: "toolStarted:fs_read"))
+        let finished = try XCTUnwrap(trail.firstIndex(of: "toolFinished:fs_read"))
+        let step1 = try XCTUnwrap(trail.firstIndex(of: "step:1"))
+        let delta = try XCTUnwrap(trail.firstIndex(of: "delta:готово"))
+        let completed = try XCTUnwrap(trail.firstIndex(of: "completed"))
+
+        XCTAssertLessThan(step0, started)
+        XCTAssertLessThan(started, finished)
+        XCTAssertLessThan(finished, step1)
+        XCTAssertLessThan(step1, delta)
+        XCTAssertLessThan(delta, completed)
+        XCTAssertEqual(trail.filter { $0 == "completed" }.count, 1, trail.description)
+    }
+
     func testHTTPErrorIsReported() async throws {
         let server = try StubSSEServer(chunks: [])
         try server.start()
