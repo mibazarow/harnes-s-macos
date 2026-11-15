@@ -260,23 +260,3 @@ final class TodoStore: @unchecked Sendable {
         }
     }
 }
-
-/// Small number coercion shared by JSON-shaped tool payloads.
-enum Coerce {
-    static func int(_ value: Any) -> Int? {
-        switch value {
-        case is Bool:
-            return nil
-        case let number as NSNumber:
-            return number.intValue
-        case let value as Int:
-            return value
-        case let value as Double:
-            return Int(value)
-        case let text as String:
-            return Int(text.trimmingCharacters(in: .whitespaces))
-        default:
-            return nil
-        }
-    }
-}
