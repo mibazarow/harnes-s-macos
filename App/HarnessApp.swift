@@ -5,10 +5,6 @@ struct HarnessApp: App {
     @State private var model = AppModel()
 
     init() {
-        #if DEBUG
-        // Headless contract export for the Windows port; never reached in Release.
-        if ContractExporter.handleCommandLine() { return }
-        #endif
         AppFont.register()
     }
 
