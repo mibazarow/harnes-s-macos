@@ -106,9 +106,9 @@ extension ChatStore {
             }
             guard !items.isEmpty else { return }
 
-            if await self.compact(items, provider: provider, model: model, services: services) {
-                self.notice("Задача закрыта: \(items.count) сообщений свёрнуты в чекпойнт.")
-            }
+            // Folded silently on purpose: the closed task is routine housekeeping,
+            // the user should not see a message per finished task.
+            _ = await self.compact(items, provider: provider, model: model, services: services)
         }
     }
 
