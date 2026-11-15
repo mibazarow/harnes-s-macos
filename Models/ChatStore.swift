@@ -207,6 +207,7 @@ final class ChatStore {
             fileSafety: services.fileSafety,
             todos: services.todos,
             readOnly: planMode,
+            interceptors: ToolInterceptorChain(log: { line in ChatStore.logLatency(line) }),
             subagent: { [weak self] prompt, readOnly in
                 await self?.runSubagent(
                     prompt: prompt, readOnly: readOnly, provider: provider,
@@ -447,7 +448,8 @@ final class ChatStore {
             fileSafety: services.fileSafety,
             todos: nil,
             readOnly: readOnly,
-            subagent: nil
+            subagent: nil,
+            interceptors: ToolInterceptorChain(log: { line in ChatStore.logLatency(line) })
         )
 
         let system = Prompts.system + """

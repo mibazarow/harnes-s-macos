@@ -39,6 +39,9 @@ struct ToolRegistry: Sendable {
     let ledger: FileReadingLedger
     /// Restriction declared by the last skill that was read.
     let skillScope: ActiveSkillScope?
+    /// Gates in front of every call. Empty by default: a registry without interceptors
+    /// behaves exactly as before.
+    let interceptors: ToolInterceptorChain
 
     init(
         workspace: URL,
@@ -55,7 +58,8 @@ struct ToolRegistry: Sendable {
         readOnly: Bool = false,
         subagent: (@Sendable (String, Bool) async -> SubagentOutcome)? = nil,
         ledger: FileReadingLedger? = nil,
-        skillScope: ActiveSkillScope? = nil
+        skillScope: ActiveSkillScope? = nil,
+        interceptors: ToolInterceptorChain = ToolInterceptorChain()
     ) {
         self.workspace = workspace
         self.memory = memory
@@ -72,6 +76,7 @@ struct ToolRegistry: Sendable {
         self.subagent = subagent
         self.ledger = ledger ?? FileReadingLedger()
         self.skillScope = skillScope
+        self.interceptors = interceptors
     }
 
     static let mutatingTools: Set<String> = [
@@ -148,6 +153,17 @@ struct ToolRegistry: Sendable {
     }
 
     func execute(_ call: ToolCall) async -> ToolResult {
+        let context = ToolCallContext(workspace: workspace, readOnly: readOnly)
+        switch await interceptors.before(call, context: context) {
+        case .denied(let result):
+            return result
+        case .allowed(let allowed):
+            let result = await executeAllowed(allowed)
+            return await interceptors.after(allowed, result: result, context: context)
+        }
+    }
+
+    private func executeAllowed(_ call: ToolCall) async -> ToolResult {
         if let denial = await skillScope?.denialReason(call.name) {
             return .fail(denial)
         }

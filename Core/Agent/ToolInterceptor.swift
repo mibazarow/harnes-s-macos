@@ -1,0 +1,117 @@
+import Foundation
+
+/// The call as an interceptor sees it.
+struct ToolCallContext: Sendable {
+    let workspace: URL
+    let readOnly: Bool
+}
+
+/// What an interceptor decided about a call.
+enum ToolVerdict: Sendable {
+    /// Run the call as it came.
+    case allow
+    /// Do not run it; the model gets `reason` and `guidance` as the tool result.
+    case deny(reason: String, guidance: String?)
+    /// Run a different call instead. The replacement is schema-checked before it runs.
+    case rewrite(ToolCall)
+}
+
+/// A gate in front of tool execution, and a hook on its result.
+///
+/// Before this existed, every check lived inside `AgentLoop` or at the top of
+/// `ToolRegistry.execute`: adding one meant editing the loop and rebuilding, and a
+/// misbehaving check was invisible unless someone read `latency.log`. Interceptors are
+/// plain values in an explicitly ordered list (R16.1).
+protocol ToolInterceptor: Sendable {
+    var name: String { get }
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async -> ToolVerdict
+    func afterResult(_ call: ToolCall, result: ToolResult, context: ToolCallContext) async -> ToolResult
+}
+
+extension ToolInterceptor {
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async -> ToolVerdict { .allow }
+
+    func afterResult(
+        _ call: ToolCall, result: ToolResult, context: ToolCallContext
+    ) async -> ToolResult { result }
+}
+
+/// Ordered interceptors. The order is the array the caller passes — one place, not
+/// registration order — and the first `deny` wins.
+struct ToolInterceptorChain: Sendable {
+    enum Outcome: Sendable {
+        case allowed(ToolCall)
+        case denied(ToolResult)
+    }
+
+    let interceptors: [ToolInterceptor]
+    /// Where a refusal is recorded. Injected so the chain stays independent of the chat
+    /// layer; production wires it to `latency.log`.
+    let log: @Sendable (String) -> Void
+
+    init(
+        _ interceptors: [ToolInterceptor] = [],
+        log: @escaping @Sendable (String) -> Void = { _ in }
+    ) {
+        self.interceptors = interceptors
+        self.log = log
+    }
+
+    func before(_ call: ToolCall, context: ToolCallContext) async -> Outcome {
+        var current = call
+        for interceptor in interceptors {
+            switch await interceptor.beforeCall(current, context: context) {
+            case .allow:
+                continue
+            case .deny(let reason, let guidance):
+                return .denied(Self.denial(call: current, reason: reason, guidance: guidance))
+            case .rewrite(let rewritten):
+                if let problem = Self.schemaProblem(in: rewritten) {
+                    return .denied(Self.denial(
+                        call: current,
+                        reason: "перехватчик \(interceptor.name) вернул аргументы, не проходящие схему: \(problem)",
+                        guidance: nil
+                    ))
+                }
+                current = rewritten
+            }
+        }
+        return .allowed(current)
+    }
+
+    func after(_ call: ToolCall, result: ToolResult, context: ToolCallContext) async -> ToolResult {
+        var current = result
+        for interceptor in interceptors {
+            current = await interceptor.afterResult(call, result: current, context: context)
+        }
+        return current
+    }
+
+    /// A refusal must reach the model as a tool result, not as a silently skipped turn:
+    /// the model has to know why and what to do instead.
+    static func denial(call: ToolCall, reason: String, guidance: String?) -> ToolResult {
+        var text = "Вызов \(call.name) отклонён: \(reason)."
+        if let guidance, !guidance.isEmpty {
+            text += "\n" + guidance
+        }
+        return .fail(text)
+    }
+
+    /// `nil` when the call can run. Only what the catalog declares is checked: the JSON
+    /// object shape and required fields. Unknown tools (MCP) are left to the registry,
+    /// which rejects names it cannot dispatch.
+    static func schemaProblem(in call: ToolCall) -> String? {
+        guard let data = call.arguments.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return "аргументы не JSON-объект"
+        }
+        guard let definition = ToolRegistry.definitions.first(where: { $0.name == call.name }) else {
+            return nil
+        }
+        guard let required = definition.parameters["required"]?.value as? [String] else {
+            return nil
+        }
+        let missing = required.filter { object[$0] == nil }
+        return missing.isEmpty ? nil : "нет обязательных полей: \(missing.joined(separator: ", "))"
+    }
+}
