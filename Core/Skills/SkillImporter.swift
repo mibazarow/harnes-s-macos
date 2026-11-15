@@ -68,14 +68,7 @@ struct SkillImporter: Sendable {
     /// Lists what a remote SKILL.md would install, without writing anything.
     func previewRemote(_ rawSource: String) async throws -> RemotePreview {
         let source = rawSource.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: source) else {
-            throw ConfigurationError.unsupportedSource("некорректный URL")
-        }
-        guard url.pathExtension.lowercased() == "md" else {
-            throw ConfigurationError.unsupportedSource(
-                "по URL поддерживается только прямой SKILL.md; для папки укажи локальный путь"
-            )
-        }
+        let url = try remoteURL(source)
         let data = try await download(url)
         guard let text = String(data: data, encoding: .utf8) else {
             throw ConfigurationError.downloadFailed("ответ не является текстом")
@@ -142,17 +135,34 @@ struct SkillImporter: Sendable {
         guard let text = try? String(contentsOf: source, encoding: .utf8) else {
             throw ConfigurationError.invalidManifest("не удалось прочитать файл")
         }
+        return try installText(
+            text, fallback: source.deletingPathExtension().lastPathComponent, force: force
+        )
+    }
 
-        let fallback = source.deletingPathExtension().lastPathComponent
+    /// Single-file install shared by the local `.md` and remote paths: both end with
+    /// exactly one SKILL.md in a freshly prepared directory.
+    private func installText(_ text: String, fallback: String, force: Bool) throws -> SkillRecord {
         let manifest = try SkillManifest.parse(text, fallbackName: fallback)
         let destination = try prepareDestination(name: manifest.name, force: force)
-
         try AppPaths.ensureDirectory(destination)
         try text.write(to: destination.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
         return record(from: destination, manifest: manifest, scope: .user)
     }
 
     private func installRemote(_ source: String, force: Bool) async throws -> SkillRecord {
+        let url = try remoteURL(source)
+        let data = try await download(url)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw ConfigurationError.downloadFailed("ответ не является текстом")
+        }
+        return try installText(
+            text, fallback: url.deletingPathExtension().lastPathComponent, force: force
+        )
+    }
+
+    /// Only a direct SKILL.md is installable from a URL; folders come from disk.
+    private func remoteURL(_ source: String) throws -> URL {
         guard let url = URL(string: source) else {
             throw ConfigurationError.unsupportedSource("некорректный URL")
         }
@@ -161,20 +171,7 @@ struct SkillImporter: Sendable {
                 "по URL поддерживается только прямой SKILL.md; для папки укажи локальный путь"
             )
         }
-
-        let data = try await download(url)
-
-        guard let text = String(data: data, encoding: .utf8) else {
-            throw ConfigurationError.downloadFailed("ответ не является текстом")
-        }
-
-        let fallback = url.deletingPathExtension().lastPathComponent
-        let manifest = try SkillManifest.parse(text, fallbackName: fallback)
-        let destination = try prepareDestination(name: manifest.name, force: force)
-
-        try AppPaths.ensureDirectory(destination)
-        try text.write(to: destination.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
-        return record(from: destination, manifest: manifest, scope: .user)
+        return url
     }
 
     /// Refuses symlinks and oversized trees before anything is copied: a skill copied
