@@ -27,9 +27,18 @@ extension ToolRegistry {
         let root = args["path"].flatMap { $0 as? String }.map(resolve) ?? workspace
         let progress = await indexer.index(root: root)
 
+        // A second pass over an unchanged folder must not print a full report: only the
+        // difference is useful, and it is what the model reads.
+        if progress.filesChanged == 0 && progress.filesDeleted == 0 {
+            var line = "Изменений нет: \(progress.filesSeen) файлов, ничего не менялось."
+            if let error = progress.error { line += " Замечание: \(error)" }
+            return .ok(line)
+        }
+
         var lines = [
-            "Проиндексировано: \(progress.filesIndexed) файлов, \(progress.chunksIndexed) фрагментов",
-            "Пропущено: \(progress.skipped)"
+            "Изменено: \(progress.filesChanged), удалено: \(progress.filesDeleted), "
+                + "векторов посчитано: \(progress.vectorsComputed)",
+            "Фрагментов: \(progress.chunksIndexed), пропущено файлов: \(progress.skipped)"
         ]
         if let error = progress.error {
             lines.append("Замечание: \(error)")

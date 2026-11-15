@@ -9,6 +9,12 @@ actor WorkspaceIndexer {
         var filesIndexed = 0
         var chunksIndexed = 0
         var skipped = 0
+        /// Files whose content changed since the last run (indexed, not skipped).
+        var filesChanged = 0
+        /// Sources present in the database but missing on disk.
+        var filesDeleted = 0
+        /// Vectors computed by the embedding model during this run.
+        var vectorsComputed = 0
         var current = ""
         var finished = false
         var error: String?
@@ -46,6 +52,8 @@ actor WorkspaceIndexer {
 
         let files = collectFiles(root: root)
         progress.filesSeen = files.count
+        let existing = existingSources(root: root)
+        var seen = Set<String>()
 
         let hasEmbeddings: Bool
         if let embeddings {
@@ -60,7 +68,9 @@ actor WorkspaceIndexer {
 
         guard hasEmbeddings, let embeddings else {
             progress.error = "эмбеддинги недоступны — индексирую только текст"
-            await indexWithoutVectors(files: files, progress: &progress)
+            await indexWithoutVectors(
+                files: files, root: root, existing: existing, progress: &progress
+            )
             progress.finished = true
             return progress
         }
@@ -74,6 +84,7 @@ actor WorkspaceIndexer {
                 let fileHash = MemoryService.hash(text)
 
                 // A file that did not change since the last run is skipped whole.
+                seen.insert(file.path)
                 if try isUnchanged(path: file.path, hash: fileHash) {
                     progress.skipped += 1
                     continue
@@ -96,6 +107,7 @@ actor WorkspaceIndexer {
 
                 let missing = chunks.indices.filter { vectors[hashes[$0]] == nil }
                 if !missing.isEmpty {
+                    progress.vectorsComputed += missing.count
                     let computed = try await embeddings.embed(missing.map { chunks[$0] })
                     for (offset, index) in missing.enumerated() where offset < computed.count {
                         vectors[hashes[index]] = computed[offset]
@@ -122,14 +134,45 @@ actor WorkspaceIndexer {
 
                 try record(path: file.path, hash: fileHash)
                 progress.filesIndexed += 1
+                progress.filesChanged += 1
             } catch {
                 progress.skipped += 1
             }
         }
 
+        progress.filesDeleted = existing.subtracting(seen).count
         progress.finished = true
         progress.current = ""
         return progress
+    }
+
+    /// Sources stored for this root: everything a later run could find deleted.
+    ///
+    /// Enumeration returns resolved paths (`/private/var/...` on macOS) while the caller
+    /// may hand us `/var/...`; both spellings are compared so the prefix match works.
+    private func existingSources(root: URL) -> Set<String> {
+        let all = (try? database.queue.read { db in
+            try String.fetchAll(
+                db,
+                sql: "SELECT DISTINCT source FROM memory WHERE scope = 'workspace' AND source IS NOT NULL"
+            )
+        }) ?? []
+        let roots = Self.pathVariants(root.path)
+        return Set(all.filter { source in
+            Self.pathVariants(source).contains { candidate in
+                roots.contains { candidate == $0 || candidate.hasPrefix($0 + "/") }
+            }
+        })
+    }
+
+    private static func pathVariants(_ path: String) -> Set<String> {
+        var variants: Set<String> = [path, URL(fileURLWithPath: path).standardizedFileURL.path]
+        if path.hasPrefix("/private/") {
+            variants.insert(String(path.dropFirst("/private".count)))
+        } else if path.hasPrefix("/") {
+            variants.insert("/private" + path)
+        }
+        return variants
     }
 
     private func isUnchanged(path: String, hash: String) throws -> Bool {
@@ -151,7 +194,13 @@ actor WorkspaceIndexer {
         }
     }
 
-    private func indexWithoutVectors(files: [URL], progress: inout Progress) async {
+    private func indexWithoutVectors(
+        files: [URL],
+        root: URL,
+        existing: Set<String>,
+        progress: inout Progress
+    ) async {
+        var seen = Set<String>()
         for file in files {
             if Task.isCancelled { break }
             progress.current = file.path
@@ -160,6 +209,7 @@ actor WorkspaceIndexer {
                 continue
             }
 
+            seen.insert(file.path)
             let fileHash = MemoryService.hash(text)
             if (try? isUnchanged(path: file.path, hash: fileHash)) == true {
                 progress.skipped += 1
@@ -177,7 +227,9 @@ actor WorkspaceIndexer {
             }
             try? record(path: file.path, hash: fileHash)
             progress.filesIndexed += 1
+            progress.filesChanged += 1
         }
+        progress.filesDeleted = existing.subtracting(seen).count
         progress.current = ""
     }
 

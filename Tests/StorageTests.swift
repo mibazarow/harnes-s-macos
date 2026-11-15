@@ -272,6 +272,32 @@ final class StorageTests: XCTestCase {
         XCTAssertTrue(exchange.output.contains("СЛУЖЕБНАЯ ПОМЕТКА"), exchange.output.suffix(80).description)
     }
 
+    func testExchangeStoresOriginalLengthAndTrivialFlag() throws {
+        let exchange = ToolExchange(
+            callID: "c1", name: "fs_write", arguments: "{}",
+            output: String(repeating: "x", count: 9_000), isError: false
+        )
+        let trivial = ToolExchange(
+            callID: "c2", name: "todo_read", arguments: "{}", output: "готово", isError: false
+        )
+
+        let raw = try XCTUnwrap(ChatHistoryService.encodeExchanges([exchange, trivial]))
+        let decoded = ChatHistoryService.decodeExchanges(raw)
+
+        XCTAssertEqual(decoded.count, 2)
+        XCTAssertEqual(decoded[0].originalLength, 9_000)
+        XCTAssertEqual(decoded[0].output.count < 5_000, true)
+        XCTAssertTrue(decoded[1].isTrivial)
+    }
+
+    func testLegacyExchangeJSONStillDecodes() throws {
+        let legacy = #"[{"callID":"c1","name":"bash","arguments":"{}","output":"ok","isError":false}]"#
+        let decoded = ChatHistoryService.decodeExchanges(legacy)
+
+        XCTAssertEqual(decoded.count, 1)
+        XCTAssertEqual(decoded[0].originalLength, 2)
+    }
+
     func testTodosPersistAndClear() async throws {
         let database = try AppDatabase()
         let todos = TodoStore(database: database)
@@ -329,16 +355,29 @@ final class StorageTests: XCTestCase {
         let first = await indexer.index(root: root)
         XCTAssertEqual(first.filesIndexed, 1)
         XCTAssertGreaterThan(first.chunksIndexed, 0)
+        XCTAssertEqual(first.filesChanged, 1)
 
         let second = await indexer.index(root: root)
         XCTAssertEqual(second.filesIndexed, 0)
         XCTAssertEqual(second.skipped, 1)
         XCTAssertEqual(second.chunksIndexed, 0)
+        XCTAssertEqual(second.filesChanged, 0)
+        XCTAssertEqual(second.filesDeleted, 0)
 
         // Touching the content re-indexes the file.
         try String(repeating: "let value = 2\n", count: 40).write(to: file, atomically: true, encoding: .utf8)
         let third = await indexer.index(root: root)
         XCTAssertEqual(third.filesIndexed, 1)
+        XCTAssertEqual(third.filesChanged, 1)
+
+        // A file that vanished is reported as deleted, not silently ignored.
+        let extra = root.appendingPathComponent("extra.swift")
+        try String(repeating: "let extra = true\n", count: 40).write(to: extra, atomically: true, encoding: .utf8)
+        _ = await indexer.index(root: root)
+        try FileManager.default.removeItem(at: extra)
+        let afterDeletion = await indexer.index(root: root)
+        XCTAssertEqual(afterDeletion.filesDeleted, 1)
+        XCTAssertEqual(afterDeletion.filesChanged, 0)
     }
 
     func testMemoryHashDedupAndVectorCleanup() async throws {
