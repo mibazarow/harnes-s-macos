@@ -21,11 +21,6 @@ final class ChatStore {
     private var flushTask: Task<Void, Never>?
     private var flushDeadline = Date.distantPast
 
-    /// Upper bound on how long a chunk waits for the paint. 60 ms is under the
-    /// threshold where a pause reads as a stutter, and it turns any provider burst —
-    /// including a whole paragraph — into six or seven visible steps per second.
-    private static let flushInterval: TimeInterval = 0.06
-
     private var replyIndex = 0
     private let services: AppServices?
     private let commands: SlashCommandRouter?
@@ -262,9 +257,9 @@ final class ChatStore {
                         // without measuring on every token.
                         let soFar = messageText(of: assistantID)
                         let length = soFar.utf8.count
-                        if length - lastLoopCheck >= 250 {
+                        if length - lastLoopCheck >= Tuning.repetitionCheckStep {
                             lastLoopCheck = length
-                            if RepetitionGuard.isLooping(soFar) {
+                            if RepetitionGuard.isLooping(String(soFar.suffix(Tuning.repetitionTail))) {
                                 repetitionStopped = true
                                 // The pending tail is part of what looped, so it must
                                 // reach the bubble before trimming.
@@ -915,17 +910,28 @@ final class ChatStore {
             + Int(elapsed.components.attoseconds / 1_000_000_000_000_000)
     }
 
+    /// Kept open between writes: open+seek+close per line was measurable on a long
+    /// session. A stat per write keeps the handle honest if the file is rotated or
+    /// deleted under us, which is cheaper than reopening every time.
+    private static let latencyLock = NSLock()
+    private static var latencyHandle: FileHandle?
+
     private static func logLatency(_ line: String) {
         let url = AppPaths.logsDirectory.appendingPathComponent("latency.log")
-        let stamped = Timestamps.now() + " " + line + "\n"
         try? AppPaths.ensureDirectory(AppPaths.logsDirectory)
-        if let handle = try? FileHandle(forWritingTo: url) {
-            handle.seekToEndOfFile()
-            handle.write(Data(stamped.utf8))
-            try? handle.close()
-        } else {
-            try? Data(stamped.utf8).write(to: url)
+        let stamped = Data((Timestamps.now() + " " + line + "\n").utf8)
+
+        latencyLock.lock()
+        defer { latencyLock.unlock() }
+        if latencyHandle == nil || !FileManager.default.fileExists(atPath: url.path) {
+            try? latencyHandle?.close()
+            if !FileManager.default.fileExists(atPath: url.path) {
+                FileManager.default.createFile(atPath: url.path, contents: nil)
+            }
+            latencyHandle = try? FileHandle(forWritingTo: url)
+            try? latencyHandle?.seekToEnd()
         }
+        try? latencyHandle?.write(contentsOf: stamped)
     }
 
     private func mockReply(for text: String, assistantID: UUID) async {
@@ -997,7 +1003,7 @@ final class ChatStore {
     /// paints immediately, because the flush is scheduled on arrival and fires at once
     /// once the buffer is old enough.
     private func scheduleFlush() {
-        flushDeadline = Date().addingTimeInterval(Self.flushInterval)
+        flushDeadline = Date().addingTimeInterval(Tuning.paintInterval)
         guard flushTask == nil else { return }
         flushTask = Task { [weak self] in
             // `@MainActor` is re-acquired after every await, so the buffer is only

@@ -59,9 +59,9 @@ extension MarkdownView {
         }
         parseTask?.cancel()
         parseTask = Task {
-            // 120 ms is below the point where a slower update is visible, and it
-            // collapses a whole burst of chunks into one parse.
-            try? await Task.sleep(for: .milliseconds(120))
+            // Kept in step with the paint interval, so formatting does not lag the
+            // words it formats.
+            try? await Task.sleep(for: .seconds(Tuning.markdownParseInterval))
             guard !Task.isCancelled else { return }
             guard parsedText != value else { return }
             parsedText = value

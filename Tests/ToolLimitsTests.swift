@@ -428,7 +428,7 @@ final class ToolLimitsTests: XCTestCase {
         // tool that pushes the catalog past it has to make that trade explicitly
         // instead of hiding it in a new description.
         let cost = ToolRegistry.schemasTokenCost()
-        XCTAssertLessThanOrEqual(cost, 5_600, "\(cost) токенов на \(ToolRegistry.definitions.count) инструментов")
+        XCTAssertLessThanOrEqual(cost, Tuning.schemaTokenBudget, "\(cost) токенов на \(ToolRegistry.definitions.count) инструментов")
     }
 
     // MARK: - argument coercion
