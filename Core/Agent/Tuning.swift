@@ -22,9 +22,16 @@ enum Tuning {
     static let schemaTokenBudget = 5_600
 
     /// How aggressively finished tool output is replaced by a stub in the request.
-    /// `reactive` means "together with an ordinary compaction", which already pays the
-    /// cache reset; `always` prunes any batch above the pruner threshold.
-    static let toolOutputPruning: ToolOutputPruner.Mode = .reactive
+    /// `budget` decides on its own: no dependency on compaction, so the chain
+    /// "savings depend on compaction, compaction on threshold, threshold on calibration"
+    /// is broken. `reactive`/`always` stay for tests and experiments.
+    static let toolOutputPruning: ToolOutputPruner.Mode = .budget
+
+    /// A batch must free at least this much before the cache reset is worth it.
+    static let toolOutputPruneBatchTokens = 4_000
+
+    /// The newest tool-calling steps are never pruned.
+    static let toolOutputPruneProtectedSteps = 6
 
     /// A closed task longer than this is folded into the checkpoint at its boundary.
     static let taskBoundarySummaryMessages = 40

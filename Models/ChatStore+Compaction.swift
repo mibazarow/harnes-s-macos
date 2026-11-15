@@ -115,7 +115,11 @@ extension ChatStore {
     /// Messages that still go to the model: completed, non-system, and not yet folded
     /// into the checkpoint.
 
-    var promptMessages: [ContextMessage] {
+    var promptMessages: [ContextMessage] { promptMessages(pruning: [:]) }
+
+    /// The messages that go to the model, optionally with finished tool output already
+    /// replaced by the stub. The plan must see the same volume the provider will.
+    func promptMessages(pruning stubs: [String: String]) -> [ContextMessage] {
         let compactedIndex = compactedThroughID.flatMap { id in
             messages.firstIndex(where: { $0.id == id })
         }
@@ -127,8 +131,9 @@ extension ChatStore {
             // Tool calls and results travel with the message. Their cost is measured
             // on serialized JSON, envelope and escaping included.
             let extraTokens = message.exchanges.reduce(0) { sum, exchange in
-                sum + ToolCost.exchange(
-                    name: exchange.name, arguments: exchange.arguments, output: exchange.output
+                let output = stubs[exchange.callID] ?? exchange.output
+                return sum + ToolCost.exchange(
+                    name: exchange.name, arguments: exchange.arguments, output: output
                 )
             }
             return ContextMessage(
@@ -138,6 +143,18 @@ extension ChatStore {
                 extraTokens: extraTokens
             )
         }
+    }
+
+    /// One decision for "what can leave the request". Used by the window plan, the
+    /// calibration and the request builder, so all three talk about the same volume.
+    func plannedPruning() -> ToolOutputPruner.Plan {
+        ToolOutputPruner.plan(
+            messages: messages,
+            mode: Tuning.toolOutputPruning,
+            compactionHappened: compactedInWindow || pruneAtBoundary,
+            threshold: Tuning.toolOutputPruneBatchTokens,
+            protectedSteps: Tuning.toolOutputPruneProtectedSteps
+        )
     }
 
     /// Folds messages into the checkpoint. Returns false when the model refused, so the
@@ -330,21 +347,7 @@ extension ChatStore {
 
         var history: [ProviderMessage] = [ProviderMessage(role: .system, content: prepared.system)]
 
-        // Finished tool output is replaced by a stub in the request only: storage keeps
-        // the full text, so nothing is lost for a later turn or for a manual review.
-        let pruningCutoff = min(taskStartIndex, messages.count)
-        let stubs = ToolOutputPruner.replacements(
-            messages: messages,
-            included: prepared.included,
-            cutoffIndex: pruningCutoff,
-            mode: Tuning.toolOutputPruning,
-            compactionHappened: compactedInWindow || pruneAtBoundary
-        )
-        if !stubs.isEmpty {
-            Self.logLatency("pruned tool_results=\(stubs.count) cutoff=\(pruningCutoff)")
-        }
-        pruneAtBoundary = false
-
+        let stubs = prepared.stubs
         var prior = prepared.included
         if let last = prior.last, messages[last.id].role == .user {
             prior.removeLast()
@@ -436,9 +439,10 @@ extension ChatStore {
             return cache.plan
         }
 
+        let pruning = plannedPruning()
         let plan = composer.plan(
             systemPrompt: cachedSystemPrompt,
-            messages: promptMessages,
+            messages: promptMessages(pruning: pruning.replacements),
             contextWindow: contextWindow,
             thresholdPercent: thresholdPercent,
             summaryTokens: summaryTokens,

@@ -692,7 +692,7 @@ final class ChatStore {
         provider: ProviderModel,
         model: String,
         services: AppServices?
-    ) async -> (system: String, included: [ContextMessage]) {
+    ) async -> (system: String, included: [ContextMessage], stubs: [String: String]) {
         if let lastContextWindow, lastContextWindow > contextWindow {
             Self.logLatency("window \(lastContextWindow) -> \(contextWindow): preflight compaction")
         }
@@ -702,9 +702,21 @@ final class ChatStore {
         var system = await buildSystemPrompt(services: services)
         let scale = await calibration.scale(providerID: provider.id, model: model)
         estimateScale = scale
+
+        // Prune before the plan: the window must be sized by what actually goes out, or
+        // pruning never moves the compaction threshold and the session still compacts
+        // as if the history were full.
+        let pruning = plannedPruning()
+        if !pruning.isEmpty {
+            Self.logLatency(
+                "pruned tool_results=\(pruning.replacements.count) saved_tokens=\(pruning.savedTokens) "
+                + "first_index=\(pruning.firstPrunedIndex ?? -1)"
+            )
+        }
+        pruneAtBoundary = false
         var plan = composer.plan(
             systemPrompt: system,
-            messages: promptMessages,
+            messages: promptMessages(pruning: pruning.replacements),
             contextWindow: contextWindow,
             thresholdPercent: compactionThreshold,
             summaryTokens: TokenEstimator.tokens(in: checkpointSummary),
@@ -725,7 +737,7 @@ final class ChatStore {
                 system = await buildSystemPrompt(services: services)
                 plan = composer.plan(
                     systemPrompt: system,
-                    messages: promptMessages,
+                    messages: promptMessages(pruning: pruning.replacements),
                     contextWindow: contextWindow,
                     thresholdPercent: compactionThreshold,
                     summaryTokens: TokenEstimator.tokens(in: checkpointSummary),
@@ -740,7 +752,7 @@ final class ChatStore {
         }
 
         cachedSystemPrompt = system
-        return (system, plan.included)
+        return (system, plan.included, pruning.replacements)
     }
 
     private static func millis(since start: ContinuousClock.Instant) -> Int {

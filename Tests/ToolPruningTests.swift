@@ -3,12 +3,13 @@ import XCTest
 
 @MainActor
 final class ToolPruningTests: XCTestCase {
-    private func exchange(_ id: String, output: String, isError: Bool = false, name: String = "bash") -> ToolExchange {
-        ToolExchange(callID: id, name: name, arguments: "{}", output: output, isError: isError)
+    private func exchange(_ id: String, output: String, isError: Bool = false, name: String = "bash",
+                          arguments: String = "{}") -> ToolExchange {
+        ToolExchange(callID: id, name: name, arguments: arguments, output: output, isError: isError)
     }
 
-    private func message(_ exchange: ToolExchange) -> ChatMessage {
-        ChatMessage(role: .assistant, text: "", exchanges: [exchange])
+    private func step(_ exchanges: [ToolExchange], text: String = "") -> ChatMessage {
+        ChatMessage(role: .assistant, text: text, exchanges: exchanges)
     }
 
     func testStubKeepsNameStatusAndSize() {
@@ -22,82 +23,143 @@ final class ToolPruningTests: XCTestCase {
     }
 
     func testErrorsAreNeverPruned() {
-        let messages = [message(exchange("c1", output: String(repeating: "x", count: 100_000), isError: true))]
-        let included = [ContextMessage(id: 0, role: "assistant", text: "", extraTokens: 30_000)]
-
-        let planned = ToolOutputPruner.replacements(
-            messages: messages, included: included, cutoffIndex: 1,
-            mode: .always, compactionHappened: true
-        )
-
-        XCTAssertTrue(planned.isEmpty)
-    }
-
-    func testOutputsReferencedInTheTailAreKept() {
-        let output = String(repeating: "важная строка\n", count: 5_000)
-        let messages = [
-            message(exchange("c1", output: output)),
-            ChatMessage(role: .assistant, text: "Смотри результат: " + String(output.prefix(80)))
-        ]
-        let included = [
-            ContextMessage(id: 0, role: "assistant", text: "", extraTokens: 30_000),
-            ContextMessage(id: 1, role: "assistant", text: messages[1].text)
-        ]
-
-        let planned = ToolOutputPruner.replacements(
-            messages: messages, included: included, cutoffIndex: 2,
-            mode: .always, compactionHappened: true
-        )
-
-        XCTAssertTrue(planned.isEmpty)
-    }
-
-    func testBelowThresholdNothingIsPruned() {
-        let messages = [message(exchange("c1", output: String(repeating: "x", count: 2_000)))]
-        let included = [ContextMessage(id: 0, role: "assistant", text: "", extraTokens: 600)]
-
-        let planned = ToolOutputPruner.replacements(
-            messages: messages, included: included, cutoffIndex: 1,
-            mode: .always, compactionHappened: true
-        )
-
-        XCTAssertTrue(planned.isEmpty, "одиночная подчистка ломает кэш ради копеек")
-    }
-
-    func testReactiveModeNeedsACompactionAndAlwaysDoesNot() {
-        let messages = [message(exchange("c1", output: String(repeating: "x", count: 4_000)))]
-        let included = [ContextMessage(id: 0, role: "assistant", text: "", extraTokens: 1_200)]
-
-        let reactive = ToolOutputPruner.replacements(
-            messages: messages, included: included, cutoffIndex: 1,
-            mode: .reactive, compactionHappened: false
-        )
-        XCTAssertTrue(reactive.isEmpty)
-
-        // One exchange cannot pass the 20k batch threshold; the mode difference is what
-        // this test is about, so the threshold is lowered explicitly.
-        let always = ToolOutputPruner.replacements(
-            messages: messages, included: included, cutoffIndex: 1,
-            mode: .always, compactionHappened: false, threshold: 1
-        )
-        XCTAssertEqual(Array(always.keys), ["c1"])
-        XCTAssertTrue(always["c1"]?.hasPrefix("[pruned:") == true)
-    }
-
-    func testBuildHistoryUsesTheStubButStorageKeepsTheFullOutput() async throws {
-        // One exchange stores at most 4k characters, so the 20k batch needs several.
         let output = String(repeating: "x", count: 4_000)
-        let exchanges = (0..<30).map { exchange("call_\($0)", output: output) }
-        let chat = ChatStore()
-        chat.messages = [
-            ChatMessage(role: .user, text: "старая задача"),
-            ChatMessage(role: .assistant, text: "", exchanges: exchanges),
-            ChatMessage(role: .assistant, text: "готово"),
-            ChatMessage(role: .user, text: "новая задача"),
-            ChatMessage(role: .assistant, text: "начал")
+        let messages = [
+            step([exchange("c1", output: output, isError: true)]),
+            ChatMessage(role: .assistant, text: String(repeating: "разбор ", count: 60))
         ]
-        chat.taskStartIndex = 3
-        chat.pruneAtBoundary = true
+
+        let plan = ToolOutputPruner.plan(
+            messages: messages, mode: .always, threshold: 1, protectedSteps: 1
+        )
+
+        XCTAssertTrue(plan.isEmpty)
+    }
+
+    func testUnreadOutputIsKept() {
+        // Nothing the assistant wrote refers to the result, so it may still be needed.
+        let messages = [
+            step([exchange("c1", output: String(repeating: "x", count: 4_000))]),
+            ChatMessage(role: .assistant, text: String(repeating: "короткий ответ", count: 5))
+        ]
+
+        let plan = ToolOutputPruner.plan(
+            messages: messages, mode: .always, threshold: 1, protectedSteps: 1
+        )
+
+        XCTAssertTrue(plan.isEmpty)
+    }
+
+    func testFileReferenceMarksTheOutputAsUsed() {
+        let output = String(repeating: "x", count: 4_000)
+        let messages = [
+            step([exchange("c1", output: output, name: "fs_read",
+                           arguments: #"{"path":"Sources/Model.swift"}"#)]),
+            ChatMessage(role: .assistant, text: "Поправил Sources/Model.swift, строка 12."),
+            step([exchange("c2", output: output, name: "fs_read",
+                           arguments: #"{"path":"Other.swift"}"#)]),
+            ChatMessage(role: .assistant, text: "Готово.")
+        ]
+
+        let plan = ToolOutputPruner.plan(
+            messages: messages, mode: .always, threshold: 1, protectedSteps: 1
+        )
+
+        XCTAssertNotNil(plan.replacements["c1"], "на файл сослались — вывод использован")
+        XCTAssertNil(plan.replacements["c2"], "на Other.swift не ссылались")
+    }
+
+    func testSubstantialAnswerMarksCommandOutputAsUsed() {
+        let output = String(repeating: "x", count: 4_000)
+        let messages = [
+            step([exchange("c1", output: output, name: "bash")]),
+            ChatMessage(role: .assistant, text: String(repeating: "подробный разбор вывода ", count: 20))
+        ]
+
+        // The step is the newest one in this fixture; the protection test covers that
+        // rule, so here it is switched off explicitly.
+        let plan = ToolOutputPruner.plan(
+            messages: messages, mode: .always, threshold: 1, protectedSteps: 0
+        )
+
+        XCTAssertNotNil(plan.replacements["c1"])
+    }
+
+    func testRecentStepsAreProtected() {
+        let old = step([exchange("old", output: String(repeating: "x", count: 4_000))])
+        let recent = (0..<3).map { step([exchange("recent_\($0)", output: String(repeating: "y", count: 4_000))]) }
+        var messages: [ChatMessage] = [old]
+        messages.append(ChatMessage(role: .assistant, text: String(repeating: "разбор ", count: 60)))
+        messages.append(contentsOf: recent)
+
+        let plan = ToolOutputPruner.plan(
+            messages: messages, mode: .always, threshold: 1, protectedSteps: 3
+        )
+
+        XCTAssertNotNil(plan.replacements["old"])
+        XCTAssertTrue(recent.allSatisfy { plan.replacements[$0.exchanges[0].callID] == nil })
+    }
+
+    func testBatchDecidesByTotalSavings() {
+        // Ten small results: each is below the batch on its own, together they pass.
+        let messages = ((0..<10).map { index -> ChatMessage in
+            step([exchange("c\(index)", output: String(repeating: "x", count: 1_000))])
+        }) + [ChatMessage(role: .assistant, text: String(repeating: "разбор ", count: 60))]
+        let messagesWithRecent = messages + (0..<1).map { _ in step([exchange("tail", output: "small")]) }
+
+        let below = ToolOutputPruner.plan(
+            messages: messagesWithRecent, mode: .always, threshold: 10_000, protectedSteps: 1
+        )
+        let above = ToolOutputPruner.plan(
+            messages: messagesWithRecent, mode: .always, threshold: 1_000, protectedSteps: 1
+        )
+
+        XCTAssertTrue(below.isEmpty, "суммарной экономии не хватает")
+        XCTAssertEqual(above.replacements.count, 10)
+    }
+
+    func testBudgetModeIgnoresCompaction() {
+        let messages = [
+            step([exchange("c1", output: String(repeating: "x", count: 4_000))]),
+            ChatMessage(role: .assistant, text: String(repeating: "разбор ", count: 60))
+        ]
+
+        let budget = ToolOutputPruner.plan(
+            messages: messages, mode: .budget, compactionHappened: false, threshold: 1, protectedSteps: 0
+        )
+        let reactive = ToolOutputPruner.plan(
+            messages: messages, mode: .reactive, compactionHappened: false, threshold: 1, protectedSteps: 0
+        )
+
+        XCTAssertEqual(budget.replacements.count, 1)
+        XCTAssertTrue(reactive.isEmpty)
+    }
+
+    func testBuildHistoryUsesTheStubAndThePlanSeesIt() async throws {
+        let output = String(repeating: "x", count: 4_000)
+        let old = (0..<3).map { index in
+            step((0..<5).map { exchange("old_\(index)_\($0)", output: output) })
+        }
+        let recent = (0..<6).map { index in
+            step([exchange("recent_\(index)", output: String(repeating: "y", count: 500))])
+        }
+
+        var messages: [ChatMessage] = [ChatMessage(role: .user, text: "старая задача")]
+        messages.append(contentsOf: old)
+        messages.append(ChatMessage(role: .assistant, text: String(repeating: "использовал результаты ", count: 20)))
+        messages.append(contentsOf: recent)
+        messages.append(ChatMessage(role: .user, text: "новая задача"))
+        messages.append(ChatMessage(role: .assistant, text: "начал"))
+
+        let chat = ChatStore()
+        chat.messages = messages
+
+        let pruning = chat.plannedPruning()
+        XCTAssertEqual(pruning.replacements.count, 15, "три старых шага по пять вызовов")
+
+        let full = chat.promptMessages(pruning: [:]).reduce(0) { $0 + $1.tokens }
+        let pruned = chat.promptMessages(pruning: pruning.replacements).reduce(0) { $0 + $1.tokens }
+        XCTAssertLessThan(pruned, full, "план должен видеть тот же объём, что уйдёт провайдеру")
 
         let provider = ProviderModel(id: "p", name: "p", baseURL: "http://127.0.0.1:1", contextWindow: 128_000)
         let history = await chat.buildHistory(
@@ -106,23 +168,8 @@ final class ToolPruningTests: XCTestCase {
         )
 
         let tools = history.filter { $0.role == .tool }
-        XCTAssertEqual(tools.count, 30)
-        XCTAssertTrue(tools.allSatisfy { $0.content.hasPrefix("[pruned: bash, ok,") })
+        XCTAssertEqual(tools.count, 15 + 6)
+        XCTAssertEqual(tools.filter { $0.content.hasPrefix("[pruned:") }.count, 15)
         XCTAssertEqual(chat.messages[1].exchanges[0].output, output, "в базе текст остался полным")
-        XCTAssertFalse(chat.pruneAtBoundary, "флаг одноразовый")
-    }
-
-    func testTaskBoundaryMovesTheCutoff() {
-        let chat = ChatStore()
-        chat.messages = [
-            ChatMessage(role: .user, text: "задача"),
-            message(exchange("c1", output: "результат")),
-            ChatMessage(role: .assistant, text: "готово")
-        ]
-
-        chat.recordTaskBoundary(services: nil)
-
-        XCTAssertEqual(chat.taskStartIndex, 3)
-        XCTAssertTrue(chat.pruneAtBoundary, "после закрытия задачи её выводы можно прунить")
     }
 }

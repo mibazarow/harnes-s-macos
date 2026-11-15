@@ -2,28 +2,43 @@ import Foundation
 
 /// Replaces finished tool output with a short stub in the request, never in storage.
 ///
-/// A long session was 88% tool results by message count; the model does not need the
-/// full text of a call it finished two turns ago, but it must still see that the call
-/// happened and succeeded, otherwise it repeats it. Rewriting the middle of the history
-/// invalidates the cached prefix, so pruning is batched: either together with an
-/// ordinary compaction or when it frees enough to be worth the cache reset.
+/// A long session was 88% tool results by message count, and the model does not need the
+/// full text of a call it has already read and summarised. Two earlier designs failed:
+/// pruning keyed to a compaction never ran (compaction is a separate, rarer event), and
+/// pruning keyed to "the current task" only ever saw the last three messages, because the
+/// task pointer was reset after every tool call. The rule now is about the data: prune
+/// output that has been *used* by a later assistant message, keep the newest steps, and
+/// act only when the batch saves enough to pay for the invalidated prompt cache.
 enum ToolOutputPruner {
     enum Mode: String, Sendable {
         /// Never touch tool output.
         case off
-        /// Only at the same moment as an ordinary compaction.
+        /// Only at the same moment as an ordinary compaction (legacy behaviour).
         case reactive
         /// Whenever the batch threshold is met.
         case always
+        /// Own decision by saved tokens: no dependency on compaction at all.
+        case budget
     }
 
-    /// Cache reset is not free: below this the cleanup costs more than it saves.
-    static let batchThresholdTokens = 20_000
+    /// A cache reset is not free: below this the cleanup costs more than it saves.
+    static let batchThresholdTokens = 4_000
+    /// The newest steps are what the model is working on right now.
+    static let protectedRecentSteps = 6
     /// How much of the original output the stub keeps.
     static let stubVisibleChars = 400
 
-    /// Stub for one result. Keeps the tool name, the status and the size so the model
-    /// knows the call ran, plus the first line for a hint.
+    struct Plan: Sendable {
+        var replacements: [String: String] = [:]
+        var savedTokens = 0
+        var firstPrunedIndex: Int?
+        var candidates = 0
+
+        var isEmpty: Bool { replacements.isEmpty }
+    }
+
+    /// Stub for one result: tool name, status and size, so the model knows the call ran,
+    /// plus the first line as a hint.
     static func stub(name: String, output: String, isError: Bool) -> String {
         let status = isError ? "error" : "ok"
         let visible = String(output.prefix(stubVisibleChars))
@@ -35,49 +50,113 @@ enum ToolOutputPruner {
         return "[pruned: \(name), \(status), \(visible.count) из \(output.count) символов] \(line)"
     }
 
-    /// `cutoffIndex` is a message index: only messages below it are considered. The
-    /// caller passes the start of the current task (or the second-to-last user turn).
-    /// Returns replacements keyed by call id; empty means "nothing worth doing".
-    static func replacements(
+    /// Decides what to prune. Pure, so the rules are testable without a chat store.
+    static func plan(
         messages: [ChatMessage],
-        included: [ContextMessage],
-        cutoffIndex: Int,
         mode: Mode,
-        compactionHappened: Bool,
-        threshold: Int = batchThresholdTokens
-    ) -> [String: String] {
-        guard mode != .off else { return [:] }
-        guard mode == .always || compactionHappened else { return [:] }
+        compactionHappened: Bool = false,
+        threshold: Int = batchThresholdTokens,
+        protectedSteps: Int = protectedRecentSteps
+    ) -> Plan {
+        guard mode != .off else { return Plan() }
+        if mode == .reactive, !compactionHappened { return Plan() }
 
-        // The tail of the history is what the model is actively working on. A result
-        // mentioned there must stay verbatim.
-        let tail = messages.suffix(4).map(\.text).joined(separator: "\n").lowercased()
+        let protectedStart = recentStepsStart(messages, count: protectedSteps)
+        var result = Plan()
+        var laterText = ""
+        // Newest first: `laterText` accumulates what the assistant said after a call, which
+        // is how "used" is decided.
+        var index = messages.count - 1
+        while index >= 0 {
+            let message = messages[index]
+            defer {
+                if message.role == .assistant, !message.text.isEmpty, laterText.count < 20_000 {
+                    laterText = message.text + "\n" + laterText
+                }
+            }
+            index -= 1
 
-        var planned: [String: String] = [:]
-        var saved = 0
-        for item in included where item.id < cutoffIndex {
-            guard item.id >= 0, item.id < messages.count else { continue }
-            let message = messages[item.id]
-            guard message.role == .assistant else { continue }
+            guard index + 1 < protectedStart else { continue }
+            guard message.role == .assistant, !message.exchanges.isEmpty else { continue }
 
             for exchange in message.exchanges where !exchange.isError {
                 guard exchange.output.count > stubVisibleChars else { continue }
-                guard planned[exchange.callID] == nil else { continue }
-
-                let probe = String(exchange.output.prefix(80)).lowercased()
-                if probe.count >= 20, tail.contains(probe) { continue }
+                // Consumed results are the safe ones to cut: a later answer already
+                // refers to them, so the model has what it needed. Unread output stays.
+                guard wasUsed(exchange, laterText: laterText) else { continue }
 
                 let replacement = stub(
                     name: exchange.name, output: exchange.output, isError: exchange.isError
                 )
                 let gain = ToolCost.result(exchange.output) - ToolCost.result(replacement)
                 guard gain > 0 else { continue }
-                planned[exchange.callID] = replacement
-                saved += gain
+                if result.replacements[exchange.callID] == nil {
+                    result.replacements[exchange.callID] = replacement
+                    result.savedTokens += gain
+                    result.candidates += 1
+                    result.firstPrunedIndex = index + 1
+                }
             }
         }
 
-        guard saved >= threshold else { return [:] }
-        return planned
+        guard result.savedTokens >= threshold else { return Plan() }
+        return result
+    }
+
+    /// True when a later assistant message refers to this result: by a file from the call
+    /// arguments, by the first line of the output, or — for command-like tools — by a
+    /// substantial answer written after the call.
+    static func wasUsed(_ exchange: ToolExchange, laterText: String) -> Bool {
+        guard !laterText.isEmpty else { return false }
+        let lower = laterText.lowercased()
+
+        for needle in fileReferences(in: exchange.arguments) where lower.contains(needle) {
+            return true
+        }
+
+        let trimmed = exchange.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count >= 40 {
+            let probe = String(trimmed.prefix(40)).lowercased()
+            if lower.contains(probe) { return true }
+        }
+
+        if exchange.name == "bash" || exchange.name == "webfetch" || exchange.name.hasPrefix("mcp__") {
+            if laterText.count > 200 { return true }
+        }
+        return false
+    }
+
+    /// Basenames from `path`, `file`, `glob`, `paths` in the call arguments.
+    static func fileReferences(in arguments: String) -> [String] {
+        guard let data = arguments.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return []
+        }
+        var values: [String] = []
+        for key in ["path", "file", "glob"] {
+            if let value = object[key] as? String { values.append(value) }
+        }
+        if let list = object["paths"] as? [String] { values.append(contentsOf: list) }
+
+        return values.compactMap { value in
+            let base = (value as NSString).lastPathComponent.lowercased()
+            // Short names match everywhere ("src", "a.md") and would freeze everything.
+            return base.count >= 4 && base != "*" ? base : nil
+        }
+    }
+
+    /// Message index where the newest `count` tool-calling steps begin.
+    private static func recentStepsStart(_ messages: [ChatMessage], count: Int) -> Int {
+        guard count > 0 else { return messages.count }
+        var seen = 0
+        var index = messages.count - 1
+        while index >= 0 {
+            if messages[index].role == .assistant, !messages[index].exchanges.isEmpty {
+                seen += 1
+                if seen == count { return index }
+            }
+            index -= 1
+        }
+        return 0
     }
 }

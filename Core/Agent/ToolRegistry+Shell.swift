@@ -38,14 +38,19 @@ extension ToolRegistry {
         // 2 000 characters by default. The old 30 000 reply was silently cut later by
         // the run budget, so the model lost it entirely; a small, announced window is
         // honest and keeps the run alive. `full` is the deliberate opt-in.
+        // 8 000 is the ceiling even for `full`: a 30 000-character command log stays in
+        // the history until the task ends and is exactly what the pruner has to clean up.
+        // Narrow the command instead (head/tail/grep).
         let full = Self.bool(args, "full") ?? false
-        let cap = full ? 30_000 : min(max(Self.int(args, "max_chars") ?? 2_000, 200), 30_000)
+        let cap = full ? 8_000 : min(max(Self.int(args, "max_chars") ?? 2_000, 200), 8_000)
         guard output.count > cap else {
             return .ok(output.isEmpty ? "(команда выполнена, вывода нет)" : output)
         }
         let shown = String(output.prefix(cap))
         return .ok(shown + "\n[обрезано: показано \(cap) из \(output.count) символов; "
-            + (full ? "это и есть предел" : "весь вывод — full: true") + "]")
+            + (full
+               ? "предел 8 000 — сузь команду (head/tail/grep)"
+               : "больше — full: true, но не больше 8 000") + "]")
     }
 
     /// Runs a command to completion or timeout and returns `exit N` plus its output.

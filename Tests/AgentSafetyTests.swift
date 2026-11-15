@@ -263,7 +263,10 @@ final class AgentSafetyTests: XCTestCase {
             arguments: #"{"command":"yes | head -c 200000","timeout_ms":20000,"full":true}"#
         ))
         XCTAssertFalse(result.isError, result.output)
-        XCTAssertGreaterThan(result.output.count, 10_000)
+        // `full` raises the cap to 8 000; the point of this test is that the command
+        // returns at all, not that the old 30k ceiling is still there.
+        XCTAssertGreaterThan(result.output.count, 7_000)
+        XCTAssertLessThan(result.output.count, 8_200)
     }
 
     func testGrepReturnsContextLines() async throws {

@@ -203,12 +203,12 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "bash",
-            description: "Run a shell command in the workspace. Output is cut to 2000 characters by default and the reply says how much was left; pass full: true only when the whole output matters.",
+            description: "Run a shell command in the workspace. Output is cut to 2000 characters by default (full: true raises it to 8000) and the reply says how much was left. Narrow the command instead of asking for everything.",
             parameters: schema([
                 "command": ["type": "string"],
                 "timeout_ms": ["type": "integer", "description": "Default 60000"],
-                "max_chars": ["type": "integer", "description": "Output cap in characters, default 2000"],
-                "full": ["type": "boolean", "description": "Return up to 30000 characters instead"]
+                "max_chars": ["type": "integer", "description": "Output cap in characters, default 2000, max 8000"],
+                "full": ["type": "boolean", "description": "Raise the cap to 8000"]
             ], required: ["command"])
         ),
         ToolDefinition(
