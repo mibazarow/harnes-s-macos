@@ -19,7 +19,7 @@
 [![Version](https://img.shields.io/badge/version-1.0.0-b87333?style=flat-square)](#)
 [![Platform](https://img.shields.io/badge/platform-macOS%2027%2B-black?style=flat-square)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange?style=flat-square)](https://swift.org)
-[![Tests](https://img.shields.io/badge/tests-188%20green-brightgreen?style=flat-square)](#тесты)
+[![Tests](https://img.shields.io/badge/tests-388%20green-brightgreen?style=flat-square)](#тесты)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
 ![Отладка сборки: нашёл причину, поправил, прогнал тесты](DOCS/screenshots/code.png)
