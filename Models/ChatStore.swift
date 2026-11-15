@@ -4,7 +4,7 @@ import Observation
 @MainActor
 @Observable
 final class ChatStore {
-    private(set) var messages: [ChatMessage]
+    internal(set) var messages: [ChatMessage]
     private(set) var isStreaming = false
     private(set) var queuedCount = 0
     /// Messages written while a turn is running. Rendered in a dock below the
@@ -16,10 +16,10 @@ final class ChatStore {
     private var commandTask: Task<Void, Never>?
 
     /// Text that arrived from the provider but is not painted yet. See `scheduleFlush`.
-    private var pendingText = ""
-    private var pendingID = UUID()
-    private var flushTask: Task<Void, Never>?
-    private var flushDeadline = Date.distantPast
+    var pendingText = ""
+    var pendingID = UUID()
+    var flushTask: Task<Void, Never>?
+    var flushDeadline = Date.distantPast
 
     private var replyIndex = 0
     private let services: AppServices?
@@ -137,7 +137,7 @@ final class ChatStore {
         }
     }
 
-    private func appendAssistant() -> UUID {
+    func appendAssistant() -> UUID {
         let message = ChatMessage(role: .assistant, text: "", state: .streaming)
         messages.append(message)
         return messages[messages.count - 1].id
@@ -946,6 +946,9 @@ final class ChatStore {
     }
 
     func stop() {
+        // The buffer is part of the answer: flush before the bubble is frozen, or the
+        // last few hundred milliseconds of text vanish on Stop.
+        flush()
         streamTask?.cancel()
         commandTask?.cancel()
         streamTask = nil
@@ -985,95 +988,6 @@ final class ChatStore {
         messages.append(next)
         persistUser(next.text, attachments: next.attachments)
         start(next.text, attachments: next.attachments)
-    }
-
-    private func append(_ chunk: String, to id: UUID) {
-        pendingText.append(chunk)
-        pendingID = id
-        scheduleFlush()
-    }
-
-    /// Providers differ wildly in how they slice an answer: some send a character at
-    /// a time, some send a paragraph. Appending each slice straight into `messages`
-    /// made the bubble jump — nothing for a moment, then a whole paragraph at once.
-    /// Text therefore lands in a buffer and reaches `messages` on a timer that is fast
-    /// enough not to delay the answer and slow enough that the eye sees a flow.
-    ///
-    /// The interval is a ceiling, not a sleep: a provider that streams slowly still
-    /// paints immediately, because the flush is scheduled on arrival and fires at once
-    /// once the buffer is old enough.
-    private func scheduleFlush() {
-        flushDeadline = Date().addingTimeInterval(Tuning.paintInterval)
-        guard flushTask == nil else { return }
-        flushTask = Task { [weak self] in
-            // `@MainActor` is re-acquired after every await, so the buffer is only
-            // touched on the main actor.
-            while let self, !self.pendingText.isEmpty {
-                let wait = self.flushDeadline.timeIntervalSinceNow
-                if wait > 0 {
-                    try? await Task.sleep(for: .seconds(wait))
-                }
-                guard !Task.isCancelled else { return }
-                self.flush()
-            }
-            self?.flushTask = nil
-        }
-    }
-
-    /// Moves the buffer into the visible bubble. Called by the timer above and, more
-    /// importantly, by every code path that reads or finishes the answer.
-    private func flush() {
-        guard !pendingText.isEmpty else { return }
-        let chunk = String(pendingText)
-        pendingText = ""
-        guard let index = messages.firstIndex(where: { $0.id == pendingID }) else { return }
-        messages[index].text += chunk
-    }
-
-    private func messageText(of id: UUID) -> String {
-        let settled = messages.first(where: { $0.id == id })?.text ?? ""
-        // The buffer is part of the answer even though it is not painted yet: the
-        // repetition check must see the whole text, not a stale prefix.
-        guard id == pendingID, !pendingText.isEmpty else { return settled }
-        return settled + pendingText
-    }
-
-    private func reasoningText(of id: UUID) -> String {
-        messages.first(where: { $0.id == id })?.reasoning ?? ""
-    }
-
-    /// Drops the repeating tail so the user is left with the part that made sense.
-    private func trimLoop(_ id: UUID) {
-        // Trim the whole answer, buffer included, then stop the timer so nothing
-        // arrives after the repair.
-        flush()
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index].text = RepetitionGuard.trimmed(messages[index].text)
-        if let reasoning = messages[index].reasoning {
-            messages[index].reasoning = RepetitionGuard.trimmed(reasoning)
-        }
-    }
-
-    private func markTruncationWarning(_ id: UUID, reason: String) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        let text = reason.lowercased() == "content_filter"
-            ? "Провайдер остановил ответ по своему фильтру содержимого. Продолжение с этого места невозможно."
-            : """
-            Ответ обрезан по лимиту вывода провайдера, а не закончен. Продолжить с этого             места нельзя: следующий запрос начнётся заново. Попроси разбить задачу на части             или скажи «продолжи» — тогда я перескажу сделанное и пойду дальше.
-            """
-        messages[index].warning = text
-    }
-
-    private func markLoopWarning(_ id: UUID) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index].warning = """
-        Остановился: ответ начал повторяться. Модель зациклилась на одном и том же,         и продолжение только тратило бы токены. Хвост повтора я убрал — переформулируй         задачу или разбей её на части.
-        """
-    }
-
-    private func appendReasoning(_ chunk: String, to id: UUID) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index].reasoning = (messages[index].reasoning ?? "") + chunk
     }
 
     private func addTool(name: String, summary: String, running: Bool, to id: UUID) {
@@ -1120,7 +1034,7 @@ final class ChatStore {
     /// Closes one step of a run: sanitizes, marks it complete and writes it to storage.
     /// Returns false when the step produced nothing, in which case its bubble is dropped.
     @discardableResult
-    private func settle(_ id: UUID) -> Bool {
+    func settle(_ id: UUID) -> Bool {
         // Everything still buffered belongs to this bubble: a step boundary must not
         // silently swallow the last few hundred milliseconds of an answer.
         flush()
@@ -1149,7 +1063,7 @@ final class ChatStore {
         return true
     }
 
-    private func finish(_ id: UUID, notice: String? = nil, fallback: String? = nil) {
+    func finish(_ id: UUID, notice: String? = nil, fallback: String? = nil) {
         // The turn is over: paint what is left, then forget the timer entirely so a
         // late flush cannot append to a bubble that is already marked complete.
         flush()
