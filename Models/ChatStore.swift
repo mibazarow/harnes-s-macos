@@ -215,7 +215,10 @@ final class ChatStore {
             },
             ledger: services.fileLedger,
             skillScope: services.skillScope,
-            interceptors: ToolInterceptorChain(log: { line in ChatStore.logLatency(line) })
+            interceptors: ToolInterceptorChain(
+                [ArgumentRulesInterceptor()],
+                log: { line in ChatStore.logLatency(line) }
+            )
         )
 
         schemaTokens = await registry.schemaTokenCost()
@@ -449,7 +452,10 @@ final class ChatStore {
             todos: nil,
             readOnly: readOnly,
             subagent: nil,
-            interceptors: ToolInterceptorChain(log: { line in ChatStore.logLatency(line) })
+            interceptors: ToolInterceptorChain(
+                [ArgumentRulesInterceptor()],
+                log: { line in ChatStore.logLatency(line) }
+            )
         )
 
         let system = Prompts.system + """
