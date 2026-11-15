@@ -474,9 +474,11 @@ final class ChatStore {
         var lastError: String?
         var steps = 0
         var callsUsed = 0
+        var budget = SubagentBudget()
+        var truncated = false
         // 12 rounds instead of 8: real investigations need a few reads, and the old cap
         // was silently hit, which is exactly how the subagent came back empty.
-        for _ in 0..<12 {
+        loop: for _ in 0..<12 {
             steps += 1
             var streamed = ""
             var calls: [ToolCall] = []
@@ -508,6 +510,16 @@ final class ChatStore {
             answer += streamed
 
             if calls.isEmpty { break }
+
+            switch budget.record(calls.count) {
+            case .stop:
+                truncated = true
+                break loop
+            case .wrapUp:
+                history.append(ProviderMessage(role: .system, content: budget.wrapUpInstruction))
+            case .proceed:
+                break
+            }
 
             history.append(ProviderMessage(role: .assistant, content: streamed, toolCalls: calls))
             callsUsed += calls.count
@@ -542,9 +554,17 @@ final class ChatStore {
             }
         }
 
-        Self.logLatency("subagent steps=\(steps) calls=\(callsUsed) "
-            + "empty=\(text.isEmpty) error=\(lastError ?? "-")")
-        return SubagentOutcome(text: text, error: lastError, steps: steps, calls: callsUsed)
+        // The parent asked for findings; a wall of process narration is not one.
+        var findings = SubagentOutput.findings(text)
+        if truncated, findings.count == text.count {
+            findings += "\n…[обрезано по бюджету: остановлен после \(callsUsed) вызовов]"
+        }
+
+        Self.logLatency("subagent steps=\(steps) calls=\(callsUsed) truncated=\(truncated) "
+            + "empty=\(findings.isEmpty) error=\(lastError ?? "-")")
+        return SubagentOutcome(
+            text: findings, error: lastError, steps: steps, calls: callsUsed, truncated: truncated
+        )
     }
 
     /// Runs the tone-card pass only when it is due: enough samples, not neutral,

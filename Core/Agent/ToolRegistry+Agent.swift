@@ -9,6 +9,8 @@ struct SubagentOutcome: Sendable {
     var error: String?
     var steps: Int = 0
     var calls: Int = 0
+    /// The hard call budget stopped the run; the text is what it had at that point.
+    var truncated: Bool = false
 
     var isEmpty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 }

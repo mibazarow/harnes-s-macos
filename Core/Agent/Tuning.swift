@@ -44,4 +44,10 @@ enum Tuning {
 
     /// A closed task longer than this is folded into the checkpoint at its boundary.
     static let taskBoundarySummaryMessages = 40
+
+    /// Tool calls a subagent may spend before it is asked to wrap up (soft) and before
+    /// it is stopped (hard). Counted in calls, not rounds: one round can batch dozens,
+    /// and calls are what the log already measures.
+    static let subagentSoftCalls = 200
+    static let subagentHardCalls = 300
 }
