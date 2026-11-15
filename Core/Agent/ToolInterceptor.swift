@@ -24,12 +24,14 @@ enum ToolVerdict: Sendable {
 /// plain values in an explicitly ordered list (R16.1).
 protocol ToolInterceptor: Sendable {
     var name: String { get }
-    func beforeCall(_ call: ToolCall, context: ToolCallContext) async -> ToolVerdict
+    /// `throws`: a broken check must fail closed. Before R16.2 an exception (or a hang)
+    /// meant "run the call anyway", which is the wrong default for a gate.
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict
     func afterResult(_ call: ToolCall, result: ToolResult, context: ToolCallContext) async -> ToolResult
 }
 
 extension ToolInterceptor {
-    func beforeCall(_ call: ToolCall, context: ToolCallContext) async -> ToolVerdict { .allow }
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict { .allow }
 
     func afterResult(
         _ call: ToolCall, result: ToolResult, context: ToolCallContext
@@ -45,22 +47,27 @@ struct ToolInterceptorChain: Sendable {
     }
 
     let interceptors: [ToolInterceptor]
+    /// How long one interceptor may take. A gate that hangs is the same failure as a
+    /// gate that throws: the call does not run.
+    let timeout: Duration
     /// Where a refusal is recorded. Injected so the chain stays independent of the chat
     /// layer; production wires it to `latency.log`.
     let log: @Sendable (String) -> Void
 
     init(
         _ interceptors: [ToolInterceptor] = [],
-        log: @escaping @Sendable (String) -> Void = { _ in }
+        log: @escaping @Sendable (String) -> Void = { _ in },
+        timeout: Duration = .milliseconds(2_000)
     ) {
         self.interceptors = interceptors
         self.log = log
+        self.timeout = timeout
     }
 
     func before(_ call: ToolCall, context: ToolCallContext) async -> Outcome {
         var current = call
         for interceptor in interceptors {
-            switch await interceptor.beforeCall(current, context: context) {
+            switch await verdict(from: interceptor, call: current, context: context) {
             case .allow:
                 continue
             case .deny(let reason, let guidance):
@@ -77,6 +84,49 @@ struct ToolInterceptorChain: Sendable {
             }
         }
         return .allowed(current)
+    }
+
+    /// One interceptor, bounded by `timeout`. A thrown error or a missed deadline is a
+    /// refusal with the interceptor's name in the log — never a pass.
+    private func verdict(
+        from interceptor: ToolInterceptor,
+        call: ToolCall,
+        context: ToolCallContext
+    ) async -> ToolVerdict {
+        let started = ContinuousClock.now
+        do {
+            return try await withThrowingTaskGroup(of: ToolVerdict.self) { group in
+                group.addTask { try await interceptor.beforeCall(call, context: context) }
+                group.addTask {
+                    try await Task.sleep(for: self.timeout)
+                    throw InterceptorTimeout()
+                }
+                guard let first = try await group.next() else { throw InterceptorTimeout() }
+                group.cancelAll()
+                return first
+            }
+        } catch is InterceptorTimeout {
+            log("interceptor_failed name=\(interceptor.name) \(Self.millis(since: started))ms reason=timeout")
+            return .deny(reason: "перехватчик \(interceptor.name) не ответил за "
+                + "\(Self.plainMillis(timeout)) мс", guidance: nil)
+        } catch {
+            log("interceptor_failed name=\(interceptor.name) \(Self.millis(since: started))ms "
+                + "reason=\(error)")
+            return .deny(reason: "перехватчик \(interceptor.name) упал: \(error)", guidance: nil)
+        }
+    }
+
+    private struct InterceptorTimeout: Error {}
+
+    private static func millis(since start: ContinuousClock.Instant) -> Int {
+        let elapsed = ContinuousClock.now - start
+        return Int(elapsed.components.seconds * 1_000)
+            + Int(elapsed.components.attoseconds / 1_000_000_000_000_000)
+    }
+
+    private static func plainMillis(_ timeout: Duration) -> Int {
+        let components = timeout.components
+        return Int(components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000)
     }
 
     func after(_ call: ToolCall, result: ToolResult, context: ToolCallContext) async -> ToolResult {

@@ -9,7 +9,7 @@ final class ToolInterceptorTests: XCTestCase {
         let reason: String
         let guidance: String?
 
-        func beforeCall(_ call: ToolCall, context: ToolCallContext) async -> ToolVerdict {
+        func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
             .deny(reason: reason, guidance: guidance)
         }
     }
@@ -19,7 +19,7 @@ final class ToolInterceptorTests: XCTestCase {
         let replacement: ToolCall
         let require: Bool
 
-        func beforeCall(_ call: ToolCall, context: ToolCallContext) async -> ToolVerdict {
+        func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
             require ? .rewrite(replacement) : .allow
         }
     }
@@ -34,7 +34,26 @@ final class ToolInterceptorTests: XCTestCase {
         }
     }
 
-    private func registry(_ interceptors: [ToolInterceptor]) -> ToolRegistry {
+    private final class LogBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage: [String] = []
+
+        var lines: [String] {
+            lock.lock(); defer { lock.unlock() }
+            return storage
+        }
+
+        func append(_ line: String) {
+            lock.lock(); defer { lock.unlock() }
+            storage.append(line)
+        }
+    }
+
+    private func registry(
+        _ interceptors: [ToolInterceptor],
+        log: @escaping @Sendable (String) -> Void = { _ in },
+        timeout: Duration = .milliseconds(2_000)
+    ) -> ToolRegistry {
         let workspace = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("interceptor-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
@@ -45,7 +64,7 @@ final class ToolInterceptorTests: XCTestCase {
             secrets: nil,
             skills: nil,
             mcp: nil,
-            interceptors: ToolInterceptorChain(interceptors)
+            interceptors: ToolInterceptorChain(interceptors, log: log, timeout: timeout)
         )
     }
 
@@ -99,6 +118,45 @@ final class ToolInterceptorTests: XCTestCase {
             contentsOf: tools.workspace.appendingPathComponent("ok.txt"), encoding: .utf8
         )
         XCTAssertEqual(written, "written")
+    }
+
+    // MARK: - R16.2: failure means refusal
+
+    private struct Broken: ToolInterceptor {
+        let name = "broken"
+
+        func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
+            throw NSError(domain: "test", code: 1)
+        }
+    }
+
+    private struct Slow: ToolInterceptor {
+        let name = "slow"
+
+        func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
+            try await Task.sleep(for: .seconds(5))
+            return .allow
+        }
+    }
+
+    func testThrownErrorRefusesTheCallAndNamesItself() async {
+        let box = LogBox()
+        let tools = registry([Broken()], log: { box.append($0) })
+        let result = await tools.execute(ToolCall(id: "c1", name: "fs_list", arguments: "{}"))
+
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.output.contains("перехватчик broken упал"), result.output)
+        XCTAssertTrue(box.lines.contains { $0.contains("name=broken") }, box.lines.joined())
+    }
+
+    func testTimeoutRefusesTheCallAndLogsTheDuration() async {
+        let box = LogBox()
+        let tools = registry([Slow()], log: { box.append($0) }, timeout: .milliseconds(50))
+        let result = await tools.execute(ToolCall(id: "c1", name: "fs_list", arguments: "{}"))
+
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.output.contains("не ответил за 50 мс"), result.output)
+        XCTAssertTrue(box.lines.contains { $0.contains("reason=timeout") }, box.lines.joined())
     }
 
     func testAfterResultCanRewriteTheResult() async {
