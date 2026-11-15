@@ -89,10 +89,6 @@ struct SkillLoader: Sendable {
         return try SkillManifest.parse(text, fallbackName: record.name)
     }
 
-    func files(in directory: URL, limit: Int = 40) -> [String] {
-        Array(allFiles(in: directory).prefix(limit))
-    }
-
     private func scan(_ directory: URL, scope: SkillScope) -> [SkillRecord] {
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(
