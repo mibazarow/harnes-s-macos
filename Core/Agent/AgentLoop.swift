@@ -246,12 +246,12 @@ struct AgentLoop: Sendable {
             default:
                 total += TokenEstimator.jsonTokens(in: message.content)
                 for call in message.toolCalls {
-                    total += ToolCost.call(name: call.name, arguments: call.arguments)
+                    total += ToolCost.call(name: call.name, arguments: call.arguments, id: call.id)
                 }
             }
             // A provider charges roughly a fixed tile price per image; 1 100 is the
             // conservative middle for a resized screenshot.
-            total += message.images.count * 1_100
+            total += message.images.count * Tuning.imageTokenEstimate
         }
         return total + ToolCost.catalog(schemas)
     }

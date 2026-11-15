@@ -7,20 +7,39 @@ import Foundation
 /// prompt came in 23% above the estimate on tool-heavy sessions. Everything here is
 /// measured on serialized JSON.
 enum ToolCost {
-    /// Per-item protocol overhead: `"role"`, `"tool_call_id"`, braces, commas.
-    private static let envelope = 10
+    /// Per-item protocol overhead beyond the serialized fields: array commas and the
+    /// `messages` wrapper are about a token per item, not ten.
+    private static let envelope = 3
 
-    static func call(name: String, arguments: String) -> Int {
-        serialized(["name": name, "arguments": arguments]) + envelope
+    /// The object the provider actually sends, not a flat pair: `id`, `type` and the
+    /// nested `function` object all cost tokens.
+    static let placeholderID = "call_01234567"
+
+    static func call(name: String, arguments: String, id: String = placeholderID) -> Int {
+        // The wrapper matters: the provider sends the call inside an assistant message
+        // with a `tool_calls` array, and those keys cost tokens too.
+        serialized([
+            "role": "assistant",
+            "tool_calls": [[
+                "id": id,
+                "type": "function",
+                "function": ["name": name, "arguments": arguments]
+            ]]
+        ]) + envelope
     }
 
-    static func result(_ output: String) -> Int {
-        serialized(["content": output]) + envelope
+    static func result(_ output: String, id: String = placeholderID) -> Int {
+        serialized(["role": "tool", "tool_call_id": id, "content": output]) + envelope
     }
 
     /// One completed call: the assistant entry plus the matching `tool` message.
-    static func exchange(name: String, arguments: String, output: String) -> Int {
-        call(name: name, arguments: arguments) + result(output)
+    static func exchange(
+        name: String,
+        arguments: String,
+        output: String,
+        id: String = placeholderID
+    ) -> Int {
+        call(name: name, arguments: arguments, id: id) + result(output, id: id)
     }
 
     static func catalog(_ schemas: [ProviderToolSchema]) -> Int {

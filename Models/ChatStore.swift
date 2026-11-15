@@ -724,6 +724,43 @@ final class ChatStore {
             toolTokens: schemaTokens
         )
 
+        // Measured pressure: the plan can say "fits" while the provider's last answer
+        // reported a prompt above the threshold. Then the measurement wins.
+        if let services {
+            let budget = composer.budget(for: contextWindow, thresholdPercent: compactionThreshold)
+            let measured = await calibration.lastMeasured(providerID: provider.id, model: model)
+            let decision = PromptPressure.decide(
+                estimated: plan.usedTokens,
+                measured: measured,
+                usable: budget.usable,
+                threshold: budget.thresholdTokens
+            )
+            if decision.source == .measured {
+                Self.logLatency(
+                    "budget_source=measured estimated=\(plan.usedTokens) measured=\(measured ?? 0)"
+                )
+            }
+            if decision.overThreshold, plan.compacted.isEmpty, !compactionCoolingDown {
+                let all = promptMessages(pruning: pruning.replacements)
+                let fold = Array(all.prefix(max(all.count / 2, 1)))
+                if fold.count < all.count,
+                   await compact(fold, provider: provider, model: model, services: services) {
+                    system = await buildSystemPrompt(services: services)
+                    compactedInWindow = true
+                    plan = composer.plan(
+                        systemPrompt: system,
+                        messages: promptMessages(pruning: pruning.replacements),
+                        contextWindow: contextWindow,
+                        thresholdPercent: compactionThreshold,
+                        summaryTokens: TokenEstimator.tokens(in: checkpointSummary),
+                        estimateScale: scale,
+                        toolTokens: schemaTokens
+                    )
+                    notice("История сжата по факту: провайдер сообщил \(measured ?? 0) токенов.")
+                }
+            }
+        }
+
         if let services, !plan.compacted.isEmpty, compactionCoolingDown {
             // A failed summary was already reported. Retrying it on every turn would
             // double the cost of a conversation that is already in trouble.

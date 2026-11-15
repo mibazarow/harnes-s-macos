@@ -18,6 +18,10 @@ enum Tuning {
     /// tail keeps the check proportional to the tail instead of the whole answer.
     static let repetitionTail = 2_000
 
+    /// Token price of one image in a request. Estimation, not measurement: providers
+    /// bill by tile and the exact value depends on the model.
+    static let imageTokenEstimate = 1_100
+
     /// Ceiling for the serialized tool catalog, used by the schema budget test.
     static let schemaTokenBudget = 5_600
 
@@ -32,6 +36,9 @@ enum Tuning {
 
     /// The newest tool-calling steps are never pruned.
     static let toolOutputPruneProtectedSteps = 6
+
+    /// User messages from the folded range kept verbatim in the checkpoint.
+    static let retainedUserTokens = 8_000
 
     /// A closed task longer than this is folded into the checkpoint at its boundary.
     static let taskBoundarySummaryMessages = 40
