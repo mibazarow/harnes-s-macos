@@ -423,6 +423,8 @@ final class ToolLimitsTests: XCTestCase {
     // MARK: - schema budget
 
     func testToolSchemaCostStaysInsideItsBudget() {
+        // The budget is shared with MCP: `schemasTokenCost` counts `mcp__*` tools too,
+        // so adding an MCP server moves this number without a line in ToolRegistry.
         // Measured 2026-11-15: 5 187 tokens for 51 tools by the app's own estimator
         // (3 635 at 46; 4 405 at 49; 4 886 at 50). The ceiling keeps ~8% headroom: a
         // tool that pushes the catalog past it has to make that trade explicitly
