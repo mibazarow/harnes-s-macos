@@ -18,6 +18,11 @@ final class ChatStore {
     /// Text that arrived from the provider but is not painted yet. See `scheduleFlush`.
     var pendingText = ""
     var pendingID = UUID()
+    /// Reasoning follows the same buffer. Appending it straight into `messages` on
+    /// every chunk republished the whole transcript per token and starved the main
+    /// thread during streaming (the UI section of the task file).
+    var pendingReasoning = ""
+    var pendingReasoningID = UUID()
     var flushTask: Task<Void, Never>?
     var flushDeadline = Date.distantPast
 

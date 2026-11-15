@@ -28,7 +28,7 @@ extension ChatStore {
         flushTask = Task { [weak self] in
             // `@MainActor` is re-acquired after every await, so the buffer is only
             // touched on the main actor.
-            while let self, !self.pendingText.isEmpty {
+            while let self, !self.pendingText.isEmpty || !self.pendingReasoning.isEmpty {
                 let wait = self.flushDeadline.timeIntervalSinceNow
                 if wait > 0 {
                     try? await Task.sleep(for: .seconds(wait))
@@ -43,11 +43,24 @@ extension ChatStore {
     /// Moves the buffer into the visible bubble. Called by the timer above and, more
     /// importantly, by every code path that reads or finishes the answer.
     func flush() {
+        flushText()
+        flushReasoning()
+    }
+
+    private func flushText() {
         guard !pendingText.isEmpty else { return }
         let chunk = String(pendingText)
         pendingText = ""
         guard let index = messages.firstIndex(where: { $0.id == pendingID }) else { return }
         messages[index].text += chunk
+    }
+
+    private func flushReasoning() {
+        guard !pendingReasoning.isEmpty else { return }
+        let chunk = String(pendingReasoning)
+        pendingReasoning = ""
+        guard let index = messages.firstIndex(where: { $0.id == pendingReasoningID }) else { return }
+        messages[index].reasoning = (messages[index].reasoning ?? "") + chunk
     }
 
     func messageText(of id: UUID) -> String {
@@ -59,7 +72,9 @@ extension ChatStore {
     }
 
     func reasoningText(of id: UUID) -> String {
-        messages.first(where: { $0.id == id })?.reasoning ?? ""
+        let settled = messages.first(where: { $0.id == id })?.reasoning ?? ""
+        guard id == pendingReasoningID, !pendingReasoning.isEmpty else { return settled }
+        return settled + pendingReasoning
     }
 
     /// Drops the repeating tail so the user is left with the part that made sense.
@@ -91,9 +106,13 @@ extension ChatStore {
         """
     }
 
+    /// Same contract as `append`: the chunk is visible through `reasoningText` at once,
+    /// but reaches `messages` on the paint timer, so the transcript is not republished
+    /// per token.
     func appendReasoning(_ chunk: String, to id: UUID) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index].reasoning = (messages[index].reasoning ?? "") + chunk
+        pendingReasoning.append(chunk)
+        pendingReasoningID = id
+        scheduleFlush()
     }
 
 }

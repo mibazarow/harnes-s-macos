@@ -64,6 +64,53 @@ final class StreamingBufferTests: XCTestCase {
         XCTAssertTrue(store.pendingText.isEmpty)
     }
 
+    // MARK: - Reasoning follows the same paint buffer
+
+    func testReasoningIsBufferedUntilPaint() {
+        let store = ChatStore()
+        let id = store.appendAssistant()
+        store.appendReasoning("размышляю", to: id)
+        store.flushTask?.cancel()
+
+        XCTAssertEqual(store.reasoningText(of: id), "размышляю")
+        XCTAssertNil(store.messages.last?.reasoning, "до flush пузырь не тронут")
+    }
+
+    func testFlushPaintsReasoning() {
+        let store = ChatStore()
+        let id = store.appendAssistant()
+        store.appendReasoning("размышляю", to: id)
+        store.flushTask?.cancel()
+
+        store.flush()
+
+        XCTAssertEqual(store.messages.last?.reasoning, "размышляю")
+        XCTAssertTrue(store.pendingReasoning.isEmpty)
+    }
+
+    func testReasoningAndTextFlushTogether() {
+        let store = ChatStore()
+        let id = store.appendAssistant()
+        store.appendReasoning("план. ", to: id)
+        store.append("ответ", to: id)
+        store.flushTask?.cancel()
+
+        store.flush()
+
+        XCTAssertEqual(store.messages.last?.reasoning, "план. ")
+        XCTAssertEqual(store.messages.last?.text, "ответ")
+    }
+
+    func testPendingReasoningIsVisibleToTheLoopGuard() {
+        let store = ChatStore()
+        let id = store.appendAssistant()
+        let unit = "одно и то же. "
+        store.appendReasoning(String(repeating: unit, count: 60), to: id)
+        store.flushTask?.cancel()
+
+        XCTAssertTrue(RepetitionGuard.isLooping(store.reasoningText(of: id)))
+    }
+
     func testTrimLoopFlushesThenCuts() {
         let store = ChatStore()
         let id = store.appendAssistant()
