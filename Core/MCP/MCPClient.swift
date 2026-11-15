@@ -347,10 +347,6 @@ actor MCPManager {
         return descriptors
     }
 
-    func invalidateTools() {
-        cachedDescriptors = nil
-    }
-
     /// Whether the server behind a qualified tool name is read-only.
     ///
     /// Reads the config file instead of starting the server: in plan mode `schemas()`

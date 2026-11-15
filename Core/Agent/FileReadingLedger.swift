@@ -36,10 +36,6 @@ actor FileReadingLedger {
         return current == stamp ? .fresh : .changed
     }
 
-    func reset() {
-        stamps.removeAll()
-    }
-
     private static func stamp(of url: URL) -> Stamp? {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               let modified = attributes[.modificationDate] as? Date,
