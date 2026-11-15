@@ -146,7 +146,7 @@ enum DemoTranscript {
         [
             ChatMessage(
                 role: .user,
-                text: "Где в проекте проверяется авторизация в Битриксе? Нужен файл, который дергает CheckAuthorization."
+                text: "Где в проекте проверяется авторизация? Нужен файл, который дергает CheckAuthorization."
             ),
             ChatMessage(
                 role: .assistant,
@@ -169,7 +169,7 @@ enum DemoTranscript {
                 """,
                 tools: [
                     trace("index_workspace", "1 284 файла · 9 412 чанков · 14 с"),
-                    trace("search_code", "авторизация битрикс → 8 совпадений"),
+                    trace("search_code", "авторизация → 8 совпадений"),
                     trace("search_code", "CheckAuthorization (точный) → 1 совпадение"),
                     trace("fs_read", "local/php_interface/init.php · 30–60")
                 ]

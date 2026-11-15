@@ -98,7 +98,7 @@ Swift 6 и SwiftUI, без Electron, без Node.js и npm в рантайме. 
 | Память между сессиями | нет | файл в репозитории | SQLite + FTS + эмбеддинги |
 | Секреты | нет | нет | локальная база под алиасами |
 | Адаптация к стилю | нет | нет | EMA-профиль с гейтами по дням |
-| Работа с кодом | нет | да | да, с Битриксом и git |
+| Работа с кодом | нет | да | да, с определением стека и git |
 | Длинный разговор | обрыв по контексту | обрыв по контексту | саммари + живой хвост, ничего не теряется |
 | Браузер и зрение | частично | через MCP | встроено, с приоритетом |
 | Честность ответов | — | — | три защиты от вранья |
@@ -251,7 +251,7 @@ HARNES_S_DATA/
 
 **Файлы:** `fs_list`, `fs_read`, `fs_write`, `edit_file`, `apply_patch`, `read_many`, `fs_tree`, `fs_grep`, `fs_glob`, `trash_paths`, `restore_trashed`, `file_versions`, `restore_version`, `undo_list`.
 
-**Код и проект:** `project_overview` (определяет Битрикс/PHP/Swift/Node/Python и команды), `search_code`, `index_workspace`, `bash`, `git_status`, `git_diff`, `git_log`, `git_commit`, `git_stash`.
+**Код и проект:** `project_overview` (определяет стек проекта и его команды сборки/тестов/линта), `search_code`, `index_workspace`, `bash`, `git_status`, `git_diff`, `git_log`, `git_commit`, `git_stash`.
 
 **Агент:** `task` (изолированный подагент), `todowrite`, `todo_read`, `schedule_add`, `schedule_list`, `schedule_remove`, `skill_list`, `skill_read`, `skill_install`, `skill_remove`, `mcp_list`, `mcp_tools`.
 
