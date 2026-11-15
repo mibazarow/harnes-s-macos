@@ -5,7 +5,7 @@ import Observation
 @Observable
 final class ChatStore {
     internal(set) var messages: [ChatMessage]
-    private(set) var isStreaming = false
+    internal(set) var isStreaming = false
     private(set) var queuedCount = 0
     /// Messages written while a turn is running. Rendered in a dock below the
     /// transcript, never mixed into it: otherwise every new step of the running answer
@@ -13,7 +13,7 @@ final class ChatStore {
     private(set) var queuedMessages: [ChatMessage] = []
 
     private var streamTask: Task<Void, Never>?
-    private var commandTask: Task<Void, Never>?
+    var commandTask: Task<Void, Never>?
 
     /// Text that arrived from the provider but is not painted yet. See `scheduleFlush`.
     var pendingText = ""
@@ -22,36 +22,36 @@ final class ChatStore {
     var flushDeadline = Date.distantPast
 
     private var replyIndex = 0
-    private let services: AppServices?
+    let services: AppServices?
     private let commands: SlashCommandRouter?
-    private let composer = ContextComposer()
+    let composer = ContextComposer()
     private let client = ProviderClient()
-    private var checkpointSummary: String = ""
+    var checkpointSummary: String = ""
     private var planMode = false
-    private var checkpointCovered: Int = 0
+    var checkpointCovered: Int = 0
     /// Last message already folded into the checkpoint: everything up to it is replaced
     /// by the summary and must not be sent again.
-    private var compactedThroughID: UUID?
+    var compactedThroughID: UUID?
     /// Window of the model used on the previous turn. A drop means the history that fit
     /// a minute ago no longer fits, and the request must be compacted before sending.
-    private var lastContextWindow: Int?
+    var lastContextWindow: Int?
     private var registry: ToolRegistry?
     private var memoryTouchedThisTurn = false
-    private var compactionTask: Task<Void, Never>?
+    var compactionTask: Task<Void, Never>?
     /// Compaction is expensive and can fail for reasons outside our control (provider
     /// down, summary rejected). Without a cooldown a broken summary would be retried on
     /// every single turn, doubling the cost of a conversation that is already in trouble.
-    private var compactionFailures = 0
-    private var compactionCooldownUntil: Date?
+    var compactionFailures = 0
+    var compactionCooldownUntil: Date?
     private var oldestStoredID: Int64?
     private(set) var hasMoreHistory = false
     private(set) var isLoadingOlder = false
     /// Threshold used for compaction and for the outgoing window. Set from settings.
     var compactionThreshold: Double = 80
     /// Last assembled system prompt, reused for the footer budget so the numbers match.
-    private var cachedSystemPrompt = Prompts.system
+    var cachedSystemPrompt = Prompts.system
     /// Last `contextPlan` result, keyed by everything that plan depends on.
-    private var planCache: (signature: String, plan: ContextPlan)?
+    var planCache: (signature: String, plan: ContextPlan)?
 
     init(services: AppServices? = nil) {
         self.services = services
@@ -390,27 +390,6 @@ final class ChatStore {
 
     /// Aggressive compaction after the provider itself said the prompt is too long.
     /// The threshold drops so the retry has real headroom, not just a few tokens.
-    private func compactAfterOverflow(
-        provider: ProviderModel,
-        model: String,
-        services: AppServices
-    ) async -> Bool {
-        let system = await buildSystemPrompt(services: services)
-        let plan = composer.plan(
-            systemPrompt: system,
-            messages: promptMessages,
-            contextWindow: provider.contextWindow,
-            thresholdPercent: min(compactionThreshold, 50),
-            summaryTokens: TokenEstimator.tokens(in: checkpointSummary)
-        )
-        guard !plan.compacted.isEmpty else {
-            notice("Сжимать нечего: в истории одно сообщение, и оно само больше окна модели.")
-            return false
-        }
-        return await compact(plan.compacted, provider: provider, model: model, services: services)
-    }
-
-    /// Isolated one-shot agent. Its context never leaks into the main chat.
     private func runSubagent(
         prompt: String,
         readOnly: Bool,
@@ -585,118 +564,12 @@ final class ChatStore {
         messages[index].warning = warnings.isEmpty ? nil : warnings.joined(separator: " ")
     }
 
-    private func activeProvider(_ services: AppServices) async throws -> ProviderModel? {
+    func activeProvider(_ services: AppServices) async throws -> ProviderModel? {
         let providers = try await services.providers.list()
         return providers.first(where: \.isDefault) ?? providers.first
     }
 
-    private func scheduleCompaction(provider: ProviderModel, model: String, services: AppServices) {
-        guard compactionTask == nil else { return }
-        compactionTask = Task { [weak self] in
-            await self?.compactIfNeeded(provider: provider, model: model, services: services)
-            self?.compactionTask = nil
-        }
-    }
-
-    /// Messages that still go to the model: completed, non-system, and not yet folded
-    /// into the checkpoint.
-    private var promptMessages: [ContextMessage] {
-        let compactedIndex = compactedThroughID.flatMap { id in
-            messages.firstIndex(where: { $0.id == id })
-        }
-        return messages.enumerated().compactMap { index, message in
-            guard message.state == .complete,
-                  message.role != .system,
-                  !message.text.isEmpty || !message.exchanges.isEmpty else { return nil }
-            if let compactedIndex, index <= compactedIndex { return nil }
-            // Tool calls and results travel with the message, so their text has to be
-            // part of the budget too.
-            let extra = message.exchanges
-                .map { "\($0.name)\($0.arguments)\n\($0.output)" }
-                .joined(separator: "\n")
-            return ContextMessage(
-                id: index,
-                role: message.role.rawValue,
-                text: message.text,
-                extra: extra
-            )
-        }
-    }
-
-    /// Folds messages into the checkpoint. Returns false when the model refused, so the
-    /// caller can tell the user instead of pretending the history was saved.
-    @discardableResult
-    private func compact(
-        _ contextMessages: [ContextMessage],
-        provider: ProviderModel,
-        model: String,
-        services: AppServices
-    ) async -> Bool {
-        guard !contextMessages.isEmpty else { return false }
-
-        do {
-            let summary = try await services.compaction.summarize(
-                messages: contextMessages,
-                provider: provider,
-                model: model,
-                previousSummary: checkpointSummary.isEmpty ? nil : checkpointSummary
-            )
-            checkpointSummary = summary
-            checkpointCovered += contextMessages.count
-            if let lastCompacted = contextMessages.last {
-                compactedThroughID = messages[lastCompacted.id].id
-            }
-
-            try? await services.compaction.saveCheckpoint(
-                CompactionService.Checkpoint(
-                    summary: summary,
-                    coveredMessageCount: checkpointCovered,
-                    createdAt: Timestamps.now()
-                ),
-                database: services.database
-            )
-            compactionFailures = 0
-            compactionCooldownUntil = nil
-            return true
-        } catch {
-            compactionFailures += 1
-            // Back off progressively: a second attempt in a minute is reasonable, a
-            // tenth is just burning tokens against a broken provider.
-            let seconds: TimeInterval = compactionFailures >= 3 ? 600 : 120
-            compactionCooldownUntil = Date().addingTimeInterval(seconds)
-            Self.logLatency("compaction failed (\(compactionFailures)x): \(error.localizedDescription)")
-            return false
-        }
-    }
-
-    private var compactionCoolingDown: Bool {
-        guard let until = compactionCooldownUntil else { return false }
-        return Date() < until
-    }
-
-    private func compactIfNeeded(provider: ProviderModel, model: String, services: AppServices) async {
-        let plan = contextPlan(
-            contextWindow: provider.contextWindow,
-            thresholdPercent: compactionThreshold,
-            summaryTokens: TokenEstimator.tokens(in: checkpointSummary)
-        )
-
-        guard plan.didCompact, !plan.compacted.isEmpty else { return }
-
-        // Preflight already handled the case where the request would not fit; a retry
-        // here would be the same request again.
-        if compactionCoolingDown { return }
-
-        if await compact(plan.compacted, provider: provider, model: model, services: services) {
-            notice("История сжата: \(plan.compacted.count) сообщений свёрнуты в саммари. Из базы ничего не удалено.")
-        } else {
-            notice("Компакция не удалась. Продолжаю с усечённым окном.")
-        }
-    }
-
-    /// The system prompt, assembled in cache-friendly order: stable parts first, the
-    /// style block — which shifts on almost every message — last.
-    private func buildSystemPrompt(services: AppServices?) async -> String {
+    func buildSystemPrompt(services: AppServices?) async -> String {
         var parts: [String] = [Prompts.system]
 
         // Project rules go right after the base prompt: they are the most specific
@@ -777,7 +650,7 @@ final class ChatStore {
     /// Builds the outgoing window and, when the history does not fit, compacts it first.
     /// This is what makes a switch to a smaller model safe: without it the oldest part
     /// would be dropped silently and the model would never learn what it missed.
-    private func prepareWindow(
+    func prepareWindow(
         contextWindow: Int,
         provider: ProviderModel,
         model: String,
@@ -825,85 +698,6 @@ final class ChatStore {
         return (system, plan.included)
     }
 
-    private func buildHistory(
-        text: String,
-        attachments: [ChatAttachment],
-        contextWindow: Int,
-        provider: ProviderModel,
-        model: String,
-        services: AppServices?
-    ) async -> [ProviderMessage] {
-        let prepared = await prepareWindow(
-            contextWindow: contextWindow,
-            provider: provider,
-            model: model,
-            services: services
-        )
-
-        var history: [ProviderMessage] = [ProviderMessage(role: .system, content: prepared.system)]
-
-        var prior = prepared.included
-        if let last = prior.last, messages[last.id].role == .user {
-            prior.removeLast()
-        }
-        for item in prior {
-            let message = messages[item.id]
-            if message.role == .user {
-                history.append(ProviderMessage(role: .user, content: message.text))
-                continue
-            }
-
-            // Replay the work, not just the prose: an assistant turn that called tools
-            // goes back as `assistant(tool_calls)` followed by one `tool` message per
-            // call, exactly as the provider emitted it. Without this the model cannot
-            // tell what it already did and starts the task over.
-            if !message.exchanges.isEmpty {
-                history.append(ProviderMessage(
-                    role: .assistant,
-                    content: message.text,
-                    toolCalls: message.exchanges.map {
-                        ToolCall(id: $0.callID, name: $0.name, arguments: $0.arguments)
-                    }
-                ))
-                for exchange in message.exchanges {
-                    history.append(ProviderMessage(
-                        role: .tool,
-                        content: exchange.output,
-                        toolCallID: exchange.callID
-                    ))
-                }
-                continue
-            }
-
-            // A step with no text and no calls carries nothing; sending an empty
-            // assistant turn is out of distribution and confuses some providers.
-            guard !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                continue
-            }
-            history.append(ProviderMessage(role: .assistant, content: message.text))
-        }
-
-        var userText = text
-        var images: [Data] = []
-
-        for attachment in attachments {
-            switch attachment.kind {
-            case .image:
-                images.append(attachment.data)
-            case .text:
-                let body = String(decoding: attachment.data, as: UTF8.self)
-                userText += "\n\n<file name=\"\(attachment.name)\" path=\"\(attachment.path)\">\n\(body.prefix(20_000))\n</file>"
-            case .folder:
-                userText += "\n\n[папка: \(attachment.path)]"
-            case .other:
-                userText += "\n\n[приложен файл: \(attachment.path)]"
-            }
-        }
-
-        history.append(ProviderMessage(role: .user, content: userText, images: images))
-        return history
-    }
-
     private static func millis(since start: ContinuousClock.Instant) -> Int {
         let elapsed = ContinuousClock.now - start
         return Int(elapsed.components.seconds * 1_000)
@@ -916,7 +710,7 @@ final class ChatStore {
     private static let latencyLock = NSLock()
     private static var latencyHandle: FileHandle?
 
-    private static func logLatency(_ line: String) {
+    static func logLatency(_ line: String) {
         let url = AppPaths.logsDirectory.appendingPathComponent("latency.log")
         try? AppPaths.ensureDirectory(AppPaths.logsDirectory)
         let stamped = Data((Timestamps.now() + " " + line + "\n").utf8)
@@ -980,7 +774,7 @@ final class ChatStore {
         }
     }
 
-    private func dequeueNext() {
+    func dequeueNext() {
         guard !isStreaming, !queuedMessages.isEmpty else { return }
         var next = queuedMessages.removeFirst()
         queuedCount = queuedMessages.count
@@ -1264,39 +1058,6 @@ final class ChatStore {
     /// Money spent so far in the provider's currency. Zero when no prices are set.
     var spent: Double = 0
 
-    func contextPlan(contextWindow: Int, thresholdPercent: Double, summaryTokens: Int = 0) -> ContextPlan {
-        // Planning tokenizes the whole history. The composer asks for the plan on every
-        // body pass, so during streaming this ran twice per token. The signature covers
-        // everything the plan depends on, so a hit is exact rather than approximate.
-        let last = messages.last
-        let signature = [
-            String(contextWindow),
-            String(thresholdPercent),
-            String(summaryTokens),
-            String(messages.count),
-            last?.id.uuidString ?? "-",
-            String(last?.text.count ?? 0),
-            String(last?.reasoning?.count ?? 0),
-            String(last?.tools.count ?? 0),
-            String(last?.exchanges.count ?? 0),
-            String(last?.exchanges.reduce(0) { $0 + $1.output.count } ?? 0),
-            String(cachedSystemPrompt.count)
-        ].joined(separator: "|")
-        if let cache = planCache, cache.signature == signature {
-            return cache.plan
-        }
-
-        let plan = composer.plan(
-            systemPrompt: cachedSystemPrompt,
-            messages: promptMessages,
-            contextWindow: contextWindow,
-            thresholdPercent: thresholdPercent,
-            summaryTokens: summaryTokens
-        )
-        planCache = (signature, plan)
-        return plan
-    }
-
     private func runCommand(_ input: String) {
         if input == "/clear" {
             clearView()
@@ -1341,73 +1102,6 @@ final class ChatStore {
 
     /// `/compact`: folds everything except the last few messages into the checkpoint
     /// regardless of the fill level. Same machinery as automatic compaction.
-    private func runCompaction() {
-        messages.append(ChatMessage(role: .assistant, text: "…", state: .streaming))
-        let messageID = messages[messages.count - 1].id
-        isStreaming = true
-
-        commandTask = Task { [weak self] in
-            guard let self else { return }
-            let text = await self.compactNow()
-            guard !Task.isCancelled else { return }
-            guard let index = self.messages.firstIndex(where: { $0.id == messageID }) else { return }
-            self.messages[index].text = text
-            self.messages[index].state = .complete
-            self.isStreaming = false
-            self.commandTask = nil
-            self.dequeueNext()
-        }
-    }
-
-    /// Manual compaction. Returns a line for the transcript.
-    func compactNow() async -> String {
-        guard let services else { return "**Ошибка.** База данных недоступна." }
-
-        let provider: ProviderModel?
-        do {
-            provider = try await activeProvider(services)
-        } catch {
-            return "**Ошибка.** Не удалось прочитать провайдеров: \(error.localizedDescription)"
-        }
-        guard let provider else { return "**Ошибка.** Провайдер не подключён." }
-
-        let model = provider.defaultModel ?? provider.models.first ?? ""
-        guard !model.isEmpty else { return "**Ошибка.** У провайдера не выбрана модель." }
-
-        let completed = promptMessages
-        guard completed.count > 2 else {
-            return "Сжимать нечего: в истории \(completed.count) сообщений."
-        }
-
-        // The tail is measured in tokens, not messages: six short replies and six long
-        // ones are very different amounts of live context.
-        let available = Int(Double(provider.contextWindow) * compactionThreshold / 100) - composer.reserveTokens
-        // Everything that is sent but is not a history message: system prompt and the
-        // existing checkpoint. Without subtracting them the boundary is optimistic.
-        let system = await buildSystemPrompt(services: services)
-        let fixed = TokenEstimator.tokens(in: system) + TokenEstimator.tokens(in: checkpointSummary)
-        let budget = max(available - fixed, 2_000)
-
-        // Compaction costs a request and destroys detail. If the history already fits,
-        // there is nothing to buy: report the numbers and leave storage alone.
-        if composer.fits(completed, budget: budget) {
-            let used = completed.reduce(0) { $0 + $1.tokens }
-            return "Сжимать нечего: вся история помещается в контекст (\(used) токенов из \(budget))."
-        }
-
-        let start = composer.tailStart(messages: completed, budget: composer.tailBudget(available: budget))
-        let toCompact = Array(completed.prefix(start))
-        guard !toCompact.isEmpty else {
-            return "Сжимать нечего: вся история уже в пределах хвоста."
-        }
-
-        if await compact(toCompact, provider: provider, model: model, services: services) {
-            return "История сжата: \(toCompact.count) сообщений свёрнуты в саммари (\(checkpointSummary.count) симв.). "
-                + "В базе ничего не удалено, последние \(completed.count - toCompact.count) сообщений остались как есть."
-        }
-        return "**Ошибка.** Компакция не удалась. Попробуй ещё раз."
-    }
-
     func clearView() {
         stop()
         oldestStoredID = nil
