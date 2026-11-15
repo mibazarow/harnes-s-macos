@@ -173,7 +173,7 @@ final class ContextTailTests: XCTestCase {
         let system = String(repeating: "s", count: 3_000)
         let window = 128_000
         let threshold = 80.0
-        let available = Int(Double(window) * threshold / 100) - composer.reserveTokens
+        let available = composer.budget(for: window, thresholdPercent: threshold).thresholdTokens
         let budget = max(available - TokenEstimator.tokens(in: system), 2_000)
 
         // Regression for /compact: the boundary must be the whole budget, and the old

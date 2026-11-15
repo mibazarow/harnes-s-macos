@@ -43,6 +43,12 @@ final class ChatStore {
     /// every single turn, doubling the cost of a conversation that is already in trouble.
     var compactionFailures = 0
     var compactionCooldownUntil: Date?
+    /// Calibration of the local token estimate against provider-reported usage.
+    let calibration: TokenCalibration
+    /// Scale applied to every "does it fit" decision, refreshed from `calibration`.
+    var estimateScale: Double = 1
+    /// Serialized tool catalog price for the current run, counted against the window.
+    var schemaTokens: Int = 0
     private var oldestStoredID: Int64?
     private(set) var hasMoreHistory = false
     private(set) var isLoadingOlder = false
@@ -55,6 +61,7 @@ final class ChatStore {
 
     init(services: AppServices? = nil) {
         self.services = services
+        self.calibration = TokenCalibration(database: services?.database)
         self.commands = services.map {
             SlashCommandRouter(
                 skills: $0.skills,
@@ -202,6 +209,7 @@ final class ChatStore {
             skillScope: services.skillScope
         )
 
+        schemaTokens = await registry.schemaTokenCost()
         let prepStart = ContinuousClock.now
         var history = await buildHistory(
             text: text,
@@ -216,14 +224,20 @@ final class ChatStore {
         Self.logLatency(
             "prep_ms=\(prepMs) prompt_chars=\(promptChars) messages=\(history.count) model=\(model)"
         )
-        let loop = AgentLoop(
+        let calibration = self.calibration
+        var loop = AgentLoop(
             provider: provider,
             model: model,
             registry: registry
         )
+        loop.onUsage = { measured, estimated in
+            await calibration.record(
+                providerID: provider.id, model: model, measured: measured, estimated: estimated
+            )
+        }
 
         var corrected = false
-        var overflowRetried = false
+        var overflowStep = 0
 
         turn: while true {
         do {
@@ -298,6 +312,7 @@ final class ChatStore {
                             + "prompt_tokens=\(promptTokens) completion_tokens=\(completionTokens) "
                             + "cache_ratio=\(ratio)%"
                         )
+                        estimateScale = await calibration.scale(providerID: provider.id, model: model)
                         do {
                             let cost = UsageService.cost(
                                 promptTokens: promptTokens,
@@ -362,15 +377,21 @@ final class ChatStore {
             // The provider rejected the request as too long. Retrying the same body is
             // pointless, so compact harder and try once more: this is the one case where
             // the estimate was provably low and only the provider knew the real limit.
-            if !overflowRetried,
+            if overflowStep < Self.overflowShrinkSteps.count,
                let providerError = error as? ProviderError,
                providerError.isContextOverflow,
-               await compactAfterOverflow(provider: provider, model: model, services: services) {
-                overflowRetried = true
+               await compactAfterOverflow(
+                   provider: provider,
+                   model: model,
+                   services: services,
+                   fraction: Self.overflowShrinkSteps[overflowStep]
+               ) {
+                let fraction = Self.overflowShrinkSteps[overflowStep]
+                overflowStep += 1
                 settle(assistantID)
                 assistantID = appendAssistant()
                 stepIndex = 0
-                notice("Провайдер отклонил запрос по длине контекста. Сжал историю и повторяю.")
+                notice("Провайдер отклонил запрос по длине контекста. Сжал до \(Int(fraction * 100))% бюджета и повторяю.")
                 history = await buildHistory(
                     text: text,
                     attachments: attachments,
@@ -662,12 +683,16 @@ final class ChatStore {
         lastContextWindow = contextWindow
 
         var system = await buildSystemPrompt(services: services)
+        let scale = await calibration.scale(providerID: provider.id, model: model)
+        estimateScale = scale
         var plan = composer.plan(
             systemPrompt: system,
             messages: promptMessages,
             contextWindow: contextWindow,
             thresholdPercent: compactionThreshold,
-            summaryTokens: TokenEstimator.tokens(in: checkpointSummary)
+            summaryTokens: TokenEstimator.tokens(in: checkpointSummary),
+            estimateScale: scale,
+            toolTokens: schemaTokens
         )
 
         if let services, !plan.compacted.isEmpty, compactionCoolingDown {
@@ -686,7 +711,9 @@ final class ChatStore {
                     messages: promptMessages,
                     contextWindow: contextWindow,
                     thresholdPercent: compactionThreshold,
-                    summaryTokens: TokenEstimator.tokens(in: checkpointSummary)
+                    summaryTokens: TokenEstimator.tokens(in: checkpointSummary),
+                    estimateScale: scale,
+                    toolTokens: schemaTokens
                 )
                 notice("Сжал историю перед отправкой: \(dropped) сообщений.")
             } else {

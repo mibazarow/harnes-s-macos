@@ -129,7 +129,8 @@ struct RootView: View {
     private var contextPlan: ContextPlan {
         chat.contextPlan(
             contextWindow: providerDirectory.contextWindow ?? 128_000,
-            thresholdPercent: settings.compactionThresholdPercent
+            thresholdPercent: settings.compactionThresholdPercent,
+            estimateScale: chat.estimateScale
         )
     }
 

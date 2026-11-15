@@ -76,7 +76,12 @@ actor CompactionService {
         // Bigger windows get bigger batches: the summary request must fit the model it
         // is sent to, but there is no reason to make twenty round-trips when ten would
         // do. The cap keeps a single request comfortably inside any modern window.
-        let budget = max(8_000, min(60_000, provider.contextWindow / 4))
+        // The summary needs room to be written: a batch that fills the window leaves
+        // nothing for the answer and the summary loses its tail. 32k is the output floor
+        // the reference compressors use; the rest of the window is input.
+        let outputFloor = 32_000
+        let available = max(provider.contextWindow - outputFloor, 8_000)
+        let budget = max(8_000, min(60_000, available))
 
         var summary = previousSummary ?? ""
         for batch in Self.batches(messages, budget: budget) {

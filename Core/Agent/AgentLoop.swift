@@ -52,6 +52,11 @@ struct AgentLoop: Sendable {
         case completed
     }
 
+    /// Called with `(measured promptTokens, local estimate)` for the request that just
+    /// answered. Keeping it here means the estimate covers exactly the messages the
+    /// provider saw, including tool results added between steps.
+    var onUsage: (@Sendable (Int, Int) async -> Void)?
+
     func run(history: [ProviderMessage]) -> AsyncThrowingStream<Event, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -78,6 +83,7 @@ struct AgentLoop: Sendable {
                         var calls: [ToolCall] = []
                         var finishReason: String?
 
+                        let estimated = Self.estimateTokens(messages: messages, schemas: schemas)
                         let stream = client.stream(
                             provider: provider,
                             model: model,
@@ -97,6 +103,7 @@ struct AgentLoop: Sendable {
                             case .toolCall(let call):
                                 calls.append(call)
                             case .usage(let promptTokens, let completionTokens, let cacheHit, let cacheMiss):
+                                if let onUsage { await onUsage(promptTokens, estimated) }
                                 continuation.yield(.usage(
                                     promptTokens: promptTokens,
                                     completionTokens: completionTokens,
@@ -224,6 +231,28 @@ struct AgentLoop: Sendable {
                 task.cancel()
             }
         }
+    }
+
+    /// What the request costs by the app's own estimator: every message body, every
+    /// tool call and result, image tiles at a flat price, plus the tool catalog.
+    static func estimateTokens(messages: [ProviderMessage], schemas: [ProviderToolSchema]) -> Int {
+        var total = 0
+        for message in messages {
+            total += TokenEstimator.tokens(in: message.content)
+            for call in message.toolCalls {
+                total += TokenEstimator.tokens(in: call.name)
+                total += TokenEstimator.tokens(in: call.arguments)
+            }
+            // A provider charges roughly a fixed tile price per image; the exact value
+            // depends on the model, and 1 100 is the conservative middle for a resized
+            // screenshot.
+            total += message.images.count * 1_100
+        }
+        total += schemas.reduce(0) { sum, schema in
+            sum + TokenEstimator.tokens(in: schema.name)
+                + TokenEstimator.tokens(in: schema.description)
+        }
+        return total
     }
 
     /// Read-only tools that can run concurrently. Consecutive runs of these execute in

@@ -5,18 +5,28 @@ import Foundation
 /// not as a kitchen sink. Behaviour is unchanged; the fields it touches are internal
 /// for exactly this reason.
 extension ChatStore {
+    /// How hard to shrink after the provider rejected the request as too long. The
+    /// first retry should not change much; the last one has to, or the turn is lost.
+    static let overflowShrinkSteps: [Double] = [0.85, 0.7, 0.5, 0.35]
+
     func compactAfterOverflow(
         provider: ProviderModel,
         model: String,
-        services: AppServices
+        services: AppServices,
+        fraction: Double = 0.5
     ) async -> Bool {
+        // The provider already said the request does not fit; a previous summary
+        // failure is not a reason to skip the one action that can recover the turn.
+        compactionCooldownUntil = nil
         let system = await buildSystemPrompt(services: services)
         let plan = composer.plan(
             systemPrompt: system,
             messages: promptMessages,
             contextWindow: provider.contextWindow,
-            thresholdPercent: min(compactionThreshold, 50),
-            summaryTokens: TokenEstimator.tokens(in: checkpointSummary)
+            thresholdPercent: min(100, max(10, fraction * 100)),
+            summaryTokens: TokenEstimator.tokens(in: checkpointSummary),
+            estimateScale: estimateScale,
+            toolTokens: schemaTokens
         )
         guard !plan.compacted.isEmpty else {
             notice("Сжимать нечего: в истории одно сообщение, и оно само больше окна модели.")
@@ -30,8 +40,19 @@ extension ChatStore {
     func scheduleCompaction(provider: ProviderModel, model: String, services: AppServices) {
         guard compactionTask == nil else { return }
         compactionTask = Task { [weak self] in
-            await self?.compactIfNeeded(provider: provider, model: model, services: services)
-            self?.compactionTask = nil
+            guard let self else { return }
+            // The task outlives the turn: the provider may have been switched in
+            // settings while the answer was streaming. Capture is only a hint.
+            let resolved: (ProviderModel, String)
+            if let fresh = try? await self.activeProvider(services),
+               let name = fresh.defaultModel ?? fresh.models.first, !name.isEmpty {
+                resolved = (fresh, name)
+            } else {
+                Self.logLatency("compaction: provider resolve failed, using caller's")
+                resolved = (provider, model)
+            }
+            await self.compactIfNeeded(provider: resolved.0, model: resolved.1, services: services)
+            self.compactionTask = nil
         }
     }
 
@@ -72,6 +93,7 @@ extension ChatStore {
         services: AppServices
     ) async -> Bool {
         guard !contextMessages.isEmpty else { return false }
+        let beforeTokens = promptMessages.reduce(0) { $0 + $1.tokens }
 
         do {
             let summary = try await services.compaction.summarize(
@@ -96,6 +118,9 @@ extension ChatStore {
             )
             compactionFailures = 0
             compactionCooldownUntil = nil
+            recordCompactionEffectiveness(
+                before: beforeTokens, services: services
+            )
             return true
         } catch {
             compactionFailures += 1
@@ -114,23 +139,117 @@ extension ChatStore {
     }
 
     func compactIfNeeded(provider: ProviderModel, model: String, services: AppServices) async {
+        let scale = await calibration.scale(providerID: provider.id, model: model)
         let plan = contextPlan(
             contextWindow: provider.contextWindow,
             thresholdPercent: compactionThreshold,
-            summaryTokens: TokenEstimator.tokens(in: checkpointSummary)
+            summaryTokens: TokenEstimator.tokens(in: checkpointSummary),
+            estimateScale: scale
         )
 
-        guard plan.didCompact, !plan.compacted.isEmpty else { return }
+        guard plan.didCompact, !plan.compacted.isEmpty else {
+            await compactIfMeasuredHot(provider: provider, model: model, services: services)
+            return
+        }
 
         // Preflight already handled the case where the request would not fit; a retry
         // here would be the same request again.
         if compactionCoolingDown { return }
 
+        var guardState = Self.loadCompactionGuard(services: services)
+        if let blocked = guardState.blockedUntil, blocked > Date() {
+            Self.logLatency("compaction blocked by strikes until \(blocked.ISO8601Format())")
+            return
+        }
+        if guardState.blockedUntil != nil {
+            // Recovery: one attempt after the block expires, not a full unblock.
+            guardState.blockedUntil = nil
+            Self.saveCompactionGuard(guardState, services: services)
+        }
+
         if await compact(plan.compacted, provider: provider, model: model, services: services) {
             notice("История сжата: \(plan.compacted.count) сообщений свёрнуты в саммари. Из базы ничего не удалено.")
         } else {
-            notice("Компакция не удалась. Продолжаю с усечённым окном.")
+            // Rejected summaries must not rotate the history: a truncated summary would
+            // silently drop context. Say what actually happened.
+            notice("Сжатие не удалось: \(plan.compacted.count) сообщений сохранены без изменений, история не тронута. Повтори /compact.")
         }
+    }
+
+    /// Reactive compaction: the plan may say "fits", but the provider already reported a
+    /// prompt above 60% of the usable input budget. Waiting for the next turn is how a
+    /// single large step overflows the window before the fold happens.
+    private func compactIfMeasuredHot(
+        provider: ProviderModel,
+        model: String,
+        services: AppServices
+    ) async {
+        guard let measured = await calibration.lastMeasured(providerID: provider.id, model: model) else { return }
+        let usable = composer.budget(
+            for: provider.contextWindow, thresholdPercent: compactionThreshold
+        ).usable
+        guard measured > Int(Double(usable) * 0.6) else { return }
+        guard !compactionCoolingDown else { return }
+
+        let all = promptMessages
+        guard all.count > 4 else { return }
+        let fold = Array(all.prefix(all.count / 2))
+        guard !fold.isEmpty else { return }
+
+        if await compact(fold, provider: provider, model: model, services: services) {
+            notice("История сжата заранее: \(fold.count) сообщений (\(measured) из \(usable) токенов у провайдера).")
+        }
+    }
+
+    // MARK: - Anti-thrash
+
+    struct CompactionGuard {
+        var strikes = 0
+        var blockedUntil: Date?
+    }
+
+    static func loadCompactionGuard(services: AppServices) -> CompactionGuard {
+        var guardState = CompactionGuard()
+        let values: [String: String] = (try? services.database.queue.read { db in
+            var result: [String: String] = [:]
+            if let raw = try AppStateStore.read(db, key: "compaction.strikes") { result["strikes"] = raw }
+            if let raw = try AppStateStore.read(db, key: "compaction.blockedUntil") { result["until"] = raw }
+            return result
+        }) ?? [:]
+        if let raw = values["strikes"], let value = Int(raw) { guardState.strikes = value }
+        if let raw = values["until"], !raw.isEmpty,
+           let date = ISO8601DateFormatter().date(from: raw) { guardState.blockedUntil = date }
+        return guardState
+    }
+
+    static func saveCompactionGuard(_ guardState: CompactionGuard, services: AppServices) {
+        try? services.database.queue.write { db in
+            try AppStateStore.write(db, key: "compaction.strikes", value: String(guardState.strikes))
+            try AppStateStore.write(
+                db, key: "compaction.blockedUntil",
+                value: guardState.blockedUntil?.ISO8601Format() ?? ""
+            )
+        }
+    }
+
+    static func resetCompactionGuard(services: AppServices) {
+        saveCompactionGuard(CompactionGuard(), services: services)
+    }
+
+    /// A compaction that does not reduce the volume is a loop, not a fix. Three in a row
+    /// block the automatic path for half an hour; the manual path clears the block.
+    func recordCompactionEffectiveness(before: Int, services: AppServices) {
+        let after = promptMessages.reduce(0) { $0 + $1.tokens }
+        var guardState = Self.loadCompactionGuard(services: services)
+        if before > 0, after >= Int(Double(before) * 0.9) {
+            guardState.strikes += 1
+            if guardState.strikes >= 3 {
+                guardState.blockedUntil = Date().addingTimeInterval(1_800)
+            }
+        } else {
+            guardState.strikes = 0
+        }
+        Self.saveCompactionGuard(guardState, services: services)
     }
 
     /// The system prompt, assembled in cache-friendly order: stable parts first, the
@@ -215,7 +334,12 @@ extension ChatStore {
         return history
     }
 
-    func contextPlan(contextWindow: Int, thresholdPercent: Double, summaryTokens: Int = 0) -> ContextPlan {
+    func contextPlan(
+        contextWindow: Int,
+        thresholdPercent: Double,
+        summaryTokens: Int = 0,
+        estimateScale: Double = 1
+    ) -> ContextPlan {
         // Planning tokenizes the whole history. The composer asks for the plan on every
         // body pass, so during streaming this ran twice per token. The signature covers
         // everything the plan depends on, so a hit is exact rather than approximate.
@@ -231,7 +355,9 @@ extension ChatStore {
             String(last?.tools.count ?? 0),
             String(last?.exchanges.count ?? 0),
             String(last?.exchanges.reduce(0) { $0 + $1.output.count } ?? 0),
-            String(cachedSystemPrompt.count)
+            String(cachedSystemPrompt.count),
+            String(estimateScale),
+            String(schemaTokens)
         ].joined(separator: "|")
         if let cache = planCache, cache.signature == signature {
             return cache.plan
@@ -242,7 +368,9 @@ extension ChatStore {
             messages: promptMessages,
             contextWindow: contextWindow,
             thresholdPercent: thresholdPercent,
-            summaryTokens: summaryTokens
+            summaryTokens: summaryTokens,
+            estimateScale: estimateScale,
+            toolTokens: schemaTokens
         )
         planCache = (signature, plan)
         return plan
@@ -267,52 +395,48 @@ extension ChatStore {
     }
 
     /// Manual compaction. Returns a line for the transcript.
-
+    ///
+    /// Manual is unconditional: it clears the cooldown and the strike counter and folds
+    /// the whole history, because the user asked. Deciding "it already fits" from a local
+    /// estimate is exactly how the command used to report success while the next request
+    /// overflowed at the provider (OpenCode and Hermes both exempt the manual path).
     func compactNow() async -> String {
         guard let services else { return "**Ошибка.** База данных недоступна." }
 
-        let provider: ProviderModel?
+        let provider: ProviderModel
         do {
-            provider = try await activeProvider(services)
+            guard let resolved = try await activeProvider(services) else {
+                return "**Ошибка.** Провайдер не подключён."
+            }
+            provider = resolved
         } catch {
             return "**Ошибка.** Не удалось прочитать провайдеров: \(error.localizedDescription)"
         }
-        guard let provider else { return "**Ошибка.** Провайдер не подключён." }
-
         let model = provider.defaultModel ?? provider.models.first ?? ""
         guard !model.isEmpty else { return "**Ошибка.** У провайдера не выбрана модель." }
 
         let completed = promptMessages
-        guard completed.count > 2 else {
-            return "Сжимать нечего: в истории \(completed.count) сообщений."
+        guard completed.count >= 3 else {
+            return "Сжимать нечего: в истории \(completed.count) сообщений — сворачивать нечего."
         }
 
-        // The tail is measured in tokens, not messages: six short replies and six long
-        // ones are very different amounts of live context.
-        let available = Int(Double(provider.contextWindow) * compactionThreshold / 100) - composer.reserveTokens
-        // Everything that is sent but is not a history message: system prompt and the
-        // existing checkpoint. Without subtracting them the boundary is optimistic.
+        compactionFailures = 0
+        compactionCooldownUntil = nil
+        Self.resetCompactionGuard(services: services)
+
         let system = await buildSystemPrompt(services: services)
-        let fixed = TokenEstimator.tokens(in: system) + TokenEstimator.tokens(in: checkpointSummary)
-        let budget = max(available - fixed, 2_000)
+        let localEstimate = TokenEstimator.tokens(in: system)
+            + TokenEstimator.tokens(in: checkpointSummary)
+            + completed.reduce(0) { $0 + $1.tokens }
 
-        // Compaction costs a request and destroys detail. If the history already fits,
-        // there is nothing to buy: report the numbers and leave storage alone.
-        if composer.fits(completed, budget: budget) {
-            let used = completed.reduce(0) { $0 + $1.tokens }
-            return "Сжимать нечего: вся история помещается в контекст (\(used) токенов из \(budget))."
+        if await compact(completed, provider: provider, model: model, services: services) {
+            let measured = await calibration.lastMeasured(providerID: provider.id, model: model)
+            let providerNote = measured.map { " Провайдер в прошлый раз сообщил prompt_tokens=\($0)." } ?? ""
+            return "История сжата: \(completed.count) сообщений свёрнуты в саммари. "
+                + "Локальная оценка до сжатия — \(localEstimate) токенов.\(providerNote) "
+                + "В базе ничего не удалено."
         }
-
-        let start = composer.tailStart(messages: completed, budget: composer.tailBudget(available: budget))
-        let toCompact = Array(completed.prefix(start))
-        guard !toCompact.isEmpty else {
-            return "Сжимать нечего: вся история уже в пределах хвоста."
-        }
-
-        if await compact(toCompact, provider: provider, model: model, services: services) {
-            return "История сжата: \(toCompact.count) сообщений свёрнуты в саммари (\(checkpointSummary.count) симв.). "
-                + "В базе ничего не удалено, последние \(completed.count - toCompact.count) сообщений остались как есть."
-        }
-        return "**Ошибка.** Компакция не удалась. Попробуй ещё раз."
+        return "**Ошибка.** Компакция не удалась; история не тронута. "
+            + "Повтори /compact или проверь провайдера."
     }
 }

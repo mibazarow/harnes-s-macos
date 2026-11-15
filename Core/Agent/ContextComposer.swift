@@ -75,6 +75,21 @@ struct ContextMessage: Sendable, Identifiable {
     }
 }
 
+/// How much of the window a request may actually use.
+///
+/// The provider reserves room for the answer out of the same window, so the input
+/// budget is smaller than `contextWindow`. Thresholding on the full window made
+/// compaction fire after the provider had already rejected the request — the failure
+/// mode that produced empty tool replies on long sessions.
+struct WindowBudget: Sendable, Equatable {
+    let window: Int
+    let outputReserve: Int
+    /// Hard cap for everything sent: system prompt, checkpoint, history, tools.
+    let usable: Int
+    /// Point where automatic compaction starts.
+    let thresholdTokens: Int
+}
+
 struct ContextPlan: Sendable {
     /// Messages that fit in the window, oldest first.
     let included: [ContextMessage]
@@ -107,74 +122,126 @@ struct ContextPlan: Sendable {
 struct ContextComposer: Sendable {
     /// Absolute floor: never send a request with nothing in it.
     var minimumTailMessages = 1
-    /// Reserve space for the model's answer.
-    var reserveTokens = 4_000
+    /// The first messages carry the task statement and are never folded. Losing them
+    /// means the next agent reads a summary of a summary and no longer knows the goal.
+    var protectedPrefixMessages = 3
     /// Share of the budget that must survive verbatim when compacting. Without a floor
     /// a plan could leave the model with one line of context; without a ceiling the
     /// tail would be so long that the summary buys nothing.
     var minimumTailShare = 0.12
     var minimumTailTokens = 2_000
 
+    /// Answer space is 15% of the window, at least 16k, but never more than half:
+    /// below half the model would have less room to read than to speak.
+    func budget(for contextWindow: Int, thresholdPercent: Double) -> WindowBudget {
+        let window = max(contextWindow, 1_000)
+        let threshold = min(max(thresholdPercent, 10), 100)
+        let outputReserve = min(max(Int(Double(window) * 0.15), 16_000), window / 2)
+        let usable = window - outputReserve
+        let raw = Int(Double(usable) * threshold / 100)
+        let floor = max(usable / 2, 16_000)
+        let ceiling = Int(Double(usable) * 0.85)
+        let thresholdTokens = min(max(raw, min(floor, ceiling)), ceiling)
+        return WindowBudget(
+            window: window,
+            outputReserve: outputReserve,
+            usable: usable,
+            thresholdTokens: thresholdTokens
+        )
+    }
+
     func plan(
         systemPrompt: String,
         messages: [ContextMessage],
         contextWindow: Int,
         thresholdPercent: Double,
-        summaryTokens: Int = 0
+        summaryTokens: Int = 0,
+        estimateScale: Double = 1,
+        toolTokens: Int = 0
     ) -> ContextPlan {
-        let systemTokens = TokenEstimator.tokens(in: systemPrompt)
-        let window = max(contextWindow, 1_000)
+        let systemTokens = scaled(TokenEstimator.tokens(in: systemPrompt), by: estimateScale)
+        let budgetInfo = budget(for: contextWindow, thresholdPercent: thresholdPercent)
+        let window = budgetInfo.window
         let threshold = min(max(thresholdPercent, 10), 100)
-        let budget = max(Int(Double(window) * threshold / 100) - reserveTokens, 512)
+        let budget = budgetInfo.thresholdTokens
 
-        let fixed = systemTokens + summaryTokens
-        let tail = Array(messages.suffix(minimumTailMessages))
-        let tailTokens = tail.reduce(0) { $0 + $1.tokens }
+        // Tool schemas are sent with every request and are not part of the history.
+        let fixed = systemTokens + summaryTokens + toolTokens
+        // The first messages carry the task statement. Losing them means the next agent
+        // reads a summary of a summary and no longer knows what was asked.
+        let protectedCount = min(protectedPrefixMessages, messages.count)
+        let protectedMessages = Array(messages.prefix(protectedCount))
+        let protectedTokens = protectedMessages.reduce(0) { $0 + scaled($1.tokens, by: estimateScale) }
+        let rest = Array(messages.dropFirst(protectedCount))
 
-        guard fixed + tailTokens <= budget else {
-            let kept = fitSuffix(tail, budget: max(budget - fixed, 0))
+        let oneTail = rest.last.map { scaled($0.tokens, by: estimateScale) } ?? 0
+        if fixed + protectedTokens + oneTail > budget {
+            // Even the protected prefix does not fit with the newest message. Keeping
+            // the newest is the only way to answer, so the old behaviour wins here.
+            let kept = fitSuffix(messages, budget: max(budget - fixed, 0))
             return ContextPlan(
                 included: kept,
                 compacted: Array(messages.dropLast(kept.count)),
                 didCompact: true,
                 summaryTokens: summaryTokens,
                 systemTokens: systemTokens,
-                usedTokens: fixed + kept.reduce(0) { $0 + $1.tokens },
+                usedTokens: fixed + kept.reduce(0) { $0 + scaled($1.tokens, by: estimateScale) },
                 contextWindow: window,
                 thresholdPercent: threshold
             )
         }
 
-        var used = fixed
-        var index = messages.count - 1
-        var kept: [ContextMessage] = []
+        let minimumTail = Array(rest.suffix(minimumTailMessages))
+        let minimumTailTokens = minimumTail.reduce(0) { $0 + scaled($1.tokens, by: estimateScale) }
+        guard fixed + protectedTokens + minimumTailTokens > budget else {
+            var used = fixed + protectedTokens
+            var index = rest.count - 1
+            var kept: [ContextMessage] = []
 
-        while index >= 0 {
-            let message = messages[index]
-            if used + message.tokens > budget { break }
-            used += message.tokens
-            kept.insert(message, at: 0)
-            index -= 1
+            while index >= 0 {
+                let message = rest[index]
+                let cost = scaled(message.tokens, by: estimateScale)
+                if used + cost > budget { break }
+                used += cost
+                kept.insert(message, at: 0)
+                index -= 1
+            }
+
+            // A tail that opens with an assistant reply reads as a dangling answer. Move
+            // the cut back to the last user message, which is also where a reader would
+            // resume.
+            var aligned = kept
+            var alignedIndex = index
+            while let first = aligned.first, first.role != "user", alignedIndex >= 0 {
+                aligned.removeFirst()
+                alignedIndex -= 1
+            }
+            if aligned.isEmpty { aligned = kept }
+
+            let compacted = Array(rest.prefix(alignedIndex + 1))
+            return ContextPlan(
+                included: protectedMessages + aligned,
+                compacted: compacted,
+                didCompact: !compacted.isEmpty,
+                summaryTokens: summaryTokens,
+                systemTokens: systemTokens,
+                usedTokens: fixed + protectedTokens
+                    + aligned.reduce(0) { $0 + scaled($1.tokens, by: estimateScale) },
+                contextWindow: window,
+                thresholdPercent: threshold
+            )
         }
 
-        // A tail that opens with an assistant reply reads as a dangling answer. Move the
-        // cut back to the last user message, which is also where a reader would resume.
-        var aligned = kept
-        var alignedIndex = index
-        while let first = aligned.first, first.role != "user", alignedIndex >= 0 {
-            aligned.removeFirst()
-            alignedIndex -= 1
-        }
-        if aligned.isEmpty { aligned = kept }
-
-        let compacted = Array(messages.prefix(alignedIndex + 1))
+        // Not even the protected prefix plus the minimum tail fits.
+        let kept = fitSuffix(rest, budget: max(budget - fixed - protectedTokens, 0))
         return ContextPlan(
-            included: aligned,
-            compacted: compacted,
-            didCompact: !compacted.isEmpty,
+            included: protectedMessages + kept,
+            compacted: Array(rest.dropLast(kept.count)),
+            didCompact: true,
             summaryTokens: summaryTokens,
             systemTokens: systemTokens,
-            usedTokens: fixed + aligned.reduce(0) { $0 + $1.tokens },
+            usedTokens: fixed + protectedTokens
+                + kept.reduce(0) { $0 + scaled($1.tokens, by: estimateScale) },
             contextWindow: window,
             thresholdPercent: threshold
         )
@@ -211,6 +278,14 @@ struct ContextComposer: Sendable {
     /// Token budget for the verbatim tail of a window.
     func tailBudget(available: Int) -> Int {
         max(minimumTailTokens, Int(Double(available) * minimumTailShare))
+    }
+
+    /// Local estimates are calibrated against what the provider actually reported. A
+    /// scale below 1 means we over-count, above 1 — the provider charges more than the
+    /// estimator thinks, and every decision must assume the larger number.
+    private func scaled(_ tokens: Int, by scale: Double) -> Int {
+        guard scale != 1, scale > 0 else { return tokens }
+        return Int((Double(tokens) * scale).rounded(.up))
     }
 
     private func fitSuffix(_ messages: [ContextMessage], budget: Int) -> [ContextMessage] {
