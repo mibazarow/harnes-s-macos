@@ -15,6 +15,17 @@ final class ChatStore {
     private var streamTask: Task<Void, Never>?
     private var commandTask: Task<Void, Never>?
 
+    /// Text that arrived from the provider but is not painted yet. See `scheduleFlush`.
+    private var pendingText = ""
+    private var pendingID = UUID()
+    private var flushTask: Task<Void, Never>?
+    private var flushDeadline = Date.distantPast
+
+    /// Upper bound on how long a chunk waits for the paint. 60 ms is under the
+    /// threshold where a pause reads as a stutter, and it turns any provider burst —
+    /// including a whole paragraph — into six or seven visible steps per second.
+    private static let flushInterval: TimeInterval = 0.06
+
     private var replyIndex = 0
     private let services: AppServices?
     private let commands: SlashCommandRouter?
@@ -249,11 +260,14 @@ final class ChatStore {
                         // the tool calls, so LoopGuard cannot see it. Checking the tail
                         // every few hundred characters is enough to catch it early
                         // without measuring on every token.
-                        let length = messageText(of: assistantID).utf8.count
+                        let soFar = messageText(of: assistantID)
+                        let length = soFar.utf8.count
                         if length - lastLoopCheck >= 250 {
                             lastLoopCheck = length
-                            if RepetitionGuard.isLooping(messageText(of: assistantID)) {
+                            if RepetitionGuard.isLooping(soFar) {
                                 repetitionStopped = true
+                                // The pending tail is part of what looped, so it must
+                                // reach the bubble before trimming.
                                 break stream
                             }
                         }
@@ -968,12 +982,54 @@ final class ChatStore {
     }
 
     private func append(_ chunk: String, to id: UUID) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        pendingText.append(chunk)
+        pendingID = id
+        scheduleFlush()
+    }
+
+    /// Providers differ wildly in how they slice an answer: some send a character at
+    /// a time, some send a paragraph. Appending each slice straight into `messages`
+    /// made the bubble jump — nothing for a moment, then a whole paragraph at once.
+    /// Text therefore lands in a buffer and reaches `messages` on a timer that is fast
+    /// enough not to delay the answer and slow enough that the eye sees a flow.
+    ///
+    /// The interval is a ceiling, not a sleep: a provider that streams slowly still
+    /// paints immediately, because the flush is scheduled on arrival and fires at once
+    /// once the buffer is old enough.
+    private func scheduleFlush() {
+        flushDeadline = Date().addingTimeInterval(Self.flushInterval)
+        guard flushTask == nil else { return }
+        flushTask = Task { [weak self] in
+            // `@MainActor` is re-acquired after every await, so the buffer is only
+            // touched on the main actor.
+            while let self, !self.pendingText.isEmpty {
+                let wait = self.flushDeadline.timeIntervalSinceNow
+                if wait > 0 {
+                    try? await Task.sleep(for: .seconds(wait))
+                }
+                guard !Task.isCancelled else { return }
+                self.flush()
+            }
+            self?.flushTask = nil
+        }
+    }
+
+    /// Moves the buffer into the visible bubble. Called by the timer above and, more
+    /// importantly, by every code path that reads or finishes the answer.
+    private func flush() {
+        guard !pendingText.isEmpty else { return }
+        let chunk = String(pendingText)
+        pendingText = ""
+        guard let index = messages.firstIndex(where: { $0.id == pendingID }) else { return }
         messages[index].text += chunk
     }
 
     private func messageText(of id: UUID) -> String {
-        messages.first(where: { $0.id == id })?.text ?? ""
+        let settled = messages.first(where: { $0.id == id })?.text ?? ""
+        // The buffer is part of the answer even though it is not painted yet: the
+        // repetition check must see the whole text, not a stale prefix.
+        guard id == pendingID, !pendingText.isEmpty else { return settled }
+        return settled + pendingText
     }
 
     private func reasoningText(of id: UUID) -> String {
@@ -982,6 +1038,9 @@ final class ChatStore {
 
     /// Drops the repeating tail so the user is left with the part that made sense.
     private func trimLoop(_ id: UUID) {
+        // Trim the whole answer, buffer included, then stop the timer so nothing
+        // arrives after the repair.
+        flush()
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         messages[index].text = RepetitionGuard.trimmed(messages[index].text)
         if let reasoning = messages[index].reasoning {
@@ -1056,6 +1115,9 @@ final class ChatStore {
     /// Returns false when the step produced nothing, in which case its bubble is dropped.
     @discardableResult
     private func settle(_ id: UUID) -> Bool {
+        // Everything still buffered belongs to this bubble: a step boundary must not
+        // silently swallow the last few hundred milliseconds of an answer.
+        flush()
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return false }
 
         messages[index].text = AssistantTextSanitizer.sanitizeRealtime(messages[index].text)
@@ -1082,6 +1144,9 @@ final class ChatStore {
     }
 
     private func finish(_ id: UUID, notice: String? = nil, fallback: String? = nil) {
+        // The turn is over: paint what is left, then forget the timer entirely so a
+        // late flush cannot append to a bubble that is already marked complete.
+        flush()
         guard let index = messages.firstIndex(where: { $0.id == id }) else {
             isStreaming = false
             return
