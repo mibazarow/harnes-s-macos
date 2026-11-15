@@ -20,4 +20,12 @@ enum Tuning {
 
     /// Ceiling for the serialized tool catalog, used by the schema budget test.
     static let schemaTokenBudget = 5_600
+
+    /// How aggressively finished tool output is replaced by a stub in the request.
+    /// `reactive` means "together with an ordinary compaction", which already pays the
+    /// cache reset; `always` prunes any batch above the pruner threshold.
+    static let toolOutputPruning: ToolOutputPruner.Mode = .reactive
+
+    /// A closed task longer than this is folded into the checkpoint at its boundary.
+    static let taskBoundarySummaryMessages = 40
 }

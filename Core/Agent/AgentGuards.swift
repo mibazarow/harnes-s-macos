@@ -125,23 +125,40 @@ struct LoopGuard: Sendable {
 /// tool. The orchestrator feeds one corrective message and runs exactly one extra turn.
 enum NoAttemptGuard {
     static let correctiveMessage = """
-    Ты ещё не попробовал ни одного инструмента. Выполни действие доступными инструментами; \
+    Ты ещё не попробовал ни одного инструмента. Выполни действие доступными инструментами. \
     Если реально невозможно — объясни это после попыток.
     """
 
-    private static let incapabilityPhrases = [
-        "не могу", "невозможно", "нет возможности", "к сожалению, я не",
-        "не получится", "i can't", "unable to", "cannot"
+    /// Explicit first-person refusals only. Generic "нет возможности" и "не получится"
+    /// стоят внутри нормальных объяснений («без пересборки не получится»), поэтому
+    /// гвард стрелял на ответах, которые отказом не были.
+    private static let refusalPhrases = [
+        "я не могу это сделать", "не могу это сделать",
+        "я не могу выполнить", "не могу выполнить",
+        "я не в состоянии это сделать",
+        "i can't do that", "i cannot do that", "unable to do that"
     ]
 
+    /// A refusal is a short headline, not a long explanation that mentions inability in
+    /// passing.
     static func looksLikeIncapability(_ text: String) -> Bool {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        let lower = text.lowercased()
-        return incapabilityPhrases.contains { lower.contains($0) }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 400 else { return false }
+        let head = String(trimmed.lowercased().prefix(160))
+        return refusalPhrases.contains { head.contains($0) }
     }
 
-    static func shouldCorrect(toolCallsMadeInRun: Int, finalText: String) -> Bool {
-        toolCallsMadeInRun == 0 && looksLikeIncapability(finalText)
+    /// Three conditions, not one: the request must be an action, the answer must be a
+    /// refusal, and no tool may have been called. Without the request check the guard
+    /// answered ordinary conversation with a corrective turn and a duplicate reply.
+    static func shouldCorrect(
+        request: String?,
+        toolCallsMadeInRun: Int,
+        finalText: String
+    ) -> Bool {
+        guard toolCallsMadeInRun == 0 else { return false }
+        guard let request, FalseSuccessGuard.looksLikeActionRequest(request) else { return false }
+        return looksLikeIncapability(finalText)
     }
 }
 

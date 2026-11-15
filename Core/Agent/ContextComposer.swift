@@ -65,6 +65,15 @@ struct ContextMessage: Sendable, Identifiable {
             + (extra.isEmpty ? 0 : TokenEstimator.tokens(in: extra))
     }
 
+    /// Text plus an already measured tool-trace cost. `ChatStore` computes the trace
+    /// cost on serialized JSON, which matches what the provider charges.
+    init(id: Int, role: String, text: String, extraTokens: Int) {
+        self.id = id
+        self.role = role
+        self.text = text
+        self.tokens = TokenEstimator.jsonTokens(in: text) + extraTokens + 8
+    }
+
     /// Explicit token count. Used by tests and by callers that already know the exact
     /// number, so budgeting tests do not depend on the estimator's calibration.
     init(id: Int, role: String, text: String, tokens: Int) {

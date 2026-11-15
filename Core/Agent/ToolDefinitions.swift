@@ -440,31 +440,11 @@ extension ToolRegistry {
     /// chars/4 guess.
     /// Cost of the catalog exactly as this run sends it, MCP tools included.
     func schemaTokenCost() async -> Int {
-        let list = await schemas()
-        return list.reduce(0) { total, schema in
-            let payload: [String: Any] = [
-                "name": schema.name,
-                "description": schema.description,
-                "parameters": schema.parameters.mapValues(\.value)
-            ]
-            guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
-                return total + TokenEstimator.tokens(in: schema.description)
-            }
-            return total + TokenEstimator.tokens(in: String(decoding: data, as: UTF8.self))
-        }
+        ToolCost.catalog(await schemas())
     }
 
     static func schemasTokenCost(_ definitions: [ToolDefinition] = ToolRegistry.definitions) -> Int {
-        definitions.reduce(0) { total, definition in
-            let payload: [String: Any] = [
-                "name": definition.name,
-                "description": definition.description,
-                "parameters": definition.parameters.mapValues(\.value)
-            ]
-            guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
-                return total + TokenEstimator.tokens(in: definition.description)
-            }
-            return total + TokenEstimator.tokens(in: String(decoding: data, as: UTF8.self))
-        }
+        ToolCost.catalog(definitions)
     }
+
 }

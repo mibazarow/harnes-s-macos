@@ -56,6 +56,62 @@ extension ChatStore {
         }
     }
 
+    /// A task closed when the model answered without calling a tool. Everything before
+    /// this point belongs to finished work: its tool output may be pruned from the next
+    /// request, and a long task is folded into the checkpoint once.
+    func recordTaskBoundary(services: AppServices?) {
+        let start = max(taskStartIndex, 0)
+        guard start < messages.count else { return }
+        let task = Array(messages[start..<messages.count])
+        let toolResults = task.reduce(0) { $0 + $1.exchanges.count }
+        guard !task.isEmpty else { return }
+
+        taskStartIndex = messages.count
+        if toolResults > 0 { pruneAtBoundary = true }
+        Self.logLatency("task boundary messages=\(task.count) tool_results=\(toolResults)")
+
+        guard let services, task.count > Tuning.taskBoundarySummaryMessages, toolResults > 0 else {
+            return
+        }
+        summarizeClosedTask(task, services: services)
+    }
+
+    private func summarizeClosedTask(_ task: [ChatMessage], services: AppServices) {
+        guard compactionTask == nil, !compactionCoolingDown else { return }
+        compactionTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.compactionTask = nil }
+            guard let provider = try? await self.activeProvider(services),
+                  let model = provider.defaultModel ?? provider.models.first, !model.isEmpty else { return }
+
+            let start = self.messages.firstIndex(where: { $0.id == task.first?.id }) ?? 0
+            let coveredIndex = self.compactedThroughID.flatMap { id in
+                self.messages.firstIndex(where: { $0.id == id })
+            }
+
+            var items: [ContextMessage] = []
+            for (offset, message) in task.enumerated() {
+                let index = start + offset
+                if let coveredIndex, index <= coveredIndex { continue }
+                guard message.state == .complete, message.role != .system,
+                      !message.text.isEmpty || !message.exchanges.isEmpty else { continue }
+                let extraTokens = message.exchanges.reduce(0) { sum, exchange in
+                    sum + ToolCost.exchange(
+                        name: exchange.name, arguments: exchange.arguments, output: exchange.output
+                    )
+                }
+                items.append(ContextMessage(
+                    id: index, role: message.role.rawValue, text: message.text, extraTokens: extraTokens
+                ))
+            }
+            guard !items.isEmpty else { return }
+
+            if await self.compact(items, provider: provider, model: model, services: services) {
+                self.notice("Задача закрыта: \(items.count) сообщений свёрнуты в чекпойнт.")
+            }
+        }
+    }
+
     /// Messages that still go to the model: completed, non-system, and not yet folded
     /// into the checkpoint.
 
@@ -68,16 +124,18 @@ extension ChatStore {
                   message.role != .system,
                   !message.text.isEmpty || !message.exchanges.isEmpty else { return nil }
             if let compactedIndex, index <= compactedIndex { return nil }
-            // Tool calls and results travel with the message, so their text has to be
-            // part of the budget too.
-            let extra = message.exchanges
-                .map { "\($0.name)\($0.arguments)\n\($0.output)" }
-                .joined(separator: "\n")
+            // Tool calls and results travel with the message. Their cost is measured
+            // on serialized JSON, envelope and escaping included.
+            let extraTokens = message.exchanges.reduce(0) { sum, exchange in
+                sum + ToolCost.exchange(
+                    name: exchange.name, arguments: exchange.arguments, output: exchange.output
+                )
+            }
             return ContextMessage(
                 id: index,
                 role: message.role.rawValue,
                 text: message.text,
-                extra: extra
+                extraTokens: extraTokens
             )
         }
     }
@@ -272,6 +330,21 @@ extension ChatStore {
 
         var history: [ProviderMessage] = [ProviderMessage(role: .system, content: prepared.system)]
 
+        // Finished tool output is replaced by a stub in the request only: storage keeps
+        // the full text, so nothing is lost for a later turn or for a manual review.
+        let pruningCutoff = min(taskStartIndex, messages.count)
+        let stubs = ToolOutputPruner.replacements(
+            messages: messages,
+            included: prepared.included,
+            cutoffIndex: pruningCutoff,
+            mode: Tuning.toolOutputPruning,
+            compactionHappened: compactedInWindow || pruneAtBoundary
+        )
+        if !stubs.isEmpty {
+            Self.logLatency("pruned tool_results=\(stubs.count) cutoff=\(pruningCutoff)")
+        }
+        pruneAtBoundary = false
+
         var prior = prepared.included
         if let last = prior.last, messages[last.id].role == .user {
             prior.removeLast()
@@ -298,7 +371,7 @@ extension ChatStore {
                 for exchange in message.exchanges {
                     history.append(ProviderMessage(
                         role: .tool,
-                        content: exchange.output,
+                        content: stubs[exchange.callID] ?? exchange.output,
                         toolCallID: exchange.callID
                     ))
                 }

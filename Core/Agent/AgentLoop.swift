@@ -233,26 +233,27 @@ struct AgentLoop: Sendable {
         }
     }
 
-    /// What the request costs by the app's own estimator: every message body, every
-    /// tool call and result, image tiles at a flat price, plus the tool catalog.
+    /// What the request costs by the app's own estimator: serialized message text,
+    /// every tool call and result measured as JSON, image tiles at a flat price, and the
+    /// tool catalog. The same basis as `ChatStore.promptMessages`, so compaction and
+    /// calibration talk about the same number.
     static func estimateTokens(messages: [ProviderMessage], schemas: [ProviderToolSchema]) -> Int {
         var total = 0
         for message in messages {
-            total += TokenEstimator.tokens(in: message.content)
-            for call in message.toolCalls {
-                total += TokenEstimator.tokens(in: call.name)
-                total += TokenEstimator.tokens(in: call.arguments)
+            switch message.role {
+            case .tool:
+                total += ToolCost.result(message.content)
+            default:
+                total += TokenEstimator.jsonTokens(in: message.content)
+                for call in message.toolCalls {
+                    total += ToolCost.call(name: call.name, arguments: call.arguments)
+                }
             }
-            // A provider charges roughly a fixed tile price per image; the exact value
-            // depends on the model, and 1 100 is the conservative middle for a resized
-            // screenshot.
+            // A provider charges roughly a fixed tile price per image; 1 100 is the
+            // conservative middle for a resized screenshot.
             total += message.images.count * 1_100
         }
-        total += schemas.reduce(0) { sum, schema in
-            sum + TokenEstimator.tokens(in: schema.name)
-                + TokenEstimator.tokens(in: schema.description)
-        }
-        return total
+        return total + ToolCost.catalog(schemas)
     }
 
     /// Read-only tools that can run concurrently. Consecutive runs of these execute in

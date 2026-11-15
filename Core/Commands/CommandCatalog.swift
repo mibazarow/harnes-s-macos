@@ -31,6 +31,7 @@ enum CommandCatalog {
         Command(name: "/clear", summary: "очистить вид, база не трогается"),
         Command(name: "/compact", summary: "сжать историю в саммари"),
         Command(name: "/stats", summary: "статистика вызовов инструментов"),
+        Command(name: "/checkpoint", summary: "закрыть задачу и сжать её результаты"),
         Command(name: "/skills", summary: "список скиллов"),
         Command(name: "/skill", summary: "управление скиллами", subcommands: [
             Command(name: "list", summary: "список установленных"),

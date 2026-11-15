@@ -49,6 +49,14 @@ final class ChatStore {
     var estimateScale: Double = 1
     /// Serialized tool catalog price for the current run, counted against the window.
     var schemaTokens: Int = 0
+    /// First message of the task in progress. Everything before it belongs to closed
+    /// tasks and may be pruned from the request.
+    var taskStartIndex: Int = 0
+    /// Set when a compaction ran in this window: pruning rides along with it so the
+    /// cached prefix is reset once, not twice.
+    var compactedInWindow = false
+    /// A task just closed: prune its finished outputs on the next request.
+    var pruneAtBoundary = false
     private var oldestStoredID: Int64?
     private(set) var hasMoreHistory = false
     private(set) var isLoadingOlder = false
@@ -354,19 +362,27 @@ final class ChatStore {
                 // One corrective turn, never a loop.
                 if !corrected,
                    NoAttemptGuard.shouldCorrect(
+                       request: text,
                        toolCallsMadeInRun: toolCallsInTurn,
                        finalText: answer
                    ) {
                     corrected = true
                     history.append(ProviderMessage(role: .system, content: NoAttemptGuard.correctiveMessage))
-                    notice("Модель отказалась, не попробовав инструменты — повторяю с требованием выполнить действие.")
+                    // Internal bookkeeping belongs in the log, not in the transcript:
+                    // a second bubble and a service note read as two answers.
+                    Self.logLatency("no_attempt_guard fired")
                     continue
                 }
 
                 break
             }
 
+            let finalStepHadTools = messages.first(where: { $0.id == assistantID })?
+                .exchanges.isEmpty == false
             finish(assistantID)
+            if !finalStepHadTools {
+                recordTaskBoundary(services: services)
+            }
             applyFalseSuccessGuard(userText: text, assistantID: assistantID)
             // Compaction is bookkeeping, not part of answering: run it after the
             // answer so it never adds a second model round-trip before the first token.
@@ -681,6 +697,7 @@ final class ChatStore {
             Self.logLatency("window \(lastContextWindow) -> \(contextWindow): preflight compaction")
         }
         lastContextWindow = contextWindow
+        compactedInWindow = false
 
         var system = await buildSystemPrompt(services: services)
         let scale = await calibration.scale(providerID: provider.id, model: model)
@@ -715,6 +732,7 @@ final class ChatStore {
                     estimateScale: scale,
                     toolTokens: schemaTokens
                 )
+                compactedInWindow = true
                 notice("Сжал историю перед отправкой: \(dropped) сообщений.")
             } else {
                 notice("Историю сжать не удалось — \(dropped) старых сообщений не попадут в запрос.")
@@ -1093,6 +1111,14 @@ final class ChatStore {
 
         if input == "/compact" {
             runCompaction()
+            return
+        }
+
+        if input == "/checkpoint" {
+            // Close the current task by hand: its finished tool output leaves the next
+            // request, and a long task is folded into the checkpoint once.
+            recordTaskBoundary(services: services)
+            notice("Контрольная точка: результаты закрытой задачи уйдут в следующий запрос сжатыми; полный текст остаётся в базе.")
             return
         }
 
