@@ -287,6 +287,30 @@ final class AppDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("v12_embeddings_version") { db in
+            // A counter the vector index watches to know when its resident matrix is
+            // stale. A trigger keeps it honest for every writer — including raw deletes
+            // in MemoryService — instead of trusting each service to invalidate.
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO app_state (key, value) VALUES ('embeddings.version', '0');
+                CREATE TRIGGER IF NOT EXISTS embeddings_version_insert
+                AFTER INSERT ON embeddings BEGIN
+                    UPDATE app_state SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
+                    WHERE key = 'embeddings.version';
+                END;
+                CREATE TRIGGER IF NOT EXISTS embeddings_version_update
+                AFTER UPDATE ON embeddings BEGIN
+                    UPDATE app_state SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
+                    WHERE key = 'embeddings.version';
+                END;
+                CREATE TRIGGER IF NOT EXISTS embeddings_version_delete
+                AFTER DELETE ON embeddings BEGIN
+                    UPDATE app_state SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
+                    WHERE key = 'embeddings.version';
+                END;
+                """)
+        }
+
         return migrator
     }
 }

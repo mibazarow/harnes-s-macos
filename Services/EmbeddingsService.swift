@@ -16,14 +16,34 @@ actor EmbeddingsService {
     private var queryCache: [(text: String, vector: Vector)] = []
     private let queryCacheLimit = 8
 
+    /// Resident copy of one collection: ids and a row-major float32 matrix. Materialized
+    /// only while the whole collection fits in memory, so a search never sees a partial
+    /// index. This is the seam an ANN index would replace later; callers only ever see
+    /// `bestMatches`.
+    private struct VectorTable {
+        var ids: [String]
+        var matrix: [Float]
+        var dim: Int
+    }
+
+    private var tables: [String: VectorTable] = [:]
+    private var tableVersions: [String: String] = [:]
+
+    /// 40k × 768 × 4 B ≈ 118 MB. Above this, holding the matrix costs more than it
+    /// saves: the streamed path stays correct, and a larger collection is the point to
+    /// add an ANN index. `shortcut: brute-force scan, upgrade to ANN above ~200k rows`.
+    private let maxCachedVectors: Int
+
     init(
         database: AppDatabase,
         installer: EmbeddingModelInstaller? = nil,
-        local: LocalEmbedder = LocalEmbedder()
+        local: LocalEmbedder = LocalEmbedder(),
+        maxCachedVectors: Int = 40_000
     ) {
         self.database = database
         self.installer = installer
         self.local = local
+        self.maxCachedVectors = maxCachedVectors
     }
 
     /// True when a 768-dim local ONNX model is installed on disk.
@@ -169,12 +189,129 @@ actor EmbeddingsService {
         }
     }
 
-    /// Top matches by cosine similarity. Dot products run through vDSP and rows are
-    /// streamed, so nothing is materialized as a dictionary of vectors.
+    /// Top matches by cosine similarity.
+    ///
+    /// Vectors are L2-normalized, so a dot product is the cosine. When the collection
+    /// fits in memory the search runs as one SGEMM-style matrix-vector product through
+    /// Accelerate instead of one decode and one call per row; otherwise it streams rows
+    /// and does the same math per row. Results and ordering are identical either way.
     func bestMatches(refKind: String, query: [Float], limit: Int) throws -> [(refID: String, score: Double)] {
-        guard !query.isEmpty else { return [] }
+        guard !query.isEmpty, limit > 0 else { return [] }
+        if let cached = try cachedMatches(refKind: refKind, query: query, limit: limit) {
+            return cached
+        }
+        return try streamedMatches(refKind: refKind, query: query, limit: limit)
+    }
 
-        return try database.queue.read { db in
+    // MARK: - Resident index
+
+    private func cachedMatches(
+        refKind: String,
+        query: [Float],
+        limit: Int
+    ) throws -> [(refID: String, score: Double)]? {
+        let version = try indexVersion()
+        let key = "\(refKind)#\(query.count)"
+        if let table = tables[key], tableVersions[key] == version {
+            return Self.topMatches(table, query: query, limit: limit)
+        }
+
+        // Load only a complete collection: a partial table would silently lose matches.
+        let count = try database.queue.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM embeddings WHERE ref_kind = ? AND dim = ?",
+                arguments: [refKind, query.count]
+            ) ?? 0
+        }
+        guard count > 0, count <= maxCachedVectors else {
+            tables[key] = nil
+            tableVersions[key] = nil
+            return nil
+        }
+
+        var ids: [String] = []
+        var matrix: [Float] = []
+        ids.reserveCapacity(count)
+        matrix.reserveCapacity(count * query.count)
+        try database.queue.read { db in
+            let rows = try Row.fetchCursor(
+                db,
+                sql: "SELECT ref_id, vector FROM embeddings WHERE ref_kind = ? AND dim = ?",
+                arguments: [refKind, query.count]
+            )
+            while let row = try rows.next() {
+                let blob: Data = row["vector"]
+                guard let values = Self.decode(blob), values.count == query.count else { continue }
+                ids.append(row["ref_id"])
+                matrix.append(contentsOf: values)
+            }
+        }
+        guard !ids.isEmpty else { return [] }
+
+        // One resident table per collection: a query with another dimension replaces it
+        // rather than keeping both matrices in memory.
+        tables = tables.filter { !$0.key.hasPrefix(refKind + "#") }
+        let table = VectorTable(ids: ids, matrix: matrix, dim: query.count)
+        tables[key] = table
+        tableVersions[key] = version
+        return Self.topMatches(table, query: query, limit: limit)
+    }
+
+    private func indexVersion() throws -> String {
+        try database.queue.read { db in
+            try String.fetchOne(
+                db, sql: "SELECT value FROM app_state WHERE key = 'embeddings.version'"
+            ) ?? "0"
+        }
+    }
+
+    private static func topMatches(
+        _ table: VectorTable,
+        query: [Float],
+        limit: Int
+    ) -> [(refID: String, score: Double)] {
+        let rows = table.ids.count
+        guard rows > 0, table.dim == query.count else { return [] }
+
+        var scores = [Float](repeating: 0, count: rows)
+        table.matrix.withUnsafeBufferPointer { matrix in
+            query.withUnsafeBufferPointer { queryBuffer in
+                scores.withUnsafeMutableBufferPointer { out in
+                    cblas_sgemv(
+                        CblasRowMajor, CblasNoTrans,
+                        Int32(rows), Int32(table.dim),
+                        1, matrix.baseAddress, Int32(table.dim),
+                        queryBuffer.baseAddress, 1,
+                        0, out.baseAddress, 1
+                    )
+                }
+            }
+        }
+
+        var best: [(refID: String, score: Double)] = []
+        best.reserveCapacity(limit)
+        for index in 0..<rows {
+            let score = Double(scores[index])
+            if best.count < limit {
+                best.append((table.ids[index], score))
+                if best.count == limit { best.sort { $0.score > $1.score } }
+            } else if let worst = best.last, score > worst.score {
+                best[best.count - 1] = (table.ids[index], score)
+                best.sort { $0.score > $1.score }
+            }
+        }
+        return best
+    }
+
+    // MARK: - Streamed fallback
+
+    private func streamedMatches(
+        refKind: String,
+        query: [Float],
+        limit: Int
+    ) throws -> [(refID: String, score: Double)] {
+        try database.queue.read { db in
             var best: [(refID: String, score: Double)] = []
             best.reserveCapacity(limit + 1)
 
