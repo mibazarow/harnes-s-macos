@@ -16,7 +16,7 @@ extension ToolRegistry {
         let line = "\(Timestamps.now()) reveal alias=\(alias) workspace=\(workspace.path)\n"
         if let handle = try? FileHandle(forWritingTo: url) {
             defer { try? handle.close() }
-            try? handle.seekToEnd()
+            _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: Data(line.utf8))
         }
     }

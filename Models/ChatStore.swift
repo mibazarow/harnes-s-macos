@@ -4,8 +4,8 @@ import Observation
 @MainActor
 @Observable
 final class ChatStore {
-    internal(set) var messages: [ChatMessage]
-    internal(set) var isStreaming = false
+    var messages: [ChatMessage]
+    var isStreaming = false
     private(set) var queuedCount = 0
     /// Messages written while a turn is running. Rendered in a dock below the
     /// transcript, never mixed into it: otherwise every new step of the running answer
@@ -56,11 +56,11 @@ final class ChatStore {
     /// instead of recomputed in the view: `RootView` used to read `messages` through the
     /// context plan, and every 60 ms paint tick re-evaluated the composer — and the stop
     /// button's animation with it.
-    internal(set) var contextUsage: ContextUsage?
+    var contextUsage: ContextUsage?
     /// The bubble that just settled. Its text is typed out by the UI; history and older
     /// bubbles are rendered immediately. `isStreaming` alone is not a signal — the final
     /// answer settles in the same runloop turn that clears it.
-    internal(set) var revealID: UUID?
+    var revealID: UUID?
     /// Serialized tool catalog price for the current run, counted against the window.
     var schemaTokens: Int = 0
     /// First message of the task in progress. Everything before it belongs to closed
@@ -812,7 +812,7 @@ final class ChatStore {
             }
         }
 
-        if let services, !plan.compacted.isEmpty, compactionCoolingDown {
+        if services != nil, !plan.compacted.isEmpty, compactionCoolingDown {
             // A failed summary was already reported. Retrying it on every turn would
             // double the cost of a conversation that is already in trouble.
             Self.logLatency("preflight compaction skipped: cooldown")
@@ -871,7 +871,7 @@ final class ChatStore {
                 FileManager.default.createFile(atPath: url.path, contents: nil)
             }
             latencyHandle = try? FileHandle(forWritingTo: url)
-            try? latencyHandle?.seekToEnd()
+            _ = try? latencyHandle?.seekToEnd()
         }
         try? latencyHandle?.write(contentsOf: stamped)
     }
