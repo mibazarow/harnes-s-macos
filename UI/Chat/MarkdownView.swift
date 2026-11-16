@@ -27,12 +27,6 @@ struct MarkdownView: View {
                 MarkdownBlockView(node: child, palette: palette, fontSize: fontSize, dimmed: false)
                     .padding(.top, index == 0 ? 0 : MarkdownBlockView.gap(after: blocks[index - 1], before: child))
             }
-            if isStreaming {
-                Text("▍")
-                    .font(AppFont.mono(fontSize))
-                    .foregroundStyle(palette.accent)
-                    .padding(.top, 4)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: text, initial: true) { _, newValue in

@@ -87,7 +87,8 @@ struct MessageRow: View, Equatable {
                     ReasoningBlock(
                         text: reasoning,
                         palette: palette,
-                        fontSize: fontSize
+                        fontSize: fontSize,
+                        isStreaming: message.state == .streaming
                     )
                 }
 
@@ -98,6 +99,7 @@ struct MessageRow: View, Equatable {
                         fontSize: fontSize,
                         isStreaming: message.state == .streaming
                     )
+                    .modifier(RevealOnAppear())
                 } else if message.state == .streaming,
                           message.tools.isEmpty,
                           (message.reasoning ?? "").isEmpty {
@@ -316,6 +318,7 @@ struct ReasoningBlock: View {
     let text: String
     let palette: Palette
     let fontSize: CGFloat
+    var isStreaming: Bool = false
 
     @State private var expanded = false
 
@@ -329,7 +332,11 @@ struct ReasoningBlock: View {
                 HStack(spacing: 6) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 8, weight: .semibold))
-                    Text(expanded ? "размышления" : "размышления · \(text.count) симв.")
+                    Text("размышления")
+                    if isStreaming {
+                        ProgressView()
+                            .controlSize(.mini)
+                    }
                     Spacer(minLength: 0)
                 }
                 .font(AppFont.mono(max(fontSize - 2, 9)))
@@ -371,5 +378,22 @@ struct BubbleContainer<Content: View>: View {
         content
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 15)
+    }
+}
+
+
+/// Text is shown whole at the end of a step. A 180 ms fade keeps it from popping in;
+/// it is not a reveal of the words themselves.
+struct RevealOnAppear: ViewModifier {
+    @State private var visible = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(visible ? 1 : 0)
+            .offset(y: visible ? 0 : 3)
+            .onAppear {
+                guard !visible else { return }
+                withAnimation(.easeOut(duration: 0.18)) { visible = true }
+            }
     }
 }
