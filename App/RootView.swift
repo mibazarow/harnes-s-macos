@@ -15,9 +15,10 @@ struct RootView: View {
     private var palette: Palette { Palette.current }
 
     var body: some View {
-        // Computed once: the plan tokenizes the whole history, and it used to be
-        // evaluated twice per body pass — twice per token while streaming.
-        let plan = contextPlan
+        // The context numbers come from a snapshot, not from the plan: reading the plan
+        // here subscribed the whole screen — including the composer and the stop ring —
+        // to `messages`, and every 60 ms paint tick re-evaluated it.
+        let usage = chat.contextUsage
 
         VStack(spacing: 0) {
             HeaderBar(palette: palette, planMode: chat.isPlanMode)
@@ -41,8 +42,8 @@ struct RootView: View {
                 isStreaming: chat.isStreaming,
                 queuedCount: chat.queuedCount,
                 providerLabel: providerDirectory.label,
-                contextLabel: contextLabel(for: plan),
-                contextWarning: plan.isOverThreshold,
+                contextLabel: contextLabel(for: usage),
+                contextWarning: usage?.overThreshold ?? false,
                 modelLabel: modelLabel,
                 modelWarning: modelWarning,
                 spent: chat.spent,
@@ -65,6 +66,7 @@ struct RootView: View {
             services?.modelInstaller?.startIfNeeded()
             await chat.loadHistory()
             await providerDirectory.reload()
+            chat.refreshContextUsage(contextWindow: providerDirectory.contextWindow ?? 128_000)
             await chat.warmUpMCP()
             startScheduler()
         }
@@ -84,10 +86,14 @@ struct RootView: View {
         }
         .onChange(of: settings.compactionThresholdPercent) { _, newValue in
             chat.compactionThreshold = newValue
+            chat.refreshContextUsage(contextWindow: providerDirectory.contextWindow ?? 128_000)
         }
         .onChange(of: providerDirectory.contextWindow) { oldValue, newValue in
-            guard let oldValue, let newValue, newValue < oldValue else { return }
-            let used = contextPlan.usedTokens
+            guard let oldValue, let newValue, newValue < oldValue else {
+                if let newValue { chat.refreshContextUsage(contextWindow: newValue) }
+                return
+            }
+            let used = chat.contextUsage?.usedTokens ?? 0
             let threshold = Int(Double(newValue) * settings.compactionThresholdPercent / 100)
             guard used > threshold else { return }
             chat.notice("Окно контекста уменьшилось: \(oldValue) → \(newValue) токенов. Сейчас в истории ~\(used). При следующем ответе старые сообщения свернутся в саммари; из базы ничего не удалится.")
@@ -126,19 +132,12 @@ struct RootView: View {
         services.scheduler.start()
     }
 
-    private var contextPlan: ContextPlan {
-        chat.contextPlan(
-            contextWindow: providerDirectory.contextWindow ?? 128_000,
-            thresholdPercent: settings.compactionThresholdPercent,
-            estimateScale: chat.estimateScale
-        )
-    }
-
-    private func contextLabel(for plan: ContextPlan) -> String {
-        let used = Self.shortTokens(plan.usedTokens)
-        let window = Self.shortTokens(plan.contextWindow)
-        if plan.didCompact {
-            return "\(used) / \(window) · сжато \(plan.compacted.count)"
+    private func contextLabel(for usage: ContextUsage?) -> String {
+        guard let usage else { return "— / —" }
+        let used = Self.shortTokens(usage.usedTokens)
+        let window = Self.shortTokens(usage.contextWindow)
+        if usage.compacted > 0 {
+            return "\(used) / \(window) · сжато \(usage.compacted)"
         }
         return "\(used) / \(window)"
     }

@@ -97,6 +97,29 @@ final class PromptAccountingTests: XCTestCase {
         XCTAssertEqual(ImageCost.tokens(in: Data("not an image".utf8)), Tuning.imageTokenEstimate)
     }
 
+    /// The composer reads a snapshot, not the plan: reading the plan in `RootView`
+    /// subscribed the whole screen to `messages` and re-evaluated the stop ring on
+    /// every paint tick.
+    @MainActor
+    func testContextUsageSnapshotIsStoredForTheComposer() throws {
+        let store = ChatStore()
+        store.messages = [
+            ChatMessage(role: .user, text: "задача"),
+            ChatMessage(role: .assistant, text: String(repeating: "ответ ", count: 50))
+        ]
+        store.refreshContextUsage(contextWindow: 128_000)
+
+        let usage = try XCTUnwrap(store.contextUsage)
+        XCTAssertEqual(usage.contextWindow, 128_000)
+        XCTAssertGreaterThan(usage.usedTokens, 0)
+        XCTAssertFalse(usage.overThreshold)
+        XCTAssertEqual(usage.compacted, 0)
+
+        store.messages.append(ChatMessage(role: .user, text: String(repeating: "ещё ", count: 500)))
+        store.refreshContextUsage(contextWindow: 128_000)
+        XCTAssertGreaterThan(try XCTUnwrap(store.contextUsage).usedTokens, usage.usedTokens)
+    }
+
     func testToolPairEstimateMatchesProviderJSON() throws {
         let id = "call_abc12345"
         let name = "bash"

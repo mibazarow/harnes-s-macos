@@ -99,6 +99,15 @@ struct WindowBudget: Sendable, Equatable {
     let thresholdTokens: Int
 }
 
+/// The few numbers the composer needs, without the plan's message arrays. A view that
+/// reads this does not subscribe to the transcript.
+struct ContextUsage: Equatable, Sendable {
+    var usedTokens: Int
+    var contextWindow: Int
+    var compacted: Int
+    var overThreshold: Bool
+}
+
 struct ContextPlan: Sendable {
     /// Messages that fit in the window, oldest first.
     let included: [ContextMessage]

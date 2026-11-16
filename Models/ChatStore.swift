@@ -52,6 +52,11 @@ final class ChatStore {
     let calibration: TokenCalibration
     /// Scale applied to every "does it fit" decision, refreshed from `calibration`.
     var estimateScale: Double = 1
+    /// What the composer shows about the context window. Snapshotted once per request
+    /// instead of recomputed in the view: `RootView` used to read `messages` through the
+    /// context plan, and every 60 ms paint tick re-evaluated the composer — and the stop
+    /// button's animation with it.
+    internal(set) var contextUsage: ContextUsage?
     /// Serialized tool catalog price for the current run, counted against the window.
     var schemaTokens: Int = 0
     /// First message of the task in progress. Everything before it belongs to closed
@@ -831,6 +836,7 @@ final class ChatStore {
         }
 
         cachedSystemPrompt = system
+        recordContextUsage(plan)
         return (system, plan.included, pruning.replacements)
     }
 

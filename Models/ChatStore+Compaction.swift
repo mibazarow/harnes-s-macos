@@ -550,6 +550,27 @@ extension ChatStore {
         return plan
     }
 
+    /// Recomputes the numbers the composer shows. Called at turn boundaries and on
+    /// startup, not from `body`.
+    func refreshContextUsage(contextWindow: Int) {
+        let plan = contextPlan(
+            contextWindow: contextWindow,
+            thresholdPercent: compactionThreshold,
+            summaryTokens: TokenEstimator.tokens(in: checkpointSummary),
+            estimateScale: estimateScale
+        )
+        recordContextUsage(plan)
+    }
+
+    func recordContextUsage(_ plan: ContextPlan) {
+        contextUsage = ContextUsage(
+            usedTokens: plan.usedTokens,
+            contextWindow: plan.contextWindow,
+            compacted: plan.compacted.count,
+            overThreshold: plan.isOverThreshold
+        )
+    }
+
     func runCompaction() {
         messages.append(ChatMessage(role: .assistant, text: "…", state: .streaming))
         let messageID = messages[messages.count - 1].id
