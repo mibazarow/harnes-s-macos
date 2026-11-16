@@ -3,8 +3,8 @@ import Foundation
 /// Timing and budget numbers that used to be literals in the streaming, markdown and
 /// guard code. One place, each with the reason it holds that value.
 enum Tuning {
-    /// How long a provider chunk waits for the paint. Below ~60 ms a pause reads as a
-    /// stutter; above it the answer arrives in visible lumps.
+    /// How often streamed reasoning reaches the bubble. Answer text does not use it:
+    /// the answer is painted whole when the step settles, so there is nothing to pace.
     static let paintInterval: TimeInterval = 0.06
 
     /// Markdown re-parse cadence while streaming. Slower than the paint interval on

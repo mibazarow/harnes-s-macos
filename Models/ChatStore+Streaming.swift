@@ -7,10 +7,16 @@ import Foundation
 /// the bubble (`settle`, `finish`, `trimLoop`, `stop`). Otherwise the buffered tail is
 /// silently lost, which looks like a slightly truncated answer.
 extension ChatStore {
+    /// Text is buffered for the whole step and painted when the step settles.
+    ///
+    /// It used to reach the bubble on the paint timer, which made the answer appear in
+    /// lumps of a few words. Reading an answer that is still being written is worse than
+    /// waiting for it: the text is shown complete, with a short fade, once the step
+    /// (or the whole answer) is done. Reasoning still streams — that is where the work
+    /// is visible while the answer is being formed.
     func append(_ chunk: String, to id: UUID) {
         pendingText.append(chunk)
         pendingID = id
-        scheduleFlush()
     }
 
     /// Providers differ wildly in how they slice an answer: some send a character at
@@ -22,19 +28,21 @@ extension ChatStore {
     /// The interval is a ceiling, not a sleep: a provider that streams slowly still
     /// paints immediately, because the flush is scheduled on arrival and fires at once
     /// once the buffer is old enough.
+    /// The timer now serves reasoning only. Text has no periodic paint: its reveal is a
+    /// step boundary, handled by `flush()` from `settle`/`finish`/`stop`.
     func scheduleFlush() {
         flushDeadline = Date().addingTimeInterval(Tuning.paintInterval)
         guard flushTask == nil else { return }
         flushTask = Task { [weak self] in
             // `@MainActor` is re-acquired after every await, so the buffer is only
             // touched on the main actor.
-            while let self, !self.pendingText.isEmpty || !self.pendingReasoning.isEmpty {
+            while let self, !self.pendingReasoning.isEmpty {
                 let wait = self.flushDeadline.timeIntervalSinceNow
                 if wait > 0 {
                     try? await Task.sleep(for: .seconds(wait))
                 }
                 guard !Task.isCancelled else { return }
-                self.flush()
+                self.flushReasoning()
             }
             self?.flushTask = nil
         }

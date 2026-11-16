@@ -8,6 +8,23 @@ import XCTest
 final class StreamingBufferTests: XCTestCase {
     private func store() -> ChatStore { ChatStore() }
 
+    /// The answer is not painted while it is being written: the buffer is shown whole
+    /// when the step settles. Before this, `append` scheduled a paint and the text
+    /// arrived in lumps of a few words.
+    func testTextWaitsForTheStepBoundary() {
+        let store = ChatStore()
+        let id = store.appendAssistant()
+        store.append("первые ", to: id)
+        store.append("слова", to: id)
+
+        XCTAssertNil(store.flushTask, "текст больше не будит таймер")
+        XCTAssertEqual(store.messages.last?.text, "")
+        XCTAssertEqual(store.messageText(of: id), "первые слова", "guard видит весь текст")
+
+        XCTAssertTrue(store.settle(id))
+        XCTAssertEqual(store.messages.last?.text, "первые слова")
+    }
+
     func testPendingTextIsPartOfTheAnswerBeforePaint() {
         let store = ChatStore()
         let id = store.appendAssistant()
