@@ -116,24 +116,20 @@ extension ToolRegistry {
         defer { source.cancel() }
 
         cancellation?.attach(pid: pid)
+        // Cancellation signals the same semaphore the exit event does, so the wait is
+        // event-driven. Polling every 50 ms woke the thread 20 times a second for the
+        // whole life of every command and made an idle app sample as 100% CPU (R17).
+        cancellation?.setOnCancel { done.signal() }
+        defer { cancellation?.setOnCancel(nil) }
 
         let deadline = Date().addingTimeInterval(timeout)
         var stopped: StopReason?
-        while true {
-            if done.wait(timeout: .now() + 0.05) == .success { break }
-            if cancellation?.isCancelled == true {
-                stopped = .cancelled
-                break
-            }
-            if Date() >= deadline {
-                stopped = .timedOut
-                break
-            }
-        }
-
-        // The process may have exited between the last poll and the cancel() call, in
-        // which case the semaphore won and the loop broke without seeing the flag.
-        if stopped == nil, cancellation?.isCancelled == true {
+        let remaining = max(deadline.timeIntervalSinceNow, 0.001)
+        if done.wait(timeout: .now() + remaining) == .timedOut {
+            stopped = .timedOut
+        } else if cancellation?.isCancelled == true {
+            // Woken by the cancellation handler or by the kill it triggered; either
+            // way the user asked to stop and the child must not be waited on.
             stopped = .cancelled
         }
 
@@ -236,6 +232,7 @@ final class ProcessCancellation: @unchecked Sendable {
     private let lock = NSLock()
     private var pid: pid_t = 0
     private var cancelled = false
+    private var onCancel: (@Sendable () -> Void)?
 
     var isCancelled: Bool {
         lock.lock(); defer { lock.unlock() }
@@ -251,11 +248,23 @@ final class ProcessCancellation: @unchecked Sendable {
         if alreadyCancelled { kill(-pid, SIGKILL) }
     }
 
+    /// Called by `runSync` to let cancellation wake its semaphore instead of being
+    /// polled for. Fires immediately when the run was already cancelled.
+    func setOnCancel(_ handler: (@Sendable () -> Void)?) {
+        lock.lock()
+        let alreadyCancelled = cancelled
+        onCancel = handler
+        lock.unlock()
+        if alreadyCancelled { handler?() }
+    }
+
     func cancel() {
         lock.lock()
         cancelled = true
         let target = pid
+        let handler = onCancel
         lock.unlock()
+        handler?()
         if target > 0 { kill(-target, SIGKILL) }
     }
 }
