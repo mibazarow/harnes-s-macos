@@ -23,8 +23,6 @@ enum DemoTranscript {
         }
     }
 
-    private static let day = Date()
-
     private static func trace(_ name: String, _ summary: String, error: Bool = false) -> ToolTrace {
         ToolTrace(name: name, summary: summary, isError: error, isRunning: false)
     }

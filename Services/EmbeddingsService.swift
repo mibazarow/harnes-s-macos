@@ -83,12 +83,6 @@ actor EmbeddingsService {
         return vector
     }
 
-    private func normalize(_ values: [Float]) -> [Float] {
-        let norm = sqrt(values.reduce(0) { $0 + $1 * $1 })
-        guard norm > 0 else { return values }
-        return values.map { $0 / norm }
-    }
-
     /// Stores a vector. `textHash` lets an identical chunk reuse an existing vector
     /// instead of running the model again.
     func store(refKind: String, refID: String, vector: Vector, textHash: String? = nil) throws {
