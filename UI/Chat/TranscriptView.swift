@@ -97,6 +97,15 @@ struct TranscriptView: View {
                 guard phase == .tracking || phase == .interacting || phase == .decelerating else { return }
                 follow = nearBottom
             }
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentSize.height
+            } action: { oldHeight, newHeight in
+                // The typed reveal grows the bubble without touching `messages`, and the
+                // markdown swap changes its height once more: the old triggers never saw
+                // either, so the end of a long answer ended up below the fold.
+                guard follow, newHeight > oldHeight else { return }
+                stick(proxy)
+            }
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 let offset = geometry.contentOffset.y + geometry.contentInsets.top
                 let scrollable = geometry.contentSize.height > geometry.containerSize.height + 1
