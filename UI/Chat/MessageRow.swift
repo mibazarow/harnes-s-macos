@@ -6,6 +6,9 @@ struct MessageRow: View, Equatable {
     let palette: Palette
     let fontSize: CGFloat
     let showTimestamp: Bool
+    /// True while a run is in progress: text that lands now is typed out instead of
+    /// appearing at once. History is shown immediately.
+    var animateReveal: Bool = false
 
     /// Rows that did not change must not re-render while another row streams: with a
     /// plain stack this is what keeps a long transcript from re-parsing every message
@@ -15,6 +18,7 @@ struct MessageRow: View, Equatable {
             && lhs.palette == rhs.palette
             && lhs.fontSize == rhs.fontSize
             && lhs.showTimestamp == rhs.showTimestamp
+            && lhs.animateReveal == rhs.animateReveal
     }
 
     private var isUser: Bool { message.role == .user }
@@ -93,13 +97,12 @@ struct MessageRow: View, Equatable {
                 }
 
                 if !message.text.isEmpty {
-                    MarkdownView(
+                    AnswerText(
                         text: message.text,
                         palette: palette,
                         fontSize: fontSize,
-                        isStreaming: message.state == .streaming
+                        animate: animateReveal
                     )
-                    .modifier(RevealOnAppear())
                 } else if message.state == .streaming,
                           message.tools.isEmpty,
                           (message.reasoning ?? "").isEmpty {
@@ -382,18 +385,84 @@ struct BubbleContainer<Content: View>: View {
 }
 
 
-/// Text is shown whole at the end of a step. A 180 ms fade keeps it from popping in;
-/// it is not a reveal of the words themselves.
-struct RevealOnAppear: ViewModifier {
-    @State private var visible = false
+/// Answer text: typed out once the step is complete, then handed to the markdown
+/// renderer.
+///
+/// The whole point of the step-boundary buffer was to stop the answer from arriving in
+/// lumps. Popping the entire block instead was the other extreme: the text is typed at a
+/// steady pace and finishes within `RevealPace.duration`, formatting included — inline
+/// marks are kept while typing, block layout comes with the final swap.
+struct AnswerText: View {
+    let text: String
+    let palette: Palette
+    let fontSize: CGFloat
+    var animate: Bool = false
 
-    func body(content: Content) -> some View {
-        content
-            .opacity(visible ? 1 : 0)
-            .offset(y: visible ? 0 : 3)
-            .onAppear {
-                guard !visible else { return }
-                withAnimation(.easeOut(duration: 0.18)) { visible = true }
+    @State private var shown: Int
+    @State private var finished: Bool
+    @State private var inline: AttributedString?
+    @State private var typing: Task<Void, Never>?
+
+    init(text: String, palette: Palette, fontSize: CGFloat, animate: Bool = false) {
+        self.text = text
+        self.palette = palette
+        self.fontSize = fontSize
+        self.animate = animate
+        let instant = !animate || text.count > 60_000
+        _shown = State(initialValue: instant ? text.count : 0)
+        _finished = State(initialValue: instant)
+    }
+
+    var body: some View {
+        Group {
+            if finished {
+                MarkdownView(text: text, palette: palette, fontSize: fontSize)
+            } else {
+                Text(prefix)
+                    .font(AppFont.mono(fontSize))
+                    .lineSpacing(AppFont.lineSpacing(for: fontSize))
+                    .foregroundStyle(palette.assistantText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+        }
+        .onAppear(perform: start)
+        .onDisappear { typing?.cancel() }
+    }
+
+    private var prefix: AttributedString {
+        guard let inline else { return AttributedString(String(text.prefix(shown))) }
+        return AttributedString(inline.characters.prefix(shown))
+    }
+
+    private func start() {
+        guard !finished, typing == nil else { return }
+        inline = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )
+        let total = text.count
+        let step = RevealPace.step(total: total)
+        typing = Task { @MainActor in
+            while shown < total {
+                try? await Task.sleep(for: .seconds(RevealPace.tick))
+                if Task.isCancelled { return }
+                shown = min(shown + step, total)
+            }
+            finished = true
+            typing = nil
+        }
+    }
+}
+
+/// How the finished answer is typed out. A fixed cap, not a per-character rate: a long
+/// answer must not take ten seconds, and a short one must still feel like typing.
+enum RevealPace {
+    static let duration: TimeInterval = 0.7
+    static let tick: TimeInterval = 0.016
+    static var ticks: Int { max(Int((duration / tick).rounded()), 1) }
+
+    static func step(total: Int) -> Int {
+        max((total + ticks - 1) / ticks, 1)
     }
 }

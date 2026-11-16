@@ -57,6 +57,10 @@ final class ChatStore {
     /// context plan, and every 60 ms paint tick re-evaluated the composer — and the stop
     /// button's animation with it.
     internal(set) var contextUsage: ContextUsage?
+    /// The bubble that just settled. Its text is typed out by the UI; history and older
+    /// bubbles are rendered immediately. `isStreaming` alone is not a signal — the final
+    /// answer settles in the same runloop turn that clears it.
+    internal(set) var revealID: UUID?
     /// Serialized tool catalog price for the current run, counted against the window.
     var schemaTokens: Int = 0
     /// First message of the task in progress. Everything before it belongs to closed
@@ -988,6 +992,7 @@ final class ChatStore {
         }
 
         messages[index].state = .complete
+        revealID = id
         for toolIndex in messages[index].tools.indices {
             messages[index].tools[toolIndex].isRunning = false
         }

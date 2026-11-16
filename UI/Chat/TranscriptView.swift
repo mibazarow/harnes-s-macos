@@ -50,7 +50,8 @@ struct TranscriptView: View {
                             message: message,
                             palette: palette,
                             fontSize: fontSize,
-                            showTimestamp: showTimestamps
+                            showTimestamp: showTimestamps,
+                            animateReveal: chat.isStreaming || chat.revealID == message.id
                         )
                         .equatable()
                         .id(message.id)
@@ -63,7 +64,8 @@ struct TranscriptView: View {
                             message: message,
                             palette: palette,
                             fontSize: fontSize,
-                            showTimestamp: showTimestamps
+                            showTimestamp: showTimestamps,
+                            animateReveal: chat.isStreaming
                         )
                         .equatable()
                         .id(message.id)
