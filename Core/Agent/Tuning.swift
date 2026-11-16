@@ -7,9 +7,12 @@ enum Tuning {
     /// stutter; above it the answer arrives in visible lumps.
     static let paintInterval: TimeInterval = 0.06
 
-    /// Markdown re-parse cadence while streaming. Kept equal to the paint interval:
-    /// with a slower parser, bold text appeared a frame or two after the words.
-    static let markdownParseInterval: TimeInterval = 0.06
+    /// Markdown re-parse cadence while streaming. Slower than the paint interval on
+    /// purpose: parsing re-renders every block and re-runs text layout, and doing that
+    /// sixteen times a second kept the main thread busy enough to starve animations.
+    /// Formatting lagging the words by a tenth of a second is invisible; a frozen
+    /// spinner is not.
+    static let markdownParseInterval: TimeInterval = 0.12
 
     /// New characters to accumulate before asking the repetition guard.
     static let repetitionCheckStep = 250

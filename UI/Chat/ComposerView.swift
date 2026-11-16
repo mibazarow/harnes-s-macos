@@ -482,8 +482,13 @@ private struct StopButton: View {
     let palette: Palette
     let action: () -> Void
 
-    @State private var spinning = false
     @State private var hovering = false
+
+    /// The angle is a function of the clock, not a `repeatForever` state animation.
+    /// That animation was restarted by every re-render of the composer during streaming
+    /// — sixty times a second of re-evaluation meant the ring kept snapping back to zero
+    /// and looked frozen at ~5 FPS. A timeline keeps rotating regardless of body updates.
+    private static let period: TimeInterval = 1.1
 
     var body: some View {
         Button(action: action) {
@@ -491,17 +496,15 @@ private struct StopButton: View {
                 Circle()
                     .stroke(palette.border, lineWidth: 2)
 
-                Circle()
-                    .trim(from: 0, to: 0.28)
-                    .stroke(
-                        palette.accent,
-                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(spinning ? 360 : 0))
-                    .animation(
-                        .linear(duration: 1.1).repeatForever(autoreverses: false),
-                        value: spinning
-                    )
+                TimelineView(.animation) { context in
+                    Circle()
+                        .trim(from: 0, to: 0.28)
+                        .stroke(
+                            palette.accent,
+                            style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(Self.angle(at: context.date)))
+                }
 
                 RoundedRectangle(cornerRadius: 2)
                     .fill(hovering ? palette.reasoning : palette.accent)
@@ -512,8 +515,13 @@ private struct StopButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .onAppear { spinning = true }
         .help("Идёт работа · нажми, чтобы остановить (Esc)")
         .accessibilityLabel("Остановить ответ")
+    }
+
+    private static func angle(at date: Date) -> Double {
+        let phase = date.timeIntervalSinceReferenceDate
+            .truncatingRemainder(dividingBy: period) / period
+        return phase * 360
     }
 }
