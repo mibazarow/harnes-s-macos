@@ -13,7 +13,6 @@ actor BackgroundProcessService {
         let pid: pid_t
         let command: String
         let started: Date
-        let logPath: String
         let exitCode: Int32?
         var running: Bool { exitCode == nil }
     }
@@ -55,36 +54,13 @@ actor BackgroundProcessService {
             atPath: logURL.path, contents: nil, attributes: [.posixPermissions: 0o600]
         )
 
-        var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
-        posix_spawn_file_actions_addopen(
-            &actions, 1, logURL.path, O_WRONLY | O_CREAT | O_APPEND, 0o600
+        let pid = try ShellSpawn.spawn(
+            command: command,
+            cwd: cwd,
+            stdoutPath: logURL.path,
+            stderrPath: logURL.path,
+            append: true
         )
-        posix_spawn_file_actions_addopen(
-            &actions, 2, logURL.path, O_WRONLY | O_CREAT | O_APPEND, 0o600
-        )
-        posix_spawn_file_actions_addchdir(&actions, cwd.path)
-
-        var attributes: posix_spawnattr_t?
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawnattr_destroy(&attributes) }
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP))
-        posix_spawnattr_setpgroup(&attributes, 0)
-
-        var argv: [UnsafeMutablePointer<CChar>?] = [
-            strdup("/bin/zsh"), strdup("-lc"), strdup(command), nil
-        ]
-        defer { argv.forEach { pointer in if let pointer { free(pointer) } } }
-
-        var pid: pid_t = 0
-        let spawned = posix_spawn(&pid, "/bin/zsh", &actions, &attributes, &argv, environ)
-        guard spawned == 0 else {
-            throw NSError(domain: "Harness", code: Int(spawned), userInfo: [
-                NSLocalizedDescriptionKey: "Не удалось запустить команду (errno \(spawned))."
-            ])
-        }
 
         entries[id] = Entry(
             id: id, pid: pid, command: command, started: Date(),
@@ -92,9 +68,12 @@ actor BackgroundProcessService {
         )
         persist()
 
+        // A `let` snapshot: capturing the mutable local in a detached closure is the
+        // warning the compiler emitted, and the pid does not change after spawn.
+        let childPID = pid
         DispatchQueue.global().async { [weak self] in
             var status: Int32 = 0
-            waitpid(pid, &status, 0)
+            waitpid(childPID, &status, 0)
             let code: Int32 = (status & 0x7F) == 0
                 ? (status >> 8) & 0xFF
                 : 128 + (status & 0x7F)
@@ -109,7 +88,7 @@ actor BackgroundProcessService {
             .map { entry in
                 Info(
                     id: entry.id, pid: entry.pid, command: entry.command,
-                    started: entry.started, logPath: entry.logURL.path,
+                    started: entry.started,
                     exitCode: entry.exitCode ?? (isAlive(entry.pid) ? nil : -1)
                 )
             }
