@@ -300,6 +300,7 @@ struct ToolRegistry: Sendable {
             case "mcp_tools": return await mcpTools(args)
             case "tool_load": return toolLoad(args)
             case "process": return await processTool(args)
+            case "windows": return windowsTool(args)
             default:
                 if call.name.hasPrefix("mcp__") {
                     return await callMCP(call, args: args)

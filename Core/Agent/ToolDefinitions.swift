@@ -133,16 +133,25 @@ extension ToolRegistry {
             ], required: ["path", "version"])
         ),
         ToolDefinition(
+            name: "windows",
+            description: "On-screen windows (id for screenshot) or running apps; bounds in points and pixels.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["list", "apps"]],
+                "app": ["type": "string", "description": "Window list: only this application"],
+                "filter": ["type": "string", "description": "App list: name substring"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "process",
-            description: "Long-lived background commands: dev servers, watchers, builds. action=run starts one and returns its id; logs, wait, stop manage it.",
+            description: "Long-lived background commands: run returns an id; logs, wait and stop manage it.",
             parameters: schema([
                 "action": ["type": "string", "enum": ["run", "list", "logs", "stop", "wait"]],
-                "command": ["type": "string", "description": "Shell command for run"],
-                "cwd": ["type": "string", "description": "Working directory, default workspace"],
-                "id": ["type": "string", "description": "Process id from run or list"],
-                "lines": ["type": "integer", "description": "Log lines to return, default 50"],
-                "filter": ["type": "string", "description": "Only lines containing this substring"],
-                "timeout_ms": ["type": "integer", "description": "wait timeout, default 30000, max 600000"]
+                "command": ["type": "string", "description": "Shell command"],
+                "cwd": ["type": "string", "description": "Default workspace"],
+                "id": ["type": "string", "description": "id from run or list"],
+                "lines": ["type": "integer", "description": "Lines, default 50"],
+                "filter": ["type": "string", "description": "Substring"],
+                "timeout_ms": ["type": "integer", "description": "wait timeout, default 30000"]
             ], required: ["action"])
         ),
         ToolDefinition(
@@ -475,7 +484,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "tool_load",
             exposure: .core,
-            description: "Return the full argument schemas for tools listed as deferred and keep them for the rest of the session.",
+            description: "Load full schemas of deferred tools for the rest of the session.",
             parameters: schema([
                 "names": ["type": "array", "items": ["type": "string"],
                           "description": "Tool names, for example [\"screenshot\", \"doc_read\"]"]
