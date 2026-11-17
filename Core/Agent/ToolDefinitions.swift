@@ -191,16 +191,55 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "process",
-            description: "Long-lived background commands: run returns an id; logs, wait and stop manage it.",
+            description: "Processes and background commands. run starts one and returns an id (logs/wait/stop manage it). ps lists every process by name substring, info explains one pid, signal and kill_tree stop it.",
             parameters: schema([
-                "action": ["type": "string", "enum": ["run", "list", "logs", "stop", "wait"]],
+                "action": ["type": "string", "enum": ["run", "list", "logs", "stop", "wait", "ps", "info", "signal", "kill_tree"]],
                 "command": ["type": "string", "description": "Shell command"],
                 "cwd": ["type": "string", "description": "Default workspace"],
                 "id": ["type": "string", "description": "id from run or list"],
+                "pid": ["type": "integer", "description": "Process id for info, signal, kill_tree"],
+                "signal": ["type": "string", "description": "TERM (default), KILL, HUP, INT"],
+                "sort": ["type": "string", "enum": ["memory", "cpu", "pid"], "description": "ps order, default memory"],
+                "limit": ["type": "integer", "description": "ps rows, default 20"],
                 "lines": ["type": "integer", "description": "Lines, default 50"],
                 "filter": ["type": "string", "description": "Substring"],
                 "timeout_ms": ["type": "integer", "description": "wait timeout, default 30000"]
             ], required: ["action"])
+        ),
+        ToolDefinition(
+            name: "network",
+            exposure: .deferred,
+            description: "Network in one call: listening ports with owners, interfaces and gateway, DNS resolution, ping, HTTP status without the body. Read-only.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["ports", "interfaces", "dns", "ping", "http"]],
+                "port": ["type": "integer", "description": "ports: filter by port number"],
+                "filter": ["type": "string", "description": "ports: process or address substring"],
+                "host": ["type": "string", "description": "dns and ping target"],
+                "url": ["type": "string", "description": "http target"],
+                "method": ["type": "string", "description": "http method, default GET"],
+                "count": ["type": "integer", "description": "ping packets, default 3"],
+                "timeout_ms": ["type": "integer", "description": "ping timeout, default 5000"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
+            name: "watch",
+            exposure: .deferred,
+            description: "Wait for file system changes instead of polling: subscribe to a path for N ms and return what changed. FSEvents, read-only.",
+            parameters: schema([
+                "path": ["type": "string", "description": "Path or comma-separated paths, default workspace"],
+                "duration_ms": ["type": "integer", "description": "Wait window, default 5000, max 120000"],
+                "limit": ["type": "integer", "description": "Max lines, default 30"]
+            ], required: [])
+        ),
+        ToolDefinition(
+            name: "spotlight",
+            exposure: .deferred,
+            description: "Search the whole machine through the Spotlight index by file name, outside the workspace. Returns path, size, date, kind.",
+            parameters: schema([
+                "query": ["type": "string", "description": "File name substring"],
+                "scope": ["type": "string", "description": "home (default), computer, network or an absolute path"],
+                "limit": ["type": "integer", "description": "Max results, default 20"]
+            ], required: ["query"])
         ),
         ToolDefinition(
             name: "task",
