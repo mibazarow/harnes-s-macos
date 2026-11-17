@@ -202,7 +202,7 @@ extension ToolRegistry {
                 "sort": ["type": "string", "enum": ["memory", "cpu", "pid"], "description": "ps order, default memory"],
                 "limit": ["type": "integer", "description": "ps rows, default 20"],
                 "lines": ["type": "integer", "description": "Lines, default 50"],
-                "filter": ["type": "string", "description": "Substring"],
+                "filter": ["type": "string", "description": "ps: name substring; logs: line substring"],
                 "timeout_ms": ["type": "integer", "description": "wait timeout, default 30000"]
             ], required: ["action"])
         ),

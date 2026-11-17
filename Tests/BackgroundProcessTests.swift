@@ -47,6 +47,58 @@ final class BackgroundProcessTests: XCTestCase {
         XCTAssertFalse(filtered.contains("beta"), filtered)
     }
 
+    /// R19.3: process inspection without `ps | grep` through the shell.
+    func testProcessListContainsOurselves() async {
+        let tools = ToolRegistry(
+            workspace: directory, memory: nil, embeddings: nil, secrets: nil,
+            skills: nil, mcp: nil, processes: service
+        )
+        let result = await tools.execute(ToolCall(id: "1", name: "process", arguments: #"{"action":"ps","lines":200}"#))
+
+        XCTAssertFalse(result.isError, result.output)
+        XCTAssertTrue(result.output.contains("\(getpid())"), result.output)
+    }
+
+    func testProcessInfoNamesTheExecutable() async {
+        let tools = ToolRegistry(
+            workspace: directory, memory: nil, embeddings: nil, secrets: nil,
+            skills: nil, mcp: nil, processes: service
+        )
+        let result = await tools.execute(ToolCall(
+            id: "1", name: "process", arguments: #"{"action":"info","pid":\#(getpid())}"#
+        ))
+
+        XCTAssertFalse(result.isError, result.output)
+        XCTAssertTrue(result.output.contains("path=/"), result.output)
+        XCTAssertTrue(result.output.contains("rss="), result.output)
+    }
+
+    func testSignalToAMissingProcessIsAnError() async {
+        let tools = ToolRegistry(
+            workspace: directory, memory: nil, embeddings: nil, secrets: nil,
+            skills: nil, mcp: nil, processes: service
+        )
+        let result = await tools.execute(ToolCall(
+            id: "1", name: "process", arguments: #"{"action":"signal","pid":999999,"signal":"TERM"}"#
+        ))
+
+        XCTAssertTrue(result.isError, result.output)
+        XCTAssertTrue(result.output.contains("999999"), result.output)
+    }
+
+    func testKillTreeNeedsALiveProcess() async {
+        let tools = ToolRegistry(
+            workspace: directory, memory: nil, embeddings: nil, secrets: nil,
+            skills: nil, mcp: nil, processes: service
+        )
+        let result = await tools.execute(ToolCall(
+            id: "1", name: "process", arguments: #"{"action":"kill_tree","pid":999999}"#
+        ))
+
+        XCTAssertTrue(result.isError, result.output)
+        XCTAssertTrue(result.output.contains("999999"), result.output)
+    }
+
     func testToolListsAndReadsThroughTheRegistry() async throws {
         let tools = ToolRegistry(
             workspace: directory, memory: nil, embeddings: nil, secrets: nil,
