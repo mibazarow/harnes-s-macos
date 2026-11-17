@@ -63,6 +63,26 @@ extension ToolRegistry {
             guard let value = args["value"] as? String else { return .fail("value обязателен") }
             let status = AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, value as CFString)
             return status == .success ? .ok("Значение установлено.") : .fail("AX отказал (код \(status.rawValue)).")
+        case "menu_list":
+            guard let bar = AXBridge.attribute(root, kAXMenuBarAttribute) else {
+                return .fail("У приложения нет строки меню.")
+            }
+            let node = MenuBridge.snapshot(bar as! AXUIElement)
+            return .ok(node.listed().joined(separator: "\n"))
+        case "menu_click":
+            guard let wanted = args["path_titles"] as? [String], !wanted.isEmpty else {
+                return .fail("path_titles обязателен: список пунктов, например [\"File\",\"Export\",\"PDF\"]")
+            }
+            guard let bar = AXBridge.attribute(root, kAXMenuBarAttribute) else {
+                return .fail("У приложения нет строки меню.")
+            }
+            guard let element = Self.menuElement(bar as! AXUIElement, path: wanted) else {
+                return .fail("Пункт меню не найден: \(wanted.joined(separator: " > ")).")
+            }
+            let status = AXUIElementPerformAction(element, kAXPressAction as CFString)
+            return status == .success
+                ? .ok("Нажато: \(wanted.joined(separator: " > ")).")
+                : .fail("AX отказал в нажатии (код \(status.rawValue)).")
         case "focus":
             guard let path = Self.path(args), let element = AXBridge.element(at: path, in: root) else {
                 return .fail("path не найден.")
@@ -71,7 +91,7 @@ extension ToolRegistry {
             let status = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
             return status == .success ? .ok("Фокус передан.") : .fail("AX отказал (код \(status.rawValue)).")
         default:
-            return .fail("action: tree | find | click | set_value | focus")
+            return .fail("action: tree | find | click | set_value | focus | menu_list | menu_click")
         }
     }
 
@@ -105,5 +125,21 @@ extension ToolRegistry {
                                mouseCursorPosition: point, mouseButton: .left) else { return }
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
+    }
+}
+
+
+extension ToolRegistry {
+    static func menuElement(_ root: AXUIElement, path: [String]) -> AXUIElement? {
+        var current = root
+        for title in path {
+            let match = AXBridge.children(current).first { child in
+                AXBridge.string(child, kAXTitleAttribute)
+                    .compare(title, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            }
+            guard let match else { return nil }
+            current = match
+        }
+        return current
     }
 }

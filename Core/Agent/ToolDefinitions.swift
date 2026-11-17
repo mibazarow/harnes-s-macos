@@ -191,7 +191,7 @@ extension ToolRegistry {
             exposure: .deferred,
             description: "AX tree of an app, search by role/title/value, press or focus an element by path. Needs Accessibility; System Settings clicks need confirm.",
             parameters: schema([
-                "action": ["type": "string", "enum": ["tree", "find", "click", "set_value", "focus"]],
+                "action": ["type": "string", "enum": ["tree", "find", "click", "set_value", "focus", "menu_list", "menu_click"]],
                 "app": ["type": "string", "description": "App name or bundle id; default frontmost"],
                 "pid": ["type": "integer"],
                 "depth": ["type": "integer", "description": "tree depth, default 3, max 8"],
@@ -201,6 +201,7 @@ extension ToolRegistry {
                 "limit": ["type": "integer", "description": "find: matches, default 20"],
                 "path": ["type": "array", "items": ["type": "integer"], "description": "Element path from tree or find"],
                 "value": ["type": "string", "description": "set_value"],
+                "path_titles": ["type": "array", "items": ["type": "string"], "description": "menu_click via path"],
                 "confirm": ["type": "boolean", "description": "Required for System Settings actions"]
             ], required: ["action"])
         ),
