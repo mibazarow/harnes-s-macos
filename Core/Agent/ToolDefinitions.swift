@@ -364,6 +364,21 @@ extension ToolRegistry {
             parameters: schema([:], required: [])
         ),
         ToolDefinition(
+            name: "git",
+            exposure: .deferred,
+            description: "Git with an action: status (structured), fetch, pull, push (confirm), branch, switch, merge, show, blame, conflicts. Destructive forms refused.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["status", "fetch", "pull", "push", "branch", "switch", "merge", "show", "blame", "conflicts"]],
+                "cwd": ["type": "string", "description": "Repository path, default workspace"],
+                "name": ["type": "string", "description": "branch/switch/merge target"],
+                "from": ["type": "string", "description": "branch start point"],
+                "ref": ["type": "string", "description": "show: ref, default HEAD"],
+                "path": ["type": "string", "description": "blame: file"],
+                "confirm": ["type": "boolean", "description": "push"],
+                "force": ["type": "boolean", "description": "Ignored: force operations are refused"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "git_status",
             description: "Show git status for the workspace.",
             parameters: schema([:], required: [])

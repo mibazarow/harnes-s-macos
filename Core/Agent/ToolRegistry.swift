@@ -123,7 +123,8 @@ struct ToolRegistry: Sendable {
         "git_commit", "git_stash",
         "bash", "schedule_add", "schedule_remove", "memory_add", "memory_forget", "secret_save",
         "skill_install", "skill_remove", "index_workspace", "todowrite", "process", "app_script",
-        "fs_copy", "fs_move", "fs_mkdir", "keyboard", "clipboard", "ui", "mouse"
+        "fs_copy", "fs_move", "fs_mkdir", "keyboard", "clipboard", "ui", "mouse",
+        "git"
     ]
 
     /// Refuses a blind write.
@@ -275,6 +276,7 @@ struct ToolRegistry: Sendable {
             case "task": return await runSubagent(args)
             case "todowrite": return todoWrite(args)
             case "todo_read": return todoRead()
+            case "git": return await gitTool(args)
             case "git_status": return try await git(["status", "--short", "--branch"])
             case "git_diff": return try await gitDiff(args)
             case "git_log": return try await gitLog(args)
