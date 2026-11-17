@@ -25,6 +25,9 @@ struct AgentLoop: Sendable {
     /// overflow. Old results are stubbed rather than dropped, so the model still knows
     /// a call happened and what it returned at a glance.
     var runOutputBudget: Int = 160_000
+    /// Stable prompt-cache key for this session. A provider keeps one K/V cache per
+    /// slot; without pinning, a request can land on a cold slot and lose the prefix.
+    var cacheKey: String? = nil
 
     enum Event: Sendable {
         /// One model request begins. Everything after it belongs to a new step, which the
@@ -66,9 +69,10 @@ struct AgentLoop: Sendable {
 
                     var step = 0
                     var loopGuard = LoopGuard()
-                    /// Every tool message index in this run, oldest first, so the output
-                    /// budget can stub from the front.
-                    var toolMessageIndices: [Int] = []
+                    /// Append-only invariant (R24): inside a run the history grows at the
+                    /// end. Rewriting an earlier tool message would diverge the cached
+                    /// prefix and make every following step cold.
+                    var runOutputChars = 0
                     // Plan drift counter: nudging only after the model itself opted into
                     // a plan avoids nagging runs that never used todowrite.
                     var sawTodo = false
@@ -88,7 +92,8 @@ struct AgentLoop: Sendable {
                             provider: provider,
                             model: model,
                             messages: messages,
-                            tools: schemas
+                            tools: schemas,
+                            cacheKey: cacheKey
                         )
 
                         for try await event in stream {
@@ -164,13 +169,17 @@ struct AgentLoop: Sendable {
                                 imagePath: imagePath
                             ))
 
-                            let toolMessage = ProviderMessage(
-                                role: .tool,
-                                content: Self.toolContent(for: result),
-                                toolCallID: call.id
+                            // The budget is applied when the result is inserted, not by
+                            // rewriting old messages later: the historical prefix must
+                            // stay byte-identical for the provider's cache.
+                            let content = Self.fitToolContent(
+                                Self.toolContent(for: result),
+                                remaining: runOutputBudget - runOutputChars
                             )
-                            messages.append(toolMessage)
-                            toolMessageIndices.append(messages.count - 1)
+                            runOutputChars += content.count
+                            messages.append(ProviderMessage(
+                                role: .tool, content: content, toolCallID: call.id
+                            ))
                         }
 
                         if calls.contains(where: { $0.name == "todowrite" }) {
@@ -180,13 +189,12 @@ struct AgentLoop: Sendable {
                             callsSinceTodoUpdate += calls.count
                         }
                         if sawTodo,
-                           let nudge = registry.todoNudge(callsSinceUpdate: callsSinceTodoUpdate),
-                           let lastTool = toolMessageIndices.last, lastTool < messages.count {
-                            messages[lastTool].content += "\n\n" + nudge
+                           let nudge = registry.todoNudge(callsSinceUpdate: callsSinceTodoUpdate) {
+                            // New message at the end, not an edit of a sent one: same
+                            // nudge, no prefix break (R24.1).
+                            messages.append(ProviderMessage(role: .system, content: nudge))
                             callsSinceTodoUpdate = 0
                         }
-
-                        Self.trimRunOutput(&messages, toolIndices: toolMessageIndices, budget: runOutputBudget)
 
                         // Progress-aware anti-loop: same calls returning the same
                         // results means we are stuck, not that we are working.
@@ -306,27 +314,16 @@ struct AgentLoop: Sendable {
         return result.isError ? toolErrorPrefix + text : text
     }
 
-    /// Stubs the oldest tool results once the run's output exceeds the budget.
-    /// The most recent results are what the model actually needs to continue.
-    static func trimRunOutput(
-        _ messages: inout [ProviderMessage],
-        toolIndices: [Int],
-        budget: Int
-    ) {
-        guard budget > 0 else { return }
+    static let runOutputStub = "[вывод этого вызова не помещается в бюджет прогона]"
 
-        var total = messages.reduce(0) { $0 + ($1.role == .tool ? $1.content.count : 0) }
-        guard total > budget else { return }
-
-        for index in toolIndices {
-            guard index < messages.count, messages[index].role == .tool else { continue }
-            let content = messages[index].content
-            guard content.count > 200 else { continue }
-            let stub = "[ранний вывод этого вызова убран, чтобы уложиться в окно]"
-            total -= content.count - stub.count
-            messages[index].content = stub
-            if total <= budget { break }
-        }
+    /// Fits one tool result into what is left of the run's output budget. Cutting at
+    /// insertion means the message is never rewritten afterwards (R24.2).
+    static func fitToolContent(_ content: String, remaining: Int) -> String {
+        guard remaining > 0 else { return runOutputStub }
+        guard content.count > remaining else { return content }
+        let marker = "\n[обрезано: бюджет прогона]"
+        let keep = max(remaining - marker.count, 0)
+        return String(content.prefix(keep)) + marker
     }
 
     /// Reasons that mean "the output was cut", not "the model stopped".

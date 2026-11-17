@@ -102,27 +102,24 @@ final class TruncationTests: XCTestCase {
 }
 
 final class RunOutputBudgetTests: XCTestCase {
-    func testOldToolResultsAreStubbedFirst() {
-        var messages: [ProviderMessage] = [
-            ProviderMessage(role: .user, content: "запрос"),
-            ProviderMessage(role: .tool, content: String(repeating: "a", count: 50_000), toolCallID: "1"),
-            ProviderMessage(role: .tool, content: String(repeating: "b", count: 50_000), toolCallID: "2"),
-            ProviderMessage(role: .tool, content: "короткий свежий вывод", toolCallID: "3")
-        ]
-        let indices = [1, 2, 3]
+    /// R24.2: the budget is applied when a result is inserted; earlier messages are
+    /// never rewritten, so the provider's prefix cache survives the threshold.
+    func testContentIsCutToOneInsertionWithAMarker() {
+        let content = String(repeating: "a", count: 5_000)
+        let fitted = AgentLoop.fitToolContent(content, remaining: 1_000)
 
-        AgentLoop.trimRunOutput(&messages, toolIndices: indices, budget: 60_000)
-
-        XCTAssertTrue(messages[1].content.contains("убран"), "самый старый результат должен быть заглушён")
-        XCTAssertEqual(messages[3].content, "короткий свежий вывод", "свежий результат не трогаем")
-        XCTAssertEqual(messages[0].content, "запрос")
+        XCTAssertLessThanOrEqual(fitted.count, 1_000)
+        XCTAssertTrue(fitted.hasSuffix("[обрезано: бюджет прогона]"))
     }
 
-    func testUnderBudgetNothingChanges() {
-        var messages: [ProviderMessage] = [
-            ProviderMessage(role: .tool, content: "маленький вывод", toolCallID: "1")
-        ]
-        AgentLoop.trimRunOutput(&messages, toolIndices: [0], budget: 60_000)
-        XCTAssertEqual(messages[0].content, "маленький вывод")
+    func testSmallContentIsUntouched() {
+        XCTAssertEqual(AgentLoop.fitToolContent("маленький вывод", remaining: 60_000), "маленький вывод")
+    }
+
+    func testNoRemainingBudgetGivesAStub() {
+        XCTAssertEqual(
+            AgentLoop.fitToolContent(String(repeating: "b", count: 10), remaining: 0),
+            AgentLoop.runOutputStub
+        )
     }
 }

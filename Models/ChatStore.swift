@@ -67,6 +67,9 @@ final class ChatStore {
     let toolCatalog = ToolCatalogState()
     /// Background children survive turns; the registry is rebuilt per turn, this is not.
     let backgroundProcesses = BackgroundProcessService()
+    /// Stable per app run; passed to every request so the provider keeps one cache slot
+    /// warm instead of shuffling requests between slots.
+    let promptCacheKey = UUID().uuidString
     /// First message of the task in progress. Everything before it belongs to closed
     /// tasks and may be pruned from the request.
     var taskStartIndex: Int = 0
@@ -260,7 +263,8 @@ final class ChatStore {
         var loop = AgentLoop(
             provider: provider,
             model: model,
-            registry: registry
+            registry: registry,
+            cacheKey: promptCacheKey
         )
         loop.onUsage = { measured, estimated in
             await calibration.record(
@@ -515,7 +519,8 @@ final class ChatStore {
                 provider: provider,
                 model: subagentModel,
                 messages: history,
-                tools: await registry.schemas()
+                tools: await registry.schemas(),
+                cacheKey: promptCacheKey
             )
 
             do {
@@ -572,7 +577,8 @@ final class ChatStore {
             do {
                 var summary = ""
                 for try await event in client.stream(
-                    provider: provider, model: subagentModel, messages: history, tools: []
+                    provider: provider, model: subagentModel, messages: history, tools: [],
+                    cacheKey: promptCacheKey
                 ) {
                     if case .delta(let chunk) = event { summary += chunk }
                 }

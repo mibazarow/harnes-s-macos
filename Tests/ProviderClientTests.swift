@@ -18,6 +18,46 @@ final class ProviderClientTests: XCTestCase {
         XCTAssertNil(ProviderClient.chatURL(baseURL: "   "))
     }
 
+    /// R24.3: the provider cache is prefix-based; ask for it explicitly and pin the slot.
+    func testEncodeRequestAsksForThePrefixCache() throws {
+        let data = try ProviderClient.encodeRequest(
+            model: "m",
+            messages: [ProviderMessage(role: .user, content: "hi")],
+            reasoning: .off,
+            cacheKey: "slot-1",
+            cacheFields: true
+        )
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(json["cache_prompt"] as? Bool, true)
+        XCTAssertEqual(json["prompt_cache_key"] as? String, "slot-1")
+    }
+
+    func testEncodeRequestWithoutAKeyLeavesTheFieldOut() throws {
+        let data = try ProviderClient.encodeRequest(
+            model: "m",
+            messages: [ProviderMessage(role: .user, content: "hi")],
+            reasoning: .off,
+            cacheFields: true
+        )
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(json["cache_prompt"] as? Bool, true)
+        XCTAssertNil(json["prompt_cache_key"])
+    }
+
+    func testCacheFieldsGoOnlyToLocalServers() throws {
+        XCTAssertTrue(ProviderClient.isLocal(baseURL: "http://127.0.0.1:2019/v1"))
+        XCTAssertTrue(ProviderClient.isLocal(baseURL: "http://192.168.1.122:8080/v1"))
+        XCTAssertFalse(ProviderClient.isLocal(baseURL: "https://api.openai.com/v1"))
+
+        let cloud = try ProviderClient.encodeRequest(
+            model: "m", messages: [ProviderMessage(role: .user, content: "hi")],
+            reasoning: .off, cacheKey: "slot-1", cacheFields: false
+        )
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: cloud) as? [String: Any])
+        XCTAssertNil(json["cache_prompt"])
+        XCTAssertNil(json["prompt_cache_key"])
+    }
+
     func testEncodeRequestSetsStreamAndReasoning() throws {
         let data = try ProviderClient.encodeRequest(
             model: "test-model",

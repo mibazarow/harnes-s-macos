@@ -140,7 +140,8 @@ struct ProviderClient: Sendable {
         provider: ProviderModel,
         model: String,
         messages: [ProviderMessage],
-        tools: [ProviderToolSchema] = []
+        tools: [ProviderToolSchema] = [],
+        cacheKey: String? = nil
     ) -> AsyncThrowingStream<ProviderEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -170,7 +171,9 @@ struct ProviderClient: Sendable {
                         messages: messages,
                         reasoning: provider.reasoningLevel,
                         tools: tools,
-                        sampling: options
+                        sampling: options,
+                        cacheKey: Self.isLocal(baseURL: provider.baseURL) ? cacheKey : nil,
+                        cacheFields: Self.isLocal(baseURL: provider.baseURL)
                     )
                     request.httpBody = body
 
@@ -202,7 +205,9 @@ struct ProviderClient: Sendable {
                                 messages: messages,
                                 reasoning: provider.reasoningLevel,
                                 tools: tools,
-                                sampling: options
+                                sampling: options,
+                                cacheKey: Self.isLocal(baseURL: provider.baseURL) ? cacheKey : nil,
+                                cacheFields: Self.isLocal(baseURL: provider.baseURL)
                             )
                             request.httpBody = body
                             continue
@@ -318,6 +323,21 @@ struct ProviderClient: Sendable {
         return URL(string: trimmed + "/chat/completions")
     }
 
+    /// Local model servers keep a K/V cache per slot; cloud APIs do not and reject
+    /// unknown fields, so cache controls are sent only where they exist.
+    static func isLocal(baseURL: String) -> Bool {
+        guard let host = URL(string: baseURL)?.host?.lowercased() else { return false }
+        if host == "localhost" || host == "127.0.0.1" || host == "::1" || host.hasSuffix(".local") {
+            return true
+        }
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else { return false }
+        if parts[0] == 10 || parts[0] == 127 { return true }
+        if parts[0] == 192, parts[1] == 168 { return true }
+        if parts[0] == 172, (16...31).contains(parts[1]) { return true }
+        return false
+    }
+
     /// Default sampling temperature when a provider has none stored. Each provider
     /// carries its own value; this is only the fallback and the value for new ones.
     static let temperature: Double = ProviderModel.defaultTemperature
@@ -328,7 +348,9 @@ struct ProviderClient: Sendable {
         reasoning: ReasoningLevel,
         tools: [ProviderToolSchema] = [],
         temperature: Double = ProviderModel.defaultTemperature,
-        sampling: SamplingOptions? = nil
+        sampling: SamplingOptions? = nil,
+        cacheKey: String? = nil,
+        cacheFields: Bool = false
     ) throws -> Data {
         let options = sampling ?? SamplingOptions(temperature: temperature, maxTokens: nil)
         var payload: [String: Any] = [
@@ -337,6 +359,12 @@ struct ProviderClient: Sendable {
             "temperature": options.temperature,
             "messages": messages.map(encodeMessage)
         ]
+        // Prefix caches are a llama.cpp/Strata feature. Cloud OpenAI-compatible APIs
+        // reject unknown top-level fields, so these go only to local servers (R24.3).
+        if cacheFields {
+            payload["cache_prompt"] = true
+            if let cacheKey { payload["prompt_cache_key"] = cacheKey }
+        }
         if let presence = options.presencePenalty {
             payload["presence_penalty"] = presence
         }
