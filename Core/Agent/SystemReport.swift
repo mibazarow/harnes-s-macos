@@ -123,12 +123,14 @@ enum SystemReport {
     static var topProcessLines: [String] {
         // `ps` with a fixed locale: one internal call is cheaper than ranking by rusage
         // and still returns text the model never sees raw.
+        // `-m` sorts by resident memory; `-r` sorts by CPU. The trailing `=` in the field
+        // list suppresses the header, so no line may be dropped.
         guard let output = try? ToolRegistry.runSync(
-            "export LC_ALL=C; ps -Ao pid=,rss=,comm= -r | head -6",
+            "export LC_ALL=C; ps -Ao pid=,rss=,comm= -m | head -6",
             cwd: URL(fileURLWithPath: NSTemporaryDirectory()),
             timeout: 5
         ) else { return [] }
-        return output.split(separator: "\n").dropFirst().compactMap { line in
+        return output.split(separator: "\n").compactMap { line in
             let parts = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
             guard parts.count == 3, let rss = Int(parts[1]) else { return nil }
             return "pid=\(parts[0]) rss=\(rss / 1024)MB \(parts[2])"
