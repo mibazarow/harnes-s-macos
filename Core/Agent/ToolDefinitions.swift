@@ -142,6 +142,25 @@ extension ToolRegistry {
             ], required: ["action"])
         ),
         ToolDefinition(
+            name: "shortcut",
+            exposure: .deferred,
+            description: "Run macOS Shortcuts by name (list, run, view); this is the text channel for Calendar, Mail and other app actions.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["list", "run", "view"]],
+                "name": ["type": "string", "description": "Shortcut name"],
+                "input": ["type": "string", "description": "Text passed as a file to run"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
+            name: "app_script",
+            exposure: .deferred,
+            description: "Run AppleScript or JXA against an application dictionary (Safari, Finder, Mail). System Events is refused by TCC.",
+            parameters: schema([
+                "language": ["type": "string", "enum": ["applescript", "jxa"]],
+                "source": ["type": "string", "description": "Script source"]
+            ], required: ["source"])
+        ),
+        ToolDefinition(
             name: "process",
             description: "Long-lived background commands: run returns an id; logs, wait and stop manage it.",
             parameters: schema([

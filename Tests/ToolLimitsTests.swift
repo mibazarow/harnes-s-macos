@@ -422,16 +422,18 @@ final class ToolLimitsTests: XCTestCase {
 
     // MARK: - schema budget
 
-    func testToolSchemaCostStaysInsideItsBudget() {
-        // The budget is shared with MCP: `schemasTokenCost` counts `mcp__*` tools too,
-        // so adding an MCP server moves this number without a line in ToolRegistry.
-        // Full catalog measured 2026-11-17: 5 287 tokens for 52 tools; what is actually
-        // sent is 3 931 because rare tools travel deferred (see ToolCatalogTests). The
-        // ceiling keeps ~6% headroom over the full list: a tool that pushes the catalog
-        // past it has to make that trade explicitly instead of hiding it in a new
-        // description.
-        let cost = ToolRegistry.schemasTokenCost()
-        XCTAssertLessThanOrEqual(cost, Tuning.schemaTokenBudget, "\(cost) токенов на \(ToolRegistry.definitions.count) инструментов")
+    func testToolSchemaCostStaysInsideItsBudget() async {
+        // Since R19.0 the ceiling applies to what is actually sent: rare tools travel as
+        // one line and their schemas are loaded on demand. The full list is larger by
+        // design and is not the number the provider sees.
+        let registry = ToolRegistry(
+            workspace: URL(fileURLWithPath: NSTemporaryDirectory()),
+            memory: nil, embeddings: nil, secrets: nil, skills: nil, mcp: nil
+        )
+        let sent = await registry.schemaTokenCost()
+        let full = ToolRegistry.schemasTokenCost()
+        XCTAssertLessThan(sent, full, "sent=\(sent) full=\(full)")
+        XCTAssertLessThanOrEqual(sent, Tuning.schemaTokenBudget, "\(sent) токенов на \(ToolRegistry.definitions.count) инструментов")
     }
 
     // MARK: - argument coercion
