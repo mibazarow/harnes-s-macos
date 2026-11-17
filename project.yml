@@ -32,6 +32,9 @@ settings:
     DEVELOPMENT_TEAM: "7D5ULU9N7J"
     ENABLE_HARDENED_RUNTIME: YES
     ENABLE_APP_SANDBOX: NO
+    # Release must not carry get-task-allow: it lets any debugger attach.
+    # Dropping it does not touch the designated requirement, so TCC grants survive.
+    CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
     DEAD_CODE_STRIPPING: YES
     SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
 

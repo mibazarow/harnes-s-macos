@@ -684,6 +684,12 @@ DR провалится и гранты снова отвалятся. Вари�
 Отдельно: в текущей сборке есть entitlement `com.apple.security.get-task-allow`.
 Для релиза его стоит снять (выключает отладчик), на TCC не влияет.
 
+**Сделано:** `CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO` в `settings.base`.
+Проверено: `codesign -d --entitlements -` на Release печатает пусто, а DR
+остался прежним — `dc8e320057ca08726bd8df1aa0b1ff4a` до и после. Значит
+чистка entitlement'а гранты не сбрасывает, порядок «сначала сборка, потом
+выдача грантов» соблюдать не обязательно.
+
 ### Приёмка
 
 1. Правка `project.yml`, `xcodegen generate`.
