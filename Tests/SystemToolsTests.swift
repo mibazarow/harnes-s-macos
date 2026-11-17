@@ -92,6 +92,54 @@ final class SystemToolsTests: XCTestCase {
         }
     }
 
+    /// `runSync` prefixes `exit N`; a parser that forgets it prints the header as data.
+    func testProcessNameStripsTheExitHeader() {
+        let name = ToolRegistry.commandLine(of: Int(getpid()))
+        XCTAssertFalse(name.contains("exit"), name)
+        XCTAssertFalse(name.isEmpty, name)
+    }
+
+    func testDefaultGatewayStripsTheExitHeader() {
+        if let gateway = ToolRegistry.defaultGateway() {
+            XCTAssertFalse(gateway.contains("exit"), gateway)
+            XCTAssertFalse(gateway.contains("\n"), gateway)
+        }
+    }
+
+    // MARK: - R25.5 spotlight
+
+    /// Spotlight is switched off on this machine, so the honest answer is either the
+    /// index state or a filesystem walk — never a bare "not found".
+    func testSpotlightFallbackFindsAFileByName() {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("spotlight-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let probe = directory.appendingPathComponent("harness-probe-marker.txt")
+        FileManager.default.createFile(atPath: probe.path, contents: Data("x".utf8))
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let items = SpotlightSearch.findByName(
+            "harness-probe-marker", scope: directory.path, limit: 5
+        )
+        XCTAssertTrue(items.contains { $0.path == probe.path }, "\(items)")
+    }
+
+    func testSpotlightFallbackRespectsTheLimit() {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("spotlight-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for index in 0..<5 {
+            FileManager.default.createFile(
+                atPath: directory.appendingPathComponent("probe-\(index).txt").path,
+                contents: Data()
+            )
+        }
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let items = SpotlightSearch.findByName("probe-", scope: directory.path, limit: 2)
+        XCTAssertLessThanOrEqual(items.count, 2)
+    }
+
     // MARK: - R19.4 network
 
     func testListenersAreParsedFromMachineFormat() {

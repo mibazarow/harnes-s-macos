@@ -293,7 +293,8 @@ extension ToolRegistry {
             cwd: URL(fileURLWithPath: NSTemporaryDirectory()),
             timeout: 5
         ) else { return "?" }
-        return output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ToolRegistry.splitExit(output).body
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func signalNumber(_ name: String) -> Int32? {

@@ -68,6 +68,48 @@ enum SpotlightSearch {
         }
     }
 
+    /// Spotlight can be switched off system-wide (`mdutil -s /` → "Indexing and
+    /// searching disabled"). The query then returns zero results in milliseconds, and
+    /// "nothing found" reads as "the file does not exist" — the most expensive kind of
+    /// wrong answer, because it sends the caller looking for another explanation.
+    static func indexingDisabled(volume: String = "/") -> Bool {
+        guard let output = try? ToolRegistry.runSync(
+            "export LC_ALL=C; mdutil -s \(ToolRegistry.shellQuote(volume))",
+            cwd: URL(fileURLWithPath: NSTemporaryDirectory()),
+            timeout: 5
+        ) else { return false }
+        return ToolRegistry.splitExit(output).body.lowercased().contains("disabled")
+    }
+
+    /// Fallback when Spotlight is off: walk the scope by name with a depth cap and a
+    /// hard time limit. Slower than an index and shallower than a full walk, but it
+    /// answers "where is that file" instead of "the answer cannot be known".
+    static func findByName(_ text: String, scope: String, limit: Int) -> [Item] {
+        let root = scope.hasPrefix("/") ? scope : NSHomeDirectory()
+        // Skip Library: it holds millions of cache files and never answers this question.
+        let command = "export LC_ALL=C; find \(ToolRegistry.shellQuote(root)) -maxdepth 8 "
+            + "-iname \(ToolRegistry.shellQuote("*\(text)*")) "
+            + "-not -path '*/Library/*' -not -path '*/.git/*' 2>/dev/null | head -\(limit)"
+        guard let output = try? ToolRegistry.runSync(
+            command,
+            cwd: URL(fileURLWithPath: NSTemporaryDirectory()),
+            timeout: 20
+        ) else { return [] }
+        return ToolRegistry.splitExit(output).body
+            .split(separator: "\n")
+            .map { String($0) }
+            .filter { !$0.isEmpty }
+            .map { path in
+                let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+                return Item(
+                    path: path,
+                    size: (attributes?[.size] as? NSNumber)?.int64Value,
+                    modified: attributes?[.modificationDate] as? Date,
+                    kind: nil
+                )
+            }
+    }
+
     static func line(for item: Item) -> String {
         var parts = [item.path]
         if let size = item.size {
@@ -145,6 +187,17 @@ extension ToolRegistry {
         let scope = args["scope"] as? String ?? "home"
         let result = await SpotlightSearch.search(text: text, scope: scope, limit: limit)
 
+        if result.items.isEmpty, SpotlightSearch.indexingDisabled() {
+            let fallback = SpotlightSearch.findByName(text, scope: scope, limit: limit)
+            guard !fallback.isEmpty else {
+                return .fail("Индекс Spotlight отключён (mdutil -s / → disabled), и поиск по "
+                    + "файловой системе не нашёл «\(text)» в пределах 8 уровней от \(scope). "
+                    + "Включить индекс: sudo mdutil -i on /.")
+            }
+            let lines = fallback.map(SpotlightSearch.line(for:))
+            return .ok("Индекс Spotlight отключён — искал по файловой системе, "
+                + "\(lines.count) найдено:\n" + lines.joined(separator: "\n"))
+        }
         guard !result.items.isEmpty else {
             return result.timedOut
                 ? .fail("Spotlight не ответил за 15 с (индекс ещё строится?). Сузь scope до пути.")

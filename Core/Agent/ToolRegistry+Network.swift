@@ -252,7 +252,10 @@ extension ToolRegistry {
             cwd: URL(fileURLWithPath: NSTemporaryDirectory()),
             timeout: 5
         ) else { return nil }
-        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        // `runSync` prefixes an `exit N` header; without stripping it the gateway reads
+        // as "exit 0\n192.168.1.1" and the caller prints a stray line.
+        let trimmed = ToolRegistry.splitExit(output).body
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 }
