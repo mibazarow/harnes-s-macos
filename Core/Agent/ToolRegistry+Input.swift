@@ -77,3 +77,10 @@ extension ToolRegistry {
         up.post(tap: .cghidEventTap)
     }
 }
+
+
+extension ToolRegistry {
+    func permissionsTool() -> ToolResult {
+        .ok(PermissionsReport.text(for: PermissionsReport.current))
+    }
+}

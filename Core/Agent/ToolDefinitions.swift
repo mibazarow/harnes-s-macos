@@ -182,6 +182,12 @@ extension ToolRegistry {
             ], required: ["source"])
         ),
         ToolDefinition(
+            name: "permissions",
+            exposure: .deferred,
+            description: "Check Accessibility and Screen Recording grants for this process and show the settings panel paths.",
+            parameters: schema([:], required: [])
+        ),
+        ToolDefinition(
             name: "clipboard",
             exposure: .deferred,
             description: "Read, write, list types or clear the system clipboard. Prefer write + keyboard combo cmd+v for long texts.",

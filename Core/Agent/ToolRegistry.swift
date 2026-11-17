@@ -309,6 +309,7 @@ struct ToolRegistry: Sendable {
             case "mcp_tools": return await mcpTools(args)
             case "tool_load": return toolLoad(args)
             case "system": return systemTool(args)
+            case "permissions": return permissionsTool()
             case "clipboard": return clipboardTool(args)
             case "keyboard": return keyboardTool(args)
             case "process": return await processTool(args)
