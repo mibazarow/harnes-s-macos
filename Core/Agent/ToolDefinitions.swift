@@ -182,6 +182,26 @@ extension ToolRegistry {
             ], required: ["source"])
         ),
         ToolDefinition(
+            name: "clipboard",
+            exposure: .deferred,
+            description: "Read, write, list types or clear the system clipboard. Prefer write + keyboard combo cmd+v for long texts.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["read", "write", "types", "clear"]],
+                "text": ["type": "string", "description": "For write"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
+            name: "keyboard",
+            exposure: .deferred,
+            description: "Type Unicode text or press keys and combos in the frontmost app. Needs the Accessibility grant.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["type", "key", "combo"]],
+                "text": ["type": "string", "description": "For type"],
+                "key": ["type": "string", "description": "return, tab, escape, arrows, f1-f12"],
+                "combo": ["type": "string", "description": "cmd+shift+4, ctrl+alt+delete"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "system",
             description: "Machine state in one call: memory and swap, power and charge, thermal, load and uptime, volumes, top processes. Read-only.",
             parameters: schema([
