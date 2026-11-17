@@ -182,6 +182,24 @@ extension ToolRegistry {
             ], required: ["source"])
         ),
         ToolDefinition(
+            name: "ui",
+            exposure: .deferred,
+            description: "AX tree of an app, search by role/title/value, press or focus an element by path. Needs Accessibility; System Settings clicks need confirm.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["tree", "find", "click", "set_value", "focus"]],
+                "app": ["type": "string", "description": "App name or bundle id; default frontmost"],
+                "pid": ["type": "integer"],
+                "depth": ["type": "integer", "description": "tree depth, default 3, max 8"],
+                "max_nodes": ["type": "integer", "description": "tree budget, default 2000"],
+                "query": ["type": "string", "description": "find: substring or regex"],
+                "regex": ["type": "boolean"],
+                "limit": ["type": "integer", "description": "find: matches, default 20"],
+                "path": ["type": "array", "items": ["type": "integer"], "description": "Element path from tree or find"],
+                "value": ["type": "string", "description": "set_value"],
+                "confirm": ["type": "boolean", "description": "Required for System Settings actions"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "permissions",
             exposure: .deferred,
             description: "Check Accessibility and Screen Recording grants for this process and show the settings panel paths.",
