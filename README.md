@@ -19,7 +19,7 @@
 [![Version](https://img.shields.io/badge/version-1.1.0-b87333?style=flat-square)](#)
 [![Platform](https://img.shields.io/badge/platform-macOS%2027%2B-black?style=flat-square)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange?style=flat-square)](https://swift.org)
-[![Tests](https://img.shields.io/badge/tests-465%20green-brightgreen?style=flat-square)](#тесты)
+[![Tests](https://img.shields.io/badge/tests-468%20green-brightgreen?style=flat-square)](#тесты)
 [![Tools](https://img.shields.io/badge/tools-63-b87333?style=flat-square)](#инструменты)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
@@ -246,7 +246,7 @@ Services/     хранилище, провайдеры, память, эмбед
               индексатор, планировщик, безопасность файлов, история
 Storage/      схема SQLite и миграции v1–v8 (GRDB)
 Models/       доменные модели и ChatStore
-Tests/        465 тестов, включая живой SSE-сервер, MCP и FSEvents
+Tests/        468 тестов, включая живой SSE-сервер, MCP и FSEvents
 ```
 
 ### Модель данных
@@ -362,7 +362,7 @@ HARNES_S_DATA/
 
 ### Тесты
 
-465 тестов: SSE-клиент на локальном сервере (дельты, reasoning, tool_calls, ошибки), кодирование запроса с температурой провайдера, применение патчей, определение проекта, рендер дерева, защиты агента, профиль стиля, консолидация памяти, планировщик, MCP handshake с живыми серверами, локальный ONNX-эмбеддер, докачка модели (размеры, частичная загрузка, живой download по флагу), скиллы (парсер frontmatter, установка, чтение, индекс промпта, группировка), компакция (пачки, шаблон саммари, хвост по токенам, распознавание отказа по длине контекста), системные инструменты (разбор `lsof -F`, сигналы и их отказы, дерево процессов, интерфейсы и резолв, FSEvents с живым появлением файла, форматирование результатов Spotlight).
+468 тестов: SSE-клиент на локальном сервере (дельты, reasoning, tool_calls, ошибки), кодирование запроса с температурой провайдера, применение патчей, определение проекта, рендер дерева, защиты агента, профиль стиля, консолидация памяти, планировщик, MCP handshake с живыми серверами, локальный ONNX-эмбеддер, докачка модели (размеры, частичная загрузка, живой download по флагу), скиллы (парсер frontmatter, установка, чтение, индекс промпта, группировка), компакция (пачки, шаблон саммари, хвост по токенам, распознавание отказа по длине контекста), системные инструменты (разбор `lsof -F`, сигналы и их отказы, дерево процессов, интерфейсы и резолв, FSEvents с живым появлением файла, форматирование результатов Spotlight).
 
 ```bash
 xcodebuild -project Harness.xcodeproj -scheme Harness -destination 'platform=macOS' test
