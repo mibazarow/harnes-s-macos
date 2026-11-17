@@ -192,7 +192,7 @@ extension ToolRegistry {
             guard !fallback.isEmpty else {
                 return .fail("Индекс Spotlight отключён (mdutil -s / → disabled), и поиск по "
                     + "файловой системе не нашёл «\(text)» в пределах 8 уровней от \(scope). "
-                    + "Включить индекс: sudo mdutil -i on /.")
+                    + "Сузь scope до конкретного каталога и попробуй снова.")
             }
             let lines = fallback.map(SpotlightSearch.line(for:))
             return .ok("Индекс Spotlight отключён — искал по файловой системе, "
