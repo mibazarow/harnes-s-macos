@@ -165,23 +165,6 @@ MCP на 127.0.0.1:3100). Инструментов: **63**.
 origin, clip на стыке двух дисплеев. Тест падал бы до правки, потому что до правки
 конвертера нет.
 
-### R18.3 — `mouse`: физический ввод мышью
-
-`action: move | click | double_click | right_click | drag | scroll`
-
-- CGEvent: `.mouseMoved`, `.leftMouseDown`/`.leftMouseUp`, `.rightMouseDown`,
-  `.otherMouseDown` (средняя кнопка), `.scrollWheel`. Для `drag` — down, набор
-  `.leftMouseDragged` шагами (2–4 шага, иначе d&d не стартует), up.
-- Координаты — **точки**, после R18.1. Для `move` использовать
-  `CGWarpMouseCursorPosition` + `.mouseMoved`, иначе курсор не сдвинется до первого
-  события.
-- Между down и up — маленькая пауза; `click` с зажатым модификатором (cmd/shift/alt)
-  через `CGEventSetFlags`.
-- `scroll` — по пикселям с направлением, а не по «строкам»: трекпад и мышь дают разное.
-
-Тест: сборка CGEvent проверяется до отправки — тип, поля `kCGMouseEventClickState`,
-`kCGKeyboardEventKeycode`, flags. Отправка — в живом прогоне.
-
 ### R18.5 — `windows`: окна всех приложений
 
 `action: list | activate | move | resize | minimize | close | fullscreen | to_display`
