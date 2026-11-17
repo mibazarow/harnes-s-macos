@@ -445,6 +445,9 @@ extension ToolRegistry {
             description: "Capture the screen, a window, or a rectangle; returns the file path for image_read/ocr.",
             parameters: schema([
                 "window_id": ["type": "integer"],
+                "window": ["type": "string", "description": "Window title substring; resolved to id"],
+                "scale_down": ["type": "number", "description": "0..1 multiplier"],
+                "max_height": ["type": "integer", "description": "Resample so height fits"],
                 "clip": [
                     "type": "object",
                     "properties": [

@@ -178,6 +178,9 @@ extension ToolRegistry {
         var command = "screencapture -x"
         if let windowID = Self.int(args, "window_id") {
             command += " -o -l \(windowID)"
+        } else if let name = args["window"] as? String, !name.isEmpty,
+                  let windowID = Self.windowID(named: name) {
+            command += " -o -l \(windowID)"
         }
         if let clip = args["clip"] as? [String: Any],
            let x = Self.int(clip, "x"), let y = Self.int(clip, "y"),
@@ -191,8 +194,35 @@ extension ToolRegistry {
         guard status == 0, FileManager.default.fileExists(atPath: path.path) else {
             return .fail("screencapture: \(String(body.prefix(300)))")
         }
+        Self.resampleIfNeeded(path, scaleDown: Self.double(args, "scale_down"),
+                              maxHeight: Self.int(args, "max_height"))
         return .ok("Скриншот: \(path.path)\nРазмер: \(Self.humanSize(FileLines.fileSize(path))). "
             + "Дальше: image_read(path:) для кропа/сжатия, ocr(path:) для текста.")
+    }
+
+    static func windowID(named name: String) -> Int? {
+        let raw = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] ?? []
+        return raw.first { window in
+            (window[kCGWindowLayer as String] as? Int) == 0
+                && ((window[kCGWindowName as String] as? String) ?? "")
+                    .localizedCaseInsensitiveContains(name)
+        }.flatMap { $0[kCGWindowNumber as String] as? Int }
+    }
+
+    static func resampleIfNeeded(_ path: URL, scaleDown: Double?, maxHeight: Int?) {
+        guard scaleDown != nil || maxHeight != nil else { return }
+        guard let image = NSImage(contentsOf: path),
+              let size = image.representations.first.map({
+                  CGSize(width: $0.pixelsWide, height: $0.pixelsHigh)
+              }),
+              let target = ScreenshotScale.target(size: size, scaleDown: scaleDown, maxHeight: maxHeight)
+        else { return }
+        _ = try? Self.runSync(
+            "sips -z \(Int(target.height)) \(Int(target.width)) \(Self.shellQuote(path.path)) >/dev/null",
+            cwd: path.deletingLastPathComponent(), timeout: 20
+        )
     }
 
     func ocr(_ args: [String: Any]) throws -> ToolResult {
