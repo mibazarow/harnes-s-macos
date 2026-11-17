@@ -59,8 +59,61 @@ extension ToolRegistry {
             }
             return .ok(lines.isEmpty ? "Приложений не найдено." : lines.joined(separator: "\n"))
 
+        case "move", "resize", "minimize", "close", "fullscreen", "to_display":
+            guard InputAccess.isTrusted else { return .fail(InputAccess.refusal) }
+            guard let id = Self.int(args, "id") else { return .fail("id обязателен") }
+            guard let (element, _) = WindowActions.element(for: id) else {
+                return .fail("Окно \(id) не найдено в AX. Список — windows list.")
+            }
+            switch action {
+            case "move":
+                guard let x = Self.int(args, "x"), let y = Self.int(args, "y") else {
+                    return .fail("move: x и y обязательны")
+                }
+                return WindowActions.setFrame(element, position: CGPoint(x: x, y: y))
+                    ? .ok("Окно \(id) перемещено в \(x),\(y).")
+                    : .fail("AX отказал в перемещении окна \(id).")
+            case "resize":
+                guard let w = Self.int(args, "w"), let h = Self.int(args, "h"), w > 100, h > 100 else {
+                    return .fail("resize: w и h обязательны, минимум 100")
+                }
+                return WindowActions.setFrame(element, size: CGSize(width: w, height: h))
+                    ? .ok("Окно \(id): \(w)×\(h).")
+                    : .fail("AX отказал в изменении размера окна \(id).")
+            case "minimize":
+                let status = AXUIElementSetAttributeValue(
+                    element, kAXMinimizedAttribute as CFString, kCFBooleanTrue
+                )
+                return status == .success ? .ok("Окно \(id) свёрнуто.") : .fail("AX отказал.")
+            case "fullscreen":
+                let on = Self.bool(args, "value") ?? true
+                let value: CFTypeRef = on ? (kCFBooleanTrue as CFBoolean) : (kCFBooleanFalse as CFBoolean)
+                let status = AXUIElementSetAttributeValue(
+                    element, "AXFullScreen" as CFString, value
+                )
+                return status == .success ? .ok("Полный экран переключён.") : .fail("AX отказал.")
+            case "close":
+                return WindowActions.press(element, attribute: kAXCloseButtonAttribute as String)
+                    ? .ok("Окно \(id) закрыто.")
+                    : .fail("Кнопка закрытия недоступна; не продавливаю.")
+            default:
+                guard let target = Self.int(args, "display") else {
+                    return .fail("to_display: display обязателен (индекс из windows list)")
+                }
+                let displays = Self.displays()
+                guard target >= 0, target < displays.count else {
+                    return .fail("Нет дисплея \(target); всего \(displays.count).")
+                }
+                guard let frame = AXBridge.frame(element) else { return .fail("У окна нет рамки.") }
+                let size = WindowActions.fitted(size: frame.1, into: displays[target])
+                let origin = WindowActions.origin(for: size, in: displays[target])
+                return WindowActions.setFrame(element, position: origin, size: size)
+                    ? .ok("Окно \(id) перенесено на дисплей \(target).")
+                    : .fail("AX отказал в переносе.")
+            }
+
         default:
-            return .fail("action: list | apps")
+            return .fail("action: list | apps | move | resize | minimize | close | fullscreen | to_display")
         }
     }
 

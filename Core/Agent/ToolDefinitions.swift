@@ -157,9 +157,14 @@ extension ToolRegistry {
             name: "windows",
             description: "On-screen windows (id for screenshot) or running apps; bounds in points and pixels.",
             parameters: schema([
-                "action": ["type": "string", "enum": ["list", "apps"]],
-                "app": ["type": "string", "description": "Window list: only this application"],
-                "filter": ["type": "string", "description": "App list: name substring"]
+                "action": ["type": "string", "enum": ["list", "apps", "move", "resize", "minimize", "close", "fullscreen", "to_display"]],
+                "app": ["type": "string", "description": "list: only this application"],
+                "filter": ["type": "string", "description": "apps: name substring"],
+                "id": ["type": "integer", "description": "Window id from list"],
+                "x": ["type": "integer"], "y": ["type": "integer"],
+                "w": ["type": "integer"], "h": ["type": "integer"],
+                "display": ["type": "integer", "description": "to_display: index"],
+                "value": ["type": "boolean", "description": "fullscreen: on/off"]
             ], required: ["action"])
         ),
         ToolDefinition(
