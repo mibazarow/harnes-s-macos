@@ -11,6 +11,27 @@ extension ToolRegistry {
             parameters: schema(["path": ["type": "string", "description": "Directory path, default '.'"]], required: [])
         ),
         ToolDefinition(
+            name: "fs_copy",
+            description: "Copy a file or directory. Refuses to overwrite unless overwrite is true; dry_run reports the plan.",
+            parameters: schema([
+                "from": ["type": "string"], "to": ["type": "string"],
+                "overwrite": ["type": "boolean"], "dry_run": ["type": "boolean"]
+            ], required: ["from", "to"])
+        ),
+        ToolDefinition(
+            name: "fs_move",
+            description: "Move or rename a file or directory. Outside the workspace needs confirm: true.",
+            parameters: schema([
+                "from": ["type": "string"], "to": ["type": "string"],
+                "overwrite": ["type": "boolean"], "confirm": ["type": "boolean"]
+            ], required: ["from", "to"])
+        ),
+        ToolDefinition(
+            name: "fs_mkdir",
+            description: "Create a directory with intermediate parents.",
+            parameters: schema(["path": ["type": "string"]], required: ["path"])
+        ),
+        ToolDefinition(
             name: "fs_read",
             exposure: .core,
             description: "Read a UTF-8 text file with line numbers.",

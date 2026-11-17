@@ -122,7 +122,8 @@ struct ToolRegistry: Sendable {
         "doc_write",
         "git_commit", "git_stash",
         "bash", "schedule_add", "schedule_remove", "memory_add", "memory_forget", "secret_save",
-        "skill_install", "skill_remove", "index_workspace", "todowrite", "process", "app_script"
+        "skill_install", "skill_remove", "index_workspace", "todowrite", "process", "app_script",
+        "fs_copy", "fs_move", "fs_mkdir"
     ]
 
     /// Refuses a blind write.
@@ -248,6 +249,9 @@ struct ToolRegistry: Sendable {
         do {
             switch call.name {
             case "fs_list": return try listFiles(args)
+            case "fs_copy": return try fileOperation("copy", args)
+            case "fs_move": return try fileOperation("move", args)
+            case "fs_mkdir": return try fileOperation("mkdir", args)
             case "fs_read": return try await readFile(args)
             case "fs_write": return try await writeFile(args)
             case "edit_file": return try await editFile(args)
