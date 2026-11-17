@@ -27,8 +27,9 @@ settings:
     MACOSX_DEPLOYMENT_TARGET: "27.0"
     ARCHS: arm64
     ONLY_ACTIVE_ARCH: YES
-    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_IDENTITY: "Apple Development"
     CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: "7D5ULU9N7J"
     ENABLE_HARDENED_RUNTIME: YES
     ENABLE_APP_SANDBOX: NO
     DEAD_CODE_STRIPPING: YES
@@ -97,8 +98,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.project-s.swift.tests
         GENERATE_INFOPLIST_FILE: YES
-        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_IDENTITY: "Apple Development"
         CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: "7D5ULU9N7J"
 
 schemes:
   Harness:
