@@ -63,6 +63,7 @@ struct ToolRegistry: Sendable {
     let scheduler: SchedulerService?
     let fileSafety: FileSafetyService?
     let todos: TodoStore?
+    let processes: BackgroundProcessService?
     let readOnly: Bool
     let subagent: (@Sendable (String, Bool) async -> SubagentOutcome)?
     /// Session-scoped read state. Shared across turns so "read it first" survives the
@@ -93,7 +94,8 @@ struct ToolRegistry: Sendable {
         ledger: FileReadingLedger? = nil,
         skillScope: ActiveSkillScope? = nil,
         interceptors: ToolInterceptorChain = ToolInterceptorChain(),
-        catalog: ToolCatalogState = ToolCatalogState()
+        catalog: ToolCatalogState = ToolCatalogState(),
+        processes: BackgroundProcessService? = nil
     ) {
         self.workspace = workspace
         self.memory = memory
@@ -106,6 +108,7 @@ struct ToolRegistry: Sendable {
         self.scheduler = scheduler
         self.fileSafety = fileSafety
         self.todos = todos
+        self.processes = processes
         self.readOnly = readOnly
         self.subagent = subagent
         self.ledger = ledger ?? FileReadingLedger()
@@ -119,7 +122,7 @@ struct ToolRegistry: Sendable {
         "doc_write",
         "git_commit", "git_stash",
         "bash", "schedule_add", "schedule_remove", "memory_add", "memory_forget", "secret_save",
-        "skill_install", "skill_remove", "index_workspace", "todowrite"
+        "skill_install", "skill_remove", "index_workspace", "todowrite", "process"
     ]
 
     /// Refuses a blind write.
@@ -296,6 +299,7 @@ struct ToolRegistry: Sendable {
             case "mcp_list": return await mcpList()
             case "mcp_tools": return await mcpTools(args)
             case "tool_load": return toolLoad(args)
+            case "process": return await processTool(args)
             default:
                 if call.name.hasPrefix("mcp__") {
                     return await callMCP(call, args: args)

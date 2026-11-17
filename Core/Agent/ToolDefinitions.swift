@@ -133,6 +133,19 @@ extension ToolRegistry {
             ], required: ["path", "version"])
         ),
         ToolDefinition(
+            name: "process",
+            description: "Long-lived background commands: dev servers, watchers, builds. action=run starts one and returns its id; logs, wait, stop manage it.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["run", "list", "logs", "stop", "wait"]],
+                "command": ["type": "string", "description": "Shell command for run"],
+                "cwd": ["type": "string", "description": "Working directory, default workspace"],
+                "id": ["type": "string", "description": "Process id from run or list"],
+                "lines": ["type": "integer", "description": "Log lines to return, default 50"],
+                "filter": ["type": "string", "description": "Only lines containing this substring"],
+                "timeout_ms": ["type": "integer", "description": "wait timeout, default 30000, max 600000"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "task",
             exposure: .core,
             description: "Delegate a self-contained job to a fresh subagent with its own context. Returns only its final answer. Pass paths to hand over files or folders you already found, so the subagent does not search for them again.",

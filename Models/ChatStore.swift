@@ -65,6 +65,8 @@ final class ChatStore {
     var schemaTokens: Int = 0
     /// Session-scoped catalog expansions; shared by the main loop and subagents.
     let toolCatalog = ToolCatalogState()
+    /// Background children survive turns; the registry is rebuilt per turn, this is not.
+    let backgroundProcesses = BackgroundProcessService()
     /// First message of the task in progress. Everything before it belongs to closed
     /// tasks and may be pruned from the request.
     var taskStartIndex: Int = 0
@@ -235,7 +237,8 @@ final class ChatStore {
                 [ArgumentRulesInterceptor(), BrowserGuardInterceptor()],
                 log: { line in ChatStore.logLatency(line) }
             ),
-            catalog: toolCatalog
+            catalog: toolCatalog,
+            processes: backgroundProcesses
         )
 
         schemaTokens = await registry.schemaTokenCost()
@@ -473,7 +476,8 @@ final class ChatStore {
                 [ArgumentRulesInterceptor(), BrowserGuardInterceptor()],
                 log: { line in ChatStore.logLatency(line) }
             ),
-            catalog: toolCatalog
+            catalog: toolCatalog,
+            processes: backgroundProcesses
         )
 
         let system = Prompts.system + """
