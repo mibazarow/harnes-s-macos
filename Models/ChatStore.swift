@@ -63,6 +63,8 @@ final class ChatStore {
     var revealID: UUID?
     /// Serialized tool catalog price for the current run, counted against the window.
     var schemaTokens: Int = 0
+    /// Session-scoped catalog expansions; shared by the main loop and subagents.
+    let toolCatalog = ToolCatalogState()
     /// First message of the task in progress. Everything before it belongs to closed
     /// tasks and may be pruned from the request.
     var taskStartIndex: Int = 0
@@ -232,7 +234,8 @@ final class ChatStore {
             interceptors: ToolInterceptorChain(
                 [ArgumentRulesInterceptor(), BrowserGuardInterceptor()],
                 log: { line in ChatStore.logLatency(line) }
-            )
+            ),
+            catalog: toolCatalog
         )
 
         schemaTokens = await registry.schemaTokenCost()
@@ -469,7 +472,8 @@ final class ChatStore {
             interceptors: ToolInterceptorChain(
                 [ArgumentRulesInterceptor(), BrowserGuardInterceptor()],
                 log: { line in ChatStore.logLatency(line) }
-            )
+            ),
+            catalog: toolCatalog
         )
 
         let system = Prompts.system + """

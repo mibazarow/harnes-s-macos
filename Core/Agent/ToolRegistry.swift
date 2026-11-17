@@ -10,10 +10,41 @@ struct ToolResult: Sendable {
     static func fail(_ text: String) -> ToolResult { ToolResult(output: text, isError: true) }
 }
 
+/// How a definition travels in the catalog. `deferred` tools keep their name and one
+/// line in every request; the full schema is fetched by `tool_load` when needed. The
+/// catalog is a permanent tax on context, so the rare groups pay only when used.
+enum ToolExposure: String, Sendable {
+    case core
+    case normal
+    case deferred
+}
+
 struct ToolDefinition: Sendable {
     let name: String
+    var exposure: ToolExposure = .normal
     let description: String
     let parameters: [String: AnySendable]
+}
+
+/// Session-scoped set of schemas the model asked to see in full.
+final class ToolCatalogState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var loaded: Set<String> = []
+
+    func isLoaded(_ name: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return loaded.contains(name)
+    }
+
+    func load(_ names: [String]) {
+        lock.lock(); defer { lock.unlock() }
+        loaded.formUnion(names)
+    }
+
+    func loadedNames() -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return loaded.sorted()
+    }
 }
 
 /// Stateless dispatcher: every dependency is an injected actor or a value.
@@ -42,6 +73,8 @@ struct ToolRegistry: Sendable {
     /// Gates in front of every call. Empty by default: a registry without interceptors
     /// behaves exactly as before.
     let interceptors: ToolInterceptorChain
+    /// Shared across turns so `tool_load` stays in effect until the session ends.
+    let catalog: ToolCatalogState
 
     init(
         workspace: URL,
@@ -59,7 +92,8 @@ struct ToolRegistry: Sendable {
         subagent: (@Sendable (String, Bool) async -> SubagentOutcome)? = nil,
         ledger: FileReadingLedger? = nil,
         skillScope: ActiveSkillScope? = nil,
-        interceptors: ToolInterceptorChain = ToolInterceptorChain()
+        interceptors: ToolInterceptorChain = ToolInterceptorChain(),
+        catalog: ToolCatalogState = ToolCatalogState()
     ) {
         self.workspace = workspace
         self.memory = memory
@@ -77,6 +111,7 @@ struct ToolRegistry: Sendable {
         self.ledger = ledger ?? FileReadingLedger()
         self.skillScope = skillScope
         self.interceptors = interceptors
+        self.catalog = catalog
     }
 
     static let mutatingTools: Set<String> = [
@@ -124,8 +159,20 @@ struct ToolRegistry: Sendable {
             if let skillScope, !(await skillScope.allows(definition.name)) { continue }
             allowed.append(definition)
         }
-        var result = allowed.map {
-            ProviderToolSchema(name: $0.name, description: $0.description, parameters: $0.parameters)
+        var result = allowed.map { definition -> ProviderToolSchema in
+            if definition.exposure == .deferred, !catalog.isLoaded(definition.name) {
+                // One line is enough to know the tool exists and ask for its schema.
+                return ProviderToolSchema(
+                    name: definition.name,
+                    description: Self.compactDescription(definition),
+                    parameters: ["type": AnySendable("object"), "properties": AnySendable([String: Any]())]
+                )
+            }
+            return ProviderToolSchema(
+                name: definition.name,
+                description: definition.description,
+                parameters: definition.parameters
+            )
         }
 
         if let mcpManager, !readOnly {
@@ -150,6 +197,14 @@ struct ToolRegistry: Sendable {
         }
 
         return result
+    }
+
+    static func compactDescription(_ definition: ToolDefinition) -> String {
+        let first = definition.description
+            .split(separator: ".", maxSplits: 1, omittingEmptySubsequences: true)
+            .first.map(String.init) ?? definition.description
+        let short = first.count > 110 ? String(first.prefix(110)) + "…" : first
+        return short + " [schema: tool_load(\"\(definition.name)\")]"
     }
 
     func execute(_ call: ToolCall) async -> ToolResult {
@@ -177,6 +232,10 @@ struct ToolRegistry: Sendable {
             let preview = call.arguments.count > 200
                 ? String(call.arguments.prefix(200)) + "…"
                 : call.arguments
+            if let hint = deferredSchemaHint(call.name) {
+                return .fail("Аргументы \(call.name) — невалидный JSON: "
+                    + "\(preview.isEmpty ? "(пусто)" : preview).\n" + hint)
+            }
             return .fail(
                 "Аргументы \(call.name) — невалидный JSON: \(preview.isEmpty ? "(пусто)" : preview). "
                 + "Вызови инструмент заново с корректным JSON-объектом."
@@ -236,6 +295,7 @@ struct ToolRegistry: Sendable {
             case "skill_remove": return await skillRemove(args)
             case "mcp_list": return await mcpList()
             case "mcp_tools": return await mcpTools(args)
+            case "tool_load": return toolLoad(args)
             default:
                 if call.name.hasPrefix("mcp__") {
                     return await callMCP(call, args: args)

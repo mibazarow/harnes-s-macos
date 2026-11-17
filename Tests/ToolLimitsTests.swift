@@ -425,10 +425,11 @@ final class ToolLimitsTests: XCTestCase {
     func testToolSchemaCostStaysInsideItsBudget() {
         // The budget is shared with MCP: `schemasTokenCost` counts `mcp__*` tools too,
         // so adding an MCP server moves this number without a line in ToolRegistry.
-        // Measured 2026-11-15: 5 187 tokens for 51 tools by the app's own estimator
-        // (3 635 at 46; 4 405 at 49; 4 886 at 50). The ceiling keeps ~8% headroom: a
-        // tool that pushes the catalog past it has to make that trade explicitly
-        // instead of hiding it in a new description.
+        // Full catalog measured 2026-11-17: 5 287 tokens for 52 tools; what is actually
+        // sent is 3 931 because rare tools travel deferred (see ToolCatalogTests). The
+        // ceiling keeps ~6% headroom over the full list: a tool that pushes the catalog
+        // past it has to make that trade explicitly instead of hiding it in a new
+        // description.
         let cost = ToolRegistry.schemasTokenCost()
         XCTAssertLessThanOrEqual(cost, Tuning.schemaTokenBudget, "\(cost) токенов на \(ToolRegistry.definitions.count) инструментов")
     }
