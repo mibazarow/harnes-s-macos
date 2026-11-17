@@ -84,3 +84,17 @@ extension ToolRegistry {
         .ok(PermissionsReport.text(for: PermissionsReport.current))
     }
 }
+
+
+extension ToolRegistry {
+    func notifyTool(_ args: [String: Any]) async -> ToolResult {
+        guard let title = args["title"] as? String, !title.isEmpty else {
+            return .fail("title обязателен")
+        }
+        let body = (args["body"] as? String) ?? ""
+        if let failure = await NotificationService().send(title: title, body: body) {
+            return .fail(failure)
+        }
+        return .ok("Уведомление отправлено.")
+    }
+}

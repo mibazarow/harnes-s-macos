@@ -225,6 +225,14 @@ extension ToolRegistry {
             ], required: ["action", "x", "y"])
         ),
         ToolDefinition(
+            name: "notify",
+            exposure: .deferred,
+            description: "Send a macOS notification with a title and body; refuses honestly when authorization is denied.",
+            parameters: schema([
+                "title": ["type": "string"], "body": ["type": "string"]
+            ], required: ["title"])
+        ),
+        ToolDefinition(
             name: "clipboard",
             exposure: .deferred,
             description: "Read, write, list types or clear the system clipboard. Prefer write + keyboard combo cmd+v for long texts.",

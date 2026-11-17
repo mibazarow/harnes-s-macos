@@ -310,6 +310,7 @@ struct ToolRegistry: Sendable {
             case "tool_load": return toolLoad(args)
             case "system": return systemTool(args)
             case "permissions": return permissionsTool()
+            case "notify": return await notifyTool(args)
             case "ui": return uiTool(args)
             case "mouse": return mouseTool(args)
             case "clipboard": return clipboardTool(args)
