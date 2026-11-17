@@ -187,8 +187,11 @@ extension ToolRegistry {
             "export LC_ALL=C; ps -o pid=,ppid=,stat=,lstart=,pcpu=,args= -p \(pid)",
             cwd: URL(fileURLWithPath: NSTemporaryDirectory()),
             timeout: 5
-        ), !ps.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            lines.append("ps: \(ps.trimmingCharacters(in: .whitespacesAndNewlines))")
+        ), !ToolRegistry.splitExit(ps).body
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let body = ToolRegistry.splitExit(ps).body
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            lines.append("ps: \(body)")
         } else {
             lines.append("ps: процесса \(pid) нет (или уже завершился)")
         }

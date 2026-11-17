@@ -92,6 +92,13 @@ final class SystemToolsTests: XCTestCase {
         }
     }
 
+    /// `process info` labels the `ps` row; the header must not survive into the field.
+    func testProcessInfoHidesTheExitHeader() {
+        let result = ToolRegistry.processInfo(["pid": Int(getpid())])
+        XCTAssertFalse(result.isError, result.output)
+        XCTAssertFalse(result.output.contains("ps: exit"), result.output)
+    }
+
     /// `runSync` prefixes `exit N`; a parser that forgets it prints the header as data.
     func testProcessNameStripsTheExitHeader() {
         let name = ToolRegistry.commandLine(of: Int(getpid()))
