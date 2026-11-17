@@ -90,12 +90,27 @@ enum NetworkReport {
     /// The `-F` machine format is used because the default output wraps columns and
     /// splits one row across lines.
     static func listeners() -> [(port: Int, proto: String, address: String, pid: Int, command: String)] {
-        guard let output = try? ToolRegistry.runSync(
-            "export LC_ALL=C; lsof -nP -iTCP -iUDP -sTCP:LISTEN -FpcPn",
-            cwd: URL(fileURLWithPath: NSTemporaryDirectory()),
-            timeout: 15
-        ) else { return [] }
-        return parseListeners(output)
+        // TCP and UDP are queried separately on purpose: `-iTCP -iUDP -sTCP:LISTEN`
+        // makes lsof return UDP entries only, leaving every listening TCP socket out.
+        let commands = [
+            "export LC_ALL=C; lsof -nP -iTCP -sTCP:LISTEN -FpcPn",
+            "export LC_ALL=C; lsof -nP -iUDP -FpcPn"
+        ]
+        var rows: [(port: Int, proto: String, address: String, pid: Int, command: String)] = []
+        for command in commands {
+            guard let output = try? ToolRegistry.runSync(
+                command,
+                cwd: URL(fileURLWithPath: NSTemporaryDirectory()),
+                timeout: 15
+            ) else { continue }
+            rows += parseListeners(output)
+        }
+        // One port is routinely reported twice (IPv4 and IPv6, or a socket inherited by
+        // a child); the answer is "who listens", not "how many sockets".
+        var seen = Set<String>()
+        return rows.filter { row in
+            seen.insert("\(row.port)|\(row.address)|\(row.pid)").inserted
+        }
     }
 
     /// Split from the call so the format can be tested without a live socket table.

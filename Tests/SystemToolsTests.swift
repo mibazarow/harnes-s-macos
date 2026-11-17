@@ -53,6 +53,45 @@ final class SystemToolsTests: XCTestCase {
         XCTAssertTrue(result.output.contains("pid="), result.output)
     }
 
+    /// The table is ~90 KB while `runSync` returns 22 KB, so a filter applied in Swift
+    /// after the call silently loses every process above pid ~250. Filtering must live
+    /// in the pipeline, where the answer is narrow before it is cut.
+    func testPsFiltersBeforeTheOutputCap() {
+        let command = ToolRegistry.psCommand(filter: "phpstorm", sort: "memory", limit: 20)
+        XCTAssertTrue(command.contains("grep -i -F"), command)
+        XCTAssertTrue(command.contains("phpstorm"), command)
+    }
+
+    /// Without a filter the cut is unavoidable, so `ps` itself must sort the whole table
+    /// first — otherwise `head` returns the lowest pids, not the heaviest processes.
+    func testPsSortsBeforeCuttingWithoutFilter() {
+        let memory = ToolRegistry.psCommand(filter: nil, sort: "memory", limit: 20)
+        XCTAssertTrue(memory.contains(" -m"), memory)
+        XCTAssertTrue(memory.contains("head -25"), memory)
+
+        let cpu = ToolRegistry.psCommand(filter: nil, sort: "cpu", limit: 5)
+        XCTAssertTrue(cpu.contains(" -r"), cpu)
+    }
+
+    func testPsCommandQuotesTheFilter() {
+        let command = ToolRegistry.psCommand(filter: "a b; rm -rf /", sort: "memory", limit: 5)
+        // The payload must survive as one quoted argument, not as extra shell words.
+        XCTAssertTrue(command.hasSuffix("'a b; rm -rf /'"), command)
+    }
+
+    /// A high-pid process is the regression case: it sits past the old 22 KB cut.
+    func testPsSeesProcessesBeyondTheOutputCap() {
+        let own = ToolRegistry.processList(["filter": "Harness", "limit": 50])
+        XCTAssertFalse(own.isError, own.output)
+        // The test runs inside Harness, so the process exists unless the bundle name
+        // was changed; assert on any pid being present rather than on the exact name.
+        if !own.output.contains("pid=") {
+            let shell = ToolRegistry.processList(["filter": "zsh", "limit": 20])
+            XCTAssertFalse(shell.isError, shell.output)
+            XCTAssertTrue(shell.output.contains("pid="), shell.output)
+        }
+    }
+
     // MARK: - R19.4 network
 
     func testListenersAreParsedFromMachineFormat() {

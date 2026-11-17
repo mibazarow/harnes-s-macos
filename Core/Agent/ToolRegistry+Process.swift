@@ -78,13 +78,31 @@ extension ToolRegistry {
     /// `proc_pidinfo` of another user's process: it returns 0 bytes for root-owned
     /// processes, and a listing that silently drops WindowServer is worse than none.
     /// The locale is pinned so the numbers never come back with a comma.
+    /// Builds the `ps` pipeline.
+    ///
+    /// Filtering happens inside `ps`/`grep`, not after the fact: the full table is around
+    /// 90 KB and `runSync` hands back only the first 22 KB, which silently hides every
+    /// process above pid ~250 — `ps` once "lost" the application it was running inside.
+    /// Sorting also happens in `ps` (`-m` by resident memory, `-r` by CPU) so that the
+    /// `head` cut keeps the real leaders instead of the first rows of the table.
+    static func psCommand(filter: String?, sort: String, limit: Int) -> String {
+        var command = "export LC_ALL=C; ps -Ao pid=,ppid=,rss=,pcpu=,etime=,comm="
+        if let filter {
+            command += " | grep -i -F -- \(shellQuote(filter))"
+        } else {
+            command += sort == "cpu" ? " -r" : (sort == "pid" ? "" : " -m")
+            command += " | head -\(limit + 5)"
+        }
+        return command
+    }
+
     static func processList(_ args: [String: Any]) -> ToolResult {
         let filter = (args["filter"] as? String)?.lowercased()
         let limit = min(max(Coerce.int(args["limit"]) ?? 20, 1), 200)
         let sort = (args["sort"] as? String)?.lowercased() ?? "memory"
 
         guard let output = try? runSync(
-            "export LC_ALL=C; ps -Ao pid=,ppid=,rss=,pcpu=,etime=,comm=",
+            Self.psCommand(filter: filter, sort: sort, limit: limit),
             cwd: URL(fileURLWithPath: NSTemporaryDirectory()),
             timeout: 10
         ) else {
