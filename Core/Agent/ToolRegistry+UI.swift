@@ -47,15 +47,21 @@ extension ToolRegistry {
             guard let path = Self.path(args), let element = AXBridge.element(at: path, in: root) else {
                 return .fail("path не найден; сначала вызови ui tree или find.")
             }
+            let verify = Self.bool(args, "verify") ?? false
+            var beforeFrame: CGRect?
+            if verify, let frame = AXBridge.frame(element) {
+                beforeFrame = CGRect(origin: frame.0, size: frame.1)
+            }
             if AXUIElementPerformAction(element, kAXPressAction as CFString) == .success {
-                return .ok("Нажато: \(path.description)")
+                return .ok("Нажато: \(path.description)" + Self.verification(beforeFrame))
             }
             guard let frame = AXBridge.frame(element) else {
                 return .fail("Элемент не поддерживает press и не имеет координат.")
             }
             let center = CGPoint(x: frame.0.x + frame.1.width / 2, y: frame.0.y + frame.1.height / 2)
             Self.click(at: center)
-            return .ok("Press не поддерживается; клик по центру \(Int(center.x)),\(Int(center.y)).")
+            return .ok("Press не поддерживается; клик по центру \(Int(center.x)),\(Int(center.y))."
+                + Self.verification(beforeFrame))
         case "set_value":
             guard let path = Self.path(args), let element = AXBridge.element(at: path, in: root) else {
                 return .fail("path не найден.")
@@ -141,5 +147,19 @@ extension ToolRegistry {
             current = match
         }
         return current
+    }
+}
+
+
+extension ToolRegistry {
+    static func verification(_ rect: CGRect?) -> String {
+        guard let rect else { return "" }
+        guard CGPreflightScreenCaptureAccess() else {
+            return "\nverify: нет гранта Screen Recording, сравнение кадров пропущено."
+        }
+        guard let (changed, before, after) = ScreenshotVerify.captureAndCompare(rect: rect) else {
+            return "\nverify: кадры не сняты."
+        }
+        return "\nverify: changed=\(changed) before=\(before) after=\(after)"
     }
 }

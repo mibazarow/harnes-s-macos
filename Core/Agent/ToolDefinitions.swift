@@ -202,7 +202,8 @@ extension ToolRegistry {
                 "path": ["type": "array", "items": ["type": "integer"], "description": "Element path from tree or find"],
                 "value": ["type": "string", "description": "set_value"],
                 "path_titles": ["type": "array", "items": ["type": "string"], "description": "menu_click via path"],
-                "confirm": ["type": "boolean", "description": "Required for System Settings actions"]
+                "confirm": ["type": "boolean", "description": "Required for System Settings actions"],
+                "verify": ["type": "boolean", "description": "click: compare the element area before/after"]
             ], required: ["action"])
         ),
         ToolDefinition(
