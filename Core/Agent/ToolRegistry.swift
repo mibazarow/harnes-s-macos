@@ -203,6 +203,11 @@ struct ToolRegistry: Sendable {
         return result
     }
 
+    func systemTool(_ args: [String: Any]) -> ToolResult {
+        let sections = Set((args["sections"] as? [String] ?? []).map { $0.lowercased() })
+        return .ok(SystemReport.text(sections: sections))
+    }
+
     static func compactDescription(_ definition: ToolDefinition) -> String {
         let first = definition.description
             .split(separator: ".", maxSplits: 1, omittingEmptySubsequences: true)
@@ -303,6 +308,7 @@ struct ToolRegistry: Sendable {
             case "mcp_list": return await mcpList()
             case "mcp_tools": return await mcpTools(args)
             case "tool_load": return toolLoad(args)
+            case "system": return systemTool(args)
             case "process": return await processTool(args)
             case "windows": return windowsTool(args)
             case "shortcut": return await shortcutTool(args)

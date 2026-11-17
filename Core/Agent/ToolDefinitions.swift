@@ -182,6 +182,14 @@ extension ToolRegistry {
             ], required: ["source"])
         ),
         ToolDefinition(
+            name: "system",
+            description: "Machine state in one call: memory and swap, power and charge, thermal, load and uptime, volumes, top processes. Read-only.",
+            parameters: schema([
+                "sections": ["type": "array", "items": ["type": "string"],
+                             "description": "memory, power, load, volumes, processes; omit for all"]
+            ], required: [])
+        ),
+        ToolDefinition(
             name: "process",
             description: "Long-lived background commands: run returns an id; logs, wait and stop manage it.",
             parameters: schema([
