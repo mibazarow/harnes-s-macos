@@ -206,6 +206,19 @@ extension ToolRegistry {
             parameters: schema([:], required: [])
         ),
         ToolDefinition(
+            name: "mouse",
+            exposure: .deferred,
+            description: "Move, click, drag or scroll the pointer in screen points. Needs the Accessibility grant.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["move", "click", "double_click", "right_click", "drag", "scroll"]],
+                "x": ["type": "integer"], "y": ["type": "integer"],
+                "to_x": ["type": "integer", "description": "drag target"],
+                "to_y": ["type": "integer"],
+                "dx": ["type": "integer", "description": "scroll pixels"],
+                "dy": ["type": "integer"]
+            ], required: ["action", "x", "y"])
+        ),
+        ToolDefinition(
             name: "clipboard",
             exposure: .deferred,
             description: "Read, write, list types or clear the system clipboard. Prefer write + keyboard combo cmd+v for long texts.",
