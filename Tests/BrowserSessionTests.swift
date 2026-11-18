@@ -1,9 +1,10 @@
 import XCTest
 @testable import Harness
 
-/// R16.6: the session decides four things without ever touching a real browser — ours,
-/// foreign port, missing bundle, launch that never opens the port — and the script must
-/// connect instead of launch and must never close the live browser.
+/// R16.6: the session decides six things without ever touching a real browser — ours,
+/// foreign port, broken profile, missing bundle, missing binary in an existing bundle,
+/// launch that never opens the port — and the script must connect instead of launch and
+/// must never close the live browser.
 final class BrowserSessionTests: XCTestCase {
     private var root: URL!
 
@@ -44,24 +45,37 @@ final class BrowserSessionTests: XCTestCase {
         }
     }
 
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        func bump() { lock.lock(); value += 1; lock.unlock() }
+        var current: Int { lock.lock(); defer { lock.unlock() }; return value }
+    }
+
     private func session(
         paths: BrowserPaths,
         portUp: @escaping @Sendable () -> Bool,
         ours: Bool = true,
-        launch: @escaping @Sendable () -> Void = {}
+        targetsAlive: @escaping @Sendable () -> Bool = { true },
+        launch: @escaping @Sendable () -> Void = {},
+        kill: @escaping @Sendable () -> Void = {},
+        removeLocks: @escaping @Sendable () -> [String] = { [] }
     ) -> BrowserSession {
         BrowserSession(
             paths: paths,
             hooks: BrowserSession.Hooks(
                 portResponds: { _ in portUp() },
                 ownerIsOurs: { _ in ours },
+                targetsAlive: { _ in targetsAlive() },
                 launch: { _ in launch() },
+                killOurProcess: { _ in kill() },
+                removeProfileLocks: { _ in removeLocks() },
                 pause: { _ in }
             )
         )
     }
 
-    func testReadyWhenOurBrowserAnswers() async throws {
+    func testReadyWhenOurBrowserAnswersWithAPage() async throws {
         let paths = try paths()
         let session = session(paths: paths, portUp: { true })
 
@@ -70,9 +84,76 @@ final class BrowserSessionTests: XCTestCase {
         XCTAssertEqual(paths.endpoint.absoluteString, "http://127.0.0.1:9222")
     }
 
+    func testOpenPortWithoutTargetsIsNotReady() async throws {
+        let paths = try paths()
+        let session = session(paths: paths, portUp: { true }, targetsAlive: { false })
+
+        let state = await session.ensureRunning(deadline: 0.5)
+        guard case .failed(let reason) = state else {
+            return XCTFail("порт без вкладок не должен считаться готовым: \(state)")
+        }
+        XCTAssertTrue(reason.contains("не открывал вкладок"), reason)
+    }
+
+    func testBrokenProfileIsHealedByName() async throws {
+        let paths = try paths()
+        let killed = Flag(false)
+        let launched = Counter()
+        let session = session(
+            paths: paths,
+            portUp: { true },
+            targetsAlive: { false },
+            launch: { launched.bump() },
+            kill: { killed.current = true },
+            removeLocks: { ["SingletonLock", "SingletonCookie"] }
+        )
+
+        let state = await session.ensureRunning(deadline: 0.5)
+        guard case .failed(let reason) = state else {
+            return XCTFail("битый профиль должен лечиться и всё равно отказать")
+        }
+        XCTAssertTrue(killed.current, "свой процесс должен быть погашен")
+        XCTAssertEqual(launched.current, 1, "браузер должен быть запущен заново")
+        XCTAssertTrue(reason.contains("перезапустил"), reason)
+        XCTAssertTrue(reason.contains("SingletonLock"), reason)
+        XCTAssertTrue(reason.contains("SingletonCookie"), reason)
+    }
+
+    func testHealedProfileBecomesReady() async throws {
+        let paths = try paths()
+        let relaunched = Flag(false)
+        let session = BrowserSession(
+            paths: paths,
+            hooks: BrowserSession.Hooks(
+                portResponds: { _ in true },
+                ownerIsOurs: { _ in true },
+                // Broken until the relaunch, alive afterwards.
+                targetsAlive: { _ in relaunched.current },
+                launch: { _ in relaunched.current = true },
+                killOurProcess: { _ in },
+                removeProfileLocks: { _ in ["SingletonLock"] },
+                pause: { _ in }
+            )
+        )
+
+        let state = await session.ensureRunning(deadline: 1)
+        XCTAssertEqual(state, .ready(paths.endpoint))
+    }
+
+    func testAbsentBrowserIsNotRunningNotAnError() async throws {
+        let paths = try paths()
+        let session = session(paths: paths, portUp: { false })
+
+        let state = await session.currentState()
+        XCTAssertEqual(state, .notRunning(paths))
+    }
+
     func testForeignPortIsRefusedWithoutKillingIt() async throws {
         let paths = try paths()
-        let session = session(paths: paths, portUp: { true }, ours: false)
+        let killed = Flag(false)
+        let session = session(
+            paths: paths, portUp: { true }, ours: false, kill: { killed.current = true }
+        )
 
         let state = await session.ensureRunning()
         guard case .failed(let reason) = state else {
@@ -80,6 +161,7 @@ final class BrowserSessionTests: XCTestCase {
         }
         XCTAssertTrue(reason.contains("занят другим Chrome"), reason)
         XCTAssertTrue(reason.contains("Не убиваю"), reason)
+        XCTAssertFalse(killed.current, "чужой процесс трогать нельзя")
     }
 
     func testMissingBundleNamesThePath() async throws {
@@ -92,6 +174,35 @@ final class BrowserSessionTests: XCTestCase {
         }
         XCTAssertTrue(reason.contains(paths.bundle.path), reason)
         XCTAssertTrue(reason.contains("не найден"), reason)
+    }
+
+    func testEmptyBundleNamesTheExactBinaryAndVersion() async throws {
+        // A bundle exists with an Info.plist but no Contents/MacOS: the old check only
+        // asked whether the bundle folder was there and then failed at launch time.
+        let bundle = root.appendingPathComponent("HarnessBrowser.app", isDirectory: true)
+        let contents = bundle.appendingPathComponent("Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        let plist: [String: Any] = [
+            "CFBundleShortVersionString": "131.0.6778.85",
+            "CFBundleIdentifier": "com.google.Chrome.forTesting"
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: contents.appendingPathComponent("Info.plist"))
+
+        let paths = BrowserPaths(
+            bundle: bundle,
+            profile: root.appendingPathComponent("browser-profile", isDirectory: true),
+            log: root.appendingPathComponent("browser.log"),
+            port: 9222
+        )
+        let session = session(paths: paths, portUp: { false })
+
+        let state = await session.ensureRunning()
+        guard case .failed(let reason) = state else {
+            return XCTFail("пустой бандл должен быть отказом")
+        }
+        XCTAssertTrue(reason.contains(paths.executable.path), reason)
+        XCTAssertTrue(reason.contains("131.0.6778.85"), reason)
     }
 
     func testLaunchThatNeverOpensThePortIsAFailure() async throws {
@@ -119,7 +230,10 @@ final class BrowserSessionTests: XCTestCase {
             hooks: BrowserSession.Hooks(
                 portResponds: { _ in started.current },
                 ownerIsOurs: { _ in true },
+                targetsAlive: { _ in true },
                 launch: { _ in started.current = true },
+                killOurProcess: { _ in },
+                removeProfileLocks: { _ in [] },
                 pause: { _ in }
             )
         )
@@ -136,6 +250,22 @@ final class BrowserSessionTests: XCTestCase {
         XCTAssertTrue(arguments.contains("--user-data-dir=\(paths.profile.path)"))
         XCTAssertTrue(arguments.contains("--restore-last-session"))
         XCTAssertTrue(arguments.contains("--no-first-run"))
+        XCTAssertTrue(
+            arguments.contains("--disable-backgrounding-occluded-windows"),
+            "свёрнутое окно иначе тормозит фоновые вкладки и ломает wait/network"
+        )
+    }
+
+    func testTargetListNeedsAPageWithADebuggerURL() {
+        let page = Data(#"[{"type":"page","webSocketDebuggerUrl":"ws://127.0.0.1:9222/devtools/page/1"}]"#.utf8)
+        let empty = Data("[]".utf8)
+        let worker = Data(#"[{"type":"service_worker","webSocketDebuggerUrl":"ws://x"}]"#.utf8)
+        let noSocket = Data(#"[{"type":"page","webSocketDebuggerUrl":""}]"#.utf8)
+
+        XCTAssertTrue(BrowserSession.hasLivePageTarget(in: page))
+        XCTAssertFalse(BrowserSession.hasLivePageTarget(in: empty))
+        XCTAssertFalse(BrowserSession.hasLivePageTarget(in: worker))
+        XCTAssertFalse(BrowserSession.hasLivePageTarget(in: noSocket))
     }
 
     func testScriptConnectsAndNeverClosesTheBrowser() {

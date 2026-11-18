@@ -90,6 +90,8 @@ extension ToolRegistry {
         switch await BrowserSession.shared.ensureRunning() {
         case .failed(let reason):
             return .fail(reason)
+        case .notRunning(let paths):
+            return .fail("Браузер не запущен: \(paths.bundle.path)")
         case .ready(let url):
             endpoint = url
         }
