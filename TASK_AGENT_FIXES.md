@@ -46,6 +46,7 @@
 | R20.1 | `cf2350f` | `windows list/apps` с id и координатами в точках и пикселях |
 | R20.2 | `ee271dc` | `git`: структурный status, fetch/pull/push(confirm)/branch/switch/merge/show/blame/conflicts |
 | R20.3 | `31cf9e8` | `app_script` (AppleScript/JXA) |
+| R25.2 | `d8444e3` | `display list/set_mode/arrangement/mirror/rotate/night_shift/restore_last`; снимок раскладки при старте; `screenshot window` через ScreenCaptureKit |
 | R25.1 | `e700eb2` | `power`: статус, сон, блокировка, `caffeinate`, яркость, громкость/mute, медиа, устройства звука, restart/shutdown с `confirm` и проверкой несохранённых |
 | R20.4 | `af8634a` | `workspace get/set/list`: `confirm`, общий `WorkspaceState`, ротация кэша префикса, промпт проекта заново |
 | R20.5 | `6357629` | `fs_copy`/`fs_move`/`fs_mkdir` с overwrite/confirm/dry_run |
@@ -62,7 +63,6 @@
 
 | # | Пункт | Где смотреть | Что именно |
 | --- | --- | --- | --- |
-| 5 | R25.2 | раздел ниже | `display`: режимы и раскладка |
 | 6 | R25.3 | раздел ниже | Spaces/Mission Control/Stage Manager |
 | 7 | R25.6 | раздел ниже | `launchd`: автозапуск, агенты, Time Machine |
 | 8 | R25.7 | раздел ниже | непрерывный экран (последним) |
@@ -502,7 +502,7 @@ DR провалится и гранты снова отвалятся. Вари�
 
 ## R25 — остальные аспекты машины: питание, дисплеи, звук, сеть, тома, поиск, оболочка, состояние
 
-**Статус: R25.1, R25.4, R25.5, R25.8, R25.12 закрыты; R25.2, R25.3, R25.6, R25.7, R25.9–R25.11 открыты.** R18 даёт руки внутри приложений, R19 — экономику вызовов,
+**Статус: R25.1, R25.2, R25.4, R25.5, R25.8, R25.12 закрыты; R25.3, R25.6, R25.7, R25.9–R25.11 открыты.** R18 даёт руки внутри приложений, R19 — экономику вызовов,
 R20 — рабочий цикл, R25 закрывает то, чем человек управляет **системно**: питание,
 яркость, громкость и устройства звука, режимы дисплеев и ночной режим, виртуальные рабочие
 столы, тома и DMG с печатью, сеть и Wi-Fi, Spotlight, автозапуск и Time Machine, внешний
@@ -604,6 +604,14 @@ R20 — рабочий цикл, R25 закрывает то, чем челов�
 `pmset -g assertions`; `restart` без confirm отклонён с текстом причины.
 
 ### R25.2 — `display`: режимы и раскладка мониторов
+
+**Закрыто (`d8444e3`).** `display`: `list` (id, режим, доступные разрешения, scale, origin,
+main/builtin), `set_mode`/`arrangement`/`mirror`/`rotate` с `confirm` и снимком в
+`backups/display.json`, `restore_last`, `night_shift` (CoreBrightness через KVC, отсутствие
+сеттера — `unsupported`). `screenshot window` идёт через `SCScreenshotManager` (кадр окна
+даже под перекрытием и на другом Space) с фолбэком на `screencapture -l`. Бюджет схем
+удержан сокращением маркера отложенных инструментов, `schemaTokenBudget` не поднимался.
+Тесты `DisplayToolTests`, `WindowCaptureTests`. Живой прогон режимов — за пользователем.
 
 `action: list | set_mode | arrangement | mirror | rotate`
 
