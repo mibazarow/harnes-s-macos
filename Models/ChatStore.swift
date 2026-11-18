@@ -70,6 +70,8 @@ final class ChatStore {
     let backgroundProcesses = BackgroundProcessService()
     /// R18.11: per-turn GUI budget, abort flag and focus bookkeeping.
     let guiSession = GUIControlSession()
+    /// R30.7: one trust check per action per turn, twenty per turn.
+    let trustSession = TrustCheckSession()
     /// Stable per app run; passed to every request so the provider keeps one cache slot
     /// warm instead of shuffling requests between slots.
     var promptCacheKey = UUID().uuidString
@@ -241,6 +243,14 @@ final class ChatStore {
             return
         }
 
+        // R30.7: the checker sees the user's own words only — this turn's message and a
+        // few earlier ones. Standing preferences from memory are the only extra source.
+        trustSession.beginTurn()
+        let trustCandidates = Self.trustCandidates(current: text, messages: messages)
+        let trustInstructions = (try? await services.memory.forPrompt(limit: 12))?
+            .filter { $0.area == "preferences" || $0.area == "lessons" }
+            .map(\.content) ?? []
+
         let registry = ToolRegistry(
             workspace: AppPaths.workspaceDirectory,
             workspaceState: services.workspaceState,
@@ -262,15 +272,22 @@ final class ChatStore {
             subagent: { [weak self] prompt, readOnly in
                 await self?.runSubagent(
                     prompt: prompt, readOnly: readOnly, provider: provider,
-                    model: model, services: services
+                    model: model, services: services, trustCandidates: trustCandidates
                 ) ?? SubagentOutcome(text: "", error: "сессия закрыта")
             },
             ledger: services.fileLedger,
             skillScope: services.skillScope,
             interceptors: ToolInterceptorChain(
                 [ArgumentRulesInterceptor(), BrowserGuardInterceptor(), SystemUIGuardInterceptor(),
-                 GUIControlGuardInterceptor(session: guiSession), RateLimitInterceptor(),
-                 UIActionJournalInterceptor()],
+                 GUIControlGuardInterceptor(session: guiSession),
+                 TrustCheckInterceptor(
+                    session: trustSession,
+                    candidates: trustCandidates,
+                    instructions: trustInstructions,
+                    autopilot: autopilot,
+                    asker: TrustModelAsker(provider: provider, model: model)
+                 ),
+                 RateLimitInterceptor(), UIActionJournalInterceptor()],
                 log: { line in ChatStore.logLatency(line) }
             ),
             catalog: toolCatalog,
@@ -385,8 +402,9 @@ final class ChatStore {
                             outcome: isError ? "failed" : "done",
                             model: model,
                             promptTokens: 0, completionTokens: 0, costUSD: 0,
-                            becauseKind: autopilot ? "autopilot" : "message",
-                            becauseQuote: text
+                            becauseKind: trustSession.decision(tool: name)?.basis.rawValue
+                                ?? (autopilot ? "autopilot" : "message"),
+                            becauseQuote: trustSession.decision(tool: name)?.quote ?? text
                         ))
                     case .usage(let promptTokens, let completionTokens, let cacheHit, let cacheMiss):
                         let ratio = promptTokens > 0 ? cacheHit * 100 / promptTokens : 0
@@ -523,7 +541,8 @@ final class ChatStore {
         readOnly: Bool,
         provider: ProviderModel,
         model: String,
-        services: AppServices
+        services: AppServices,
+        trustCandidates: [TrustCandidate]
     ) async -> SubagentOutcome {
         // A subagent is its own turn for the GUI budget, but shares the abort flag: the
         // stop hotkey must kill a runaway child too.
@@ -531,6 +550,10 @@ final class ChatStore {
         subagentSession.beginTurn(
             originalFrontmost: NSWorkspace.shared.frontmostApplication?.processIdentifier
         )
+        // R30.7: a subagent's authority is the user's words that started the parent turn,
+        // not the prompt the parent model wrote. Its own budget of twenty checks.
+        let subagentTrust = TrustCheckSession()
+        subagentTrust.beginTurn()
         defer {
             let current = NSWorkspace.shared.frontmostApplication?.processIdentifier
             if let pid = subagentSession.restoreTarget(current: current) {
@@ -557,8 +580,15 @@ final class ChatStore {
             subagent: nil,
             interceptors: ToolInterceptorChain(
                 [ArgumentRulesInterceptor(), BrowserGuardInterceptor(), SystemUIGuardInterceptor(),
-                 GUIControlGuardInterceptor(session: subagentSession), RateLimitInterceptor(),
-                 UIActionJournalInterceptor()],
+                 GUIControlGuardInterceptor(session: subagentSession),
+                 TrustCheckInterceptor(
+                    session: subagentTrust,
+                    candidates: trustCandidates,
+                    instructions: [],
+                    autopilot: autopilot,
+                    asker: TrustModelAsker(provider: provider, model: model)
+                 ),
+                 RateLimitInterceptor(), UIActionJournalInterceptor()],
                 log: { line in ChatStore.logLatency(line) }
             ),
             catalog: toolCatalog,
@@ -680,6 +710,22 @@ final class ChatStore {
         return SubagentOutcome(
             text: findings, error: lastError, steps: steps, calls: callsUsed, truncated: truncated
         )
+    }
+
+    /// R30.7: `current` is this turn's message; earlier user messages are the fallback
+    /// sources. Assistant text, tool results and file content never become candidates.
+    static func trustCandidates(current: String, messages: [ChatMessage]) -> [TrustCandidate] {
+        var result = [TrustCandidate(id: "current", text: String(current.prefix(4_000)))]
+        let earlier = messages
+            .filter { $0.role == .user && $0.text != current }
+            .suffix(5)
+            .reversed()
+        for (index, message) in earlier.enumerated() {
+            result.append(TrustCandidate(
+                id: "m\(index + 1)", text: String(message.text.prefix(2_000))
+            ))
+        }
+        return result
     }
 
     /// Runs the tone-card pass only when it is due: enough samples, not neutral,

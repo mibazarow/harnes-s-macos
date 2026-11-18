@@ -7,7 +7,7 @@ struct ToolCallContext: Sendable {
 }
 
 /// What an interceptor decided about a call.
-enum ToolVerdict: Sendable {
+enum ToolVerdict: Sendable, Equatable {
     /// Run the call as it came.
     case allow
     /// Do not run it; the model gets `reason` and `guidance` as the tool result.
@@ -28,9 +28,13 @@ protocol ToolInterceptor: Sendable {
     /// meant "run the call anyway", which is the wrong default for a gate.
     func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict
     func afterResult(_ call: ToolCall, result: ToolResult, context: ToolCallContext) async -> ToolResult
+    /// A gate that calls a model needs more than the chain default. `nil` keeps it.
+    var timeoutOverride: Duration? { get }
 }
 
 extension ToolInterceptor {
+    var timeoutOverride: Duration? { nil }
+
     func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict { .allow }
 
     func afterResult(
@@ -97,8 +101,9 @@ struct ToolInterceptorChain: Sendable {
         do {
             return try await withThrowingTaskGroup(of: ToolVerdict.self) { group in
                 group.addTask { try await interceptor.beforeCall(call, context: context) }
+                let deadline = interceptor.timeoutOverride ?? self.timeout
                 group.addTask {
-                    try await Task.sleep(for: self.timeout)
+                    try await Task.sleep(for: deadline)
                     throw InterceptorTimeout()
                 }
                 guard let first = try await group.next() else { throw InterceptorTimeout() }
@@ -108,7 +113,7 @@ struct ToolInterceptorChain: Sendable {
         } catch is InterceptorTimeout {
             log("interceptor_failed name=\(interceptor.name) \(Self.millis(since: started))ms reason=timeout")
             return .deny(reason: "перехватчик \(interceptor.name) не ответил за "
-                + "\(Self.plainMillis(timeout)) мс", guidance: nil)
+                + "\(Self.plainMillis(interceptor.timeoutOverride ?? timeout)) мс", guidance: nil)
         } catch {
             log("interceptor_failed name=\(interceptor.name) \(Self.millis(since: started))ms "
                 + "reason=\(error)")
