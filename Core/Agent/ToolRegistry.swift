@@ -352,6 +352,7 @@ struct ToolRegistry: Sendable {
             case "settings": return await settingsTool(args)
             case "calendar": return await calendarTool(args)
             case "contacts": return await contactsTool(args)
+            case "share": return await shareTool(args)
             case "windows": return windowsTool(args)
             case "shortcut": return await shortcutTool(args)
             case "app_script": return await appScriptTool(args)

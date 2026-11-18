@@ -398,6 +398,19 @@ extension ToolRegistry {
             ], required: ["query"])
         ),
         ToolDefinition(
+            name: "share",
+            exposure: .deferred,
+            description: "Mail and AirDrop: compose opens a ready letter, send needs confirm and reports Mail's error, airdrop opens the picker, services lists names.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["compose", "send", "airdrop", "services"]],
+                "to": ["type": "array", "items": ["type": "string"], "description": "Recipients"],
+                "subject": ["type": "string"], "body": ["type": "string"],
+                "attachments": ["type": "array", "items": ["type": "string"]],
+                "paths": ["type": "array", "items": ["type": "string"], "description": "airdrop files"],
+                "confirm": ["type": "boolean", "description": "Required for send"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "contacts",
             exposure: .deferred,
             description: "Address book via Contacts: search by name, phone or email, get one card, create or update (confirm). Limited access shows only chosen cards.",
