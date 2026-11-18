@@ -432,6 +432,9 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(queued.role, .user)
 
         chat.stop()
+        // The stop token is process-wide; without this the next test would start already
+        // stopped.
+        defer { AgentAbortSignal.shared.clear() }
         XCTAssertEqual(chat.queuedCount, 0)
         XCTAssertTrue(chat.queuedMessages.isEmpty)
         XCTAssertFalse(chat.isStreaming)

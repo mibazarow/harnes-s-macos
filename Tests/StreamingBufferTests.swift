@@ -76,6 +76,8 @@ final class StreamingBufferTests: XCTestCase {
         store.flushTask?.cancel()
 
         store.stop()
+        // Process-wide token: leaving it set would stop the next test's tools.
+        defer { AgentAbortSignal.shared.clear() }
 
         XCTAssertTrue(store.messages.last?.text.contains("остановлено на этом") == true)
         XCTAssertTrue(store.pendingText.isEmpty)
