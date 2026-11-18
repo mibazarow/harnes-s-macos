@@ -308,13 +308,16 @@ extension ChatStore {
             var saved = 0
             for candidate in candidates {
                 do {
-                    _ = try await services.memory.add(
+                    let item = try await services.memory.add(
                         candidate.content,
                         kind: FactExtraction.kind(for: candidate.area),
                         source: "compaction",
                         area: candidate.area,
                         quote: candidate.quote,
                         quoteVerified: true
+                    )
+                    await MemoryIndexer.index(
+                        id: item.id, content: item.content, sink: services.embeddings
                     )
                     saved += 1
                 } catch {

@@ -104,14 +104,9 @@ extension ToolRegistry {
             supersedesID: supersedesID
         )
 
-        if let embeddings {
-            let hash = MemoryService.hash(item.content)
-            if let existing = try? await embeddings.vector(refKind: "memory", textHash: hash) {
-                try? await embeddings.store(refKind: "memory", refID: String(item.id), vector: existing, textHash: hash)
-            } else if let vector = try? await embeddings.embed([item.content]).first {
-                try? await embeddings.store(refKind: "memory", refID: String(item.id), vector: vector, textHash: hash)
-            }
-        }
+        // R33.4: embed now, not at the next re-index. Best-effort: the record is
+        // already saved and a missing model must not undo it.
+        await MemoryIndexer.index(id: item.id, content: item.content, sink: embeddings)
 
         let mark = item.pinned ? " (закреплено)" : ""
         let replaced = supersedesID.map { " Заменил #\($0), старая запись осталась по id." } ?? ""
