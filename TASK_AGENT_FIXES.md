@@ -46,6 +46,7 @@
 | R20.1 | `cf2350f` | `windows list/apps` с id и координатами в точках и пикселях |
 | R20.2 | `ee271dc` | `git`: структурный status, fetch/pull/push(confirm)/branch/switch/merge/show/blame/conflicts |
 | R20.3 | `31cf9e8` | `app_script` (AppleScript/JXA) |
+| R25.9 | `f77f469` | `network wifi/discover/vpn/proxy`; SSID с `needs_location`, Bonjour с портами, пароль не пишется |
 | R25.7 | `61230a7` | `screenshot stream`: кадры по окну, дифф по сетке 16×10, только изменённые блоки, последний изменённый кадр |
 | R25.6 | `400bd38` | `launchd`: `login_item` (SMAppService), `agents` (launchctl print), `tm_status/start/list/exclusions`; автобэкап не воссоздаётся |
 | R25.3 | `c83d93c` | `windows spaces/move_to_space/mission_control/stage_manager`; приватные символы SkyLight/CoreDock, `unsupported` без них |
@@ -66,7 +67,6 @@
 
 | # | Пункт | Где смотреть | Что именно |
 | --- | --- | --- | --- |
-| 9 | R25.9 | раздел ниже | Wi-Fi SSID и поиск устройств (ports/dns/http уже есть) |
 | 10 | R25.10 | раздел ниже | `settings`: оболочка и внешний вид |
 | 11 | R25.11 | раздел ниже | инвентарь грантов в `system` |
 | 12 | R26.1–R26.4 | раздел ниже | EventKit/Contacts/share/чтение уведомлений; нужны Info.plist |
@@ -502,7 +502,7 @@ DR провалится и гранты снова отвалятся. Вари�
 
 ## R25 — остальные аспекты машины: питание, дисплеи, звук, сеть, тома, поиск, оболочка, состояние
 
-**Статус: R25.1–R25.8, R25.12 закрыты; R25.9–R25.11 открыты.** R18 даёт руки внутри приложений, R19 — экономику вызовов,
+**Статус: R25.1–R25.9, R25.12 закрыты; R25.10, R25.11 открыты.** R18 даёт руки внутри приложений, R19 — экономику вызовов,
 R20 — рабочий цикл, R25 закрывает то, чем человек управляет **системно**: питание,
 яркость, громкость и устройства звука, режимы дисплеев и ночной режим, виртуальные рабочие
 столы, тома и DMG с печатью, сеть и Wi-Fi, Spotlight, автозапуск и Time Machine, внешний
@@ -695,6 +695,13 @@ main/builtin), `set_mode`/`arrangement`/`mirror`/`rotate` с `confirm` и сни
 Поэтому — последним и только с замером, что оно реально экономит вызовы.
 
 ### R25.9 — `network`: не только порты, но и Wi-Fi, DNS, поиск устройств
+
+**Закрыто (`f77f469`)**: `network` добит до `wifi` (CoreWLAN: статус, скан, join с
+`confirm`, радио; SSID без Location → `needs_location` + фолбэк `networksetup`),
+`discover` (`NetServiceBrowser`, имена и порты), `vpn` (utun + `scutil --nc list`,
+`restart` только с `confirm` и только живое ядро), `proxy` (`networksetup`, запись с
+`confirm`). Пароль Wi-Fi не пишется в вывод. Тесты `NetworkExtrasTests`.
+Живой прогон Wi-Fi/LLMSERVER — за пользователем.
 
 Базовый R19.4 (порты, слушатели, связность) остаётся. Добор до полного покрытия сети:
 
