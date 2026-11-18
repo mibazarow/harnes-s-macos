@@ -82,7 +82,10 @@ enum TrustPolicy {
     static func requirement(tool: String, args: [String: Any], workspace: URL) -> TrustRequirement? {
         let action = (args["action"] as? String)?.lowercased() ?? ""
         switch tool {
-        case "memory_add", "secret_save", "schedule_add", "schedule_remove", "settings":
+        // R30.7: `memory_add` and `secret_save` are direct commands, not guesses the
+        // agent made up. The quote requirement belongs to `bash`/writes, not to
+        // "remember this": checking them rejected the very request that asked for them.
+        case "schedule_add", "schedule_remove", "settings":
             return .quote
         case "secret_get":
             return (args["reveal"] as? Bool) == true ? .quote : nil
@@ -162,40 +165,61 @@ final class TrustCheckSession: @unchecked Sendable {
     static let maxCallsPerTurn = 20
 
     private let lock = NSLock()
-    private var calls: [String: Int] = [:]
+    /// Verdicts keyed by tool + arguments: `settings appearance` twice is one question,
+    /// two `memory_add` calls about different records are two.
     private var decisions: [String: Decision] = [:]
-    private var total = 0
+    /// Last verdict per tool, for the journal which reads by tool name.
+    private var lastByTool: [String: Decision] = [:]
 
     func beginTurn() {
         lock.lock(); defer { lock.unlock() }
-        calls.removeAll()
         decisions.removeAll()
-        total = 0
+        lastByTool.removeAll()
     }
 
-    func reserve(tool: String) -> Reservation {
+    /// R30.7: an attempt is not a verdict. The old `calls[tool]` counter made the second
+    /// call after one refusal look like an exhausted quota; now a missing verdict simply
+    /// asks again, and the quota counts unique verdicts.
+    func reserve(tool: String, key: String) -> Reservation {
         lock.lock(); defer { lock.unlock() }
-        if let decision = decisions[tool] { return .reuse(decision) }
-        if let used = calls[tool], used >= 1 { return .exhausted }
-        guard total < Self.maxCallsPerTurn else { return .exhausted }
-        calls[tool, default: 0] += 1
-        total += 1
+        if let decision = decisions[key] { return .reuse(decision) }
+        guard decisions.count < Self.maxCallsPerTurn else { return .exhausted }
         return .call
     }
 
-    func record(tool: String, basis: TrustBasis, quote: String) {
+    func record(tool: String, key: String, basis: TrustBasis, quote: String) {
         lock.lock(); defer { lock.unlock() }
-        decisions[tool] = Decision(basis: basis, quote: TrustCheck.clamp(quote))
+        let decision = Decision(basis: basis, quote: TrustCheck.clamp(quote))
+        decisions[key] = decision
+        lastByTool[tool] = decision
     }
 
     func decision(tool: String) -> Decision? {
         lock.lock(); defer { lock.unlock() }
-        return decisions[tool]
+        return lastByTool[tool]
     }
 
     func callsUsed() -> Int {
         lock.lock(); defer { lock.unlock() }
-        return total
+        return decisions.count
+    }
+
+    /// Stable key for the turn cache: sorted arguments, so the same call is the same key.
+    static func cacheKey(tool: String, args: [String: Any]) -> String {
+        let body = args.keys.sorted().map { key in
+            "\(key)=\(describe(args[key]))"
+        }.joined(separator: "&")
+        return "\(tool)|\(body)"
+    }
+
+    private static func describe(_ value: Any?) -> String {
+        switch value {
+        case let string as String: return string
+        case let bool as Bool: return bool ? "true" : "false"
+        case let number as NSNumber: return number.stringValue
+        case let array as [Any]: return array.map { describe($0) }.joined(separator: ",")
+        default: return String(describing: value ?? "")
+        }
     }
 }
 
@@ -213,21 +237,27 @@ struct TrustCheckInterceptor: ToolInterceptor {
 
     func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
         let args = ToolRegistry.decodeArguments(call.arguments) ?? [:]
-        guard let requirement = TrustPolicy.requirement(
+        guard TrustPolicy.requirement(
             tool: call.name, args: args, workspace: context.workspace
-        ) else { return .allow }
+        ) != nil else { return .allow }
 
         let confirmed = (args["confirm"] as? Bool) == true
-        switch session.reserve(tool: call.name) {
+        let key = TrustCheckSession.cacheKey(tool: call.name, args: args)
+
+        // R30.7: autopilot is the user's standing "go ahead". Asking a second model on
+        // every action added latency and produced refusals the user had already allowed.
+        if autopilot {
+            session.record(tool: call.name, key: key, basis: .autopilot, quote: "")
+            return .allow
+        }
+
+        switch session.reserve(tool: call.name, key: key) {
         case .reuse:
-            // One check per action per turn: the first answer stands, and it was only
+            // One verdict per action per turn: the first answer stands, and it was only
             // recorded when it passed.
             return .allow
         case .exhausted:
-            return Self.escalate(
-                call: call, confirmed: confirmed,
-                reason: "лимит проверок на ход (\(TrustCheckSession.maxCallsPerTurn)) исчерпан"
-            )
+            return Self.refuse(.quota, confirmed: confirmed)
         case .call:
             break
         }
@@ -239,45 +269,63 @@ struct TrustCheckInterceptor: ToolInterceptor {
             instructions: instructions
         )
         guard let answer = try await asker.ask(request) else {
-            return Self.escalate(
-                call: call, confirmed: confirmed,
-                reason: "проверка «покрыто ли это просьбой» не дала ответа"
-            )
+            return Self.refuse(.unanswered, confirmed: confirmed)
         }
 
         switch answer {
         case .no, .other:
-            return Self.escalate(
-                call: call, confirmed: confirmed,
-                reason: "действие не покрыто тем, что пользователь просил"
-            )
+            return Self.refuse(.notCovered, confirmed: confirmed)
         case .yes(let sourceID, let quote):
             guard let source = Self.source(id: sourceID, quote: quote, in: candidates),
                   TrustCheck.verify(quote: quote, in: source.text) else {
-                return Self.escalate(
-                    call: call, confirmed: confirmed,
-                    reason: "цитата не найдена в словах пользователя"
+                return Self.refuse(
+                    .notCovered, confirmed: confirmed,
+                    detail: "цитата не найдена в словах пользователя"
                 )
             }
-            let basis: TrustBasis = autopilot
-                ? .autopilot
-                : (source.id == "current" ? .message : .rule)
-            session.record(tool: call.name, basis: basis, quote: quote)
+            let basis: TrustBasis = source.id == "current" ? .message : .rule
+            session.record(tool: call.name, key: key, basis: basis, quote: quote)
             return .allow
         }
     }
 
+    /// Three different events used to share one sentence. Only "the user did not ask"
+    /// gets the `confirm` hint; a timeout says "try again", and an exhausted quota says
+    /// the check will not run again this turn.
+    enum Refusal {
+        case notCovered
+        case unanswered
+        case quota
+    }
+
     /// `confirm` is the last resort, not a bypass: without it the call is refused with a
     /// reason the model can act on.
-    static func escalate(call: ToolCall, confirmed: Bool, reason: String) -> ToolVerdict {
+    static func refuse(_ kind: Refusal, confirmed: Bool, detail: String? = nil) -> ToolVerdict {
         if confirmed {
             return .allow
         }
-        return .deny(
-            reason: "\(reason); нужен confirm: true, если пользователь действительно просил",
-            guidance: "Не повторяй действие вслепую. Сформулируй, что именно собираешься сделать, "
-                + "и повтори с confirm: true только после ясной просьбы пользователя."
-        )
+        switch kind {
+        case .notCovered:
+            let head = detail ?? "действие не покрыто тем, что пользователь просил"
+            return .deny(
+                reason: "\(head); нужен confirm: true, если пользователь действительно просил",
+                guidance: "Не повторяй действие вслепую. Сформулируй, что именно собираешься "
+                    + "сделать, и повтори с confirm: true только после ясной просьбы пользователя."
+            )
+        case .unanswered:
+            return .deny(
+                reason: "проверка не ответила за 10 с, повтори",
+                guidance: "Это не отказ по существу: повтори тот же вызов. Если проверка "
+                    + "молчит снова, остановись и спроси пользователя."
+            )
+        case .quota:
+            return .deny(
+                reason: "проверка на этот инструмент в этом ходу уже не спрашивается: "
+                    + "исчерпан лимит \(TrustCheckSession.maxCallsPerTurn) вердиктов",
+                guidance: "Останови действие и переформулируй задачу: новый ход начнёт "
+                    + "новый счёт проверок."
+            )
+        }
     }
 
     /// No source id: the server searches every candidate itself, so a model that stays

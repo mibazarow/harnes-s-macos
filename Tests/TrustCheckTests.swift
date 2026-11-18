@@ -2,7 +2,8 @@ import XCTest
 @testable import Harness
 
 /// R30.7: the checker picks a source, the server verifies the quote, and nothing runs
-/// without a verbatim fragment of the user's own words.
+/// without a verbatim fragment of the user's own words — except direct commands such as
+/// "remember this", which are exempt by design.
 final class TrustCheckTests: XCTestCase {
     private actor StubAsker: TrustAsking {
         private let answer: TrustAnswer?
@@ -23,6 +24,31 @@ final class TrustCheckTests: XCTestCase {
         func calls() -> Int { seen }
     }
 
+    private actor SequenceAsker: TrustAsking {
+        private var answers: [TrustAnswer?]
+        private var seen = 0
+
+        init(_ answers: [TrustAnswer?]) { self.answers = answers }
+
+        func ask(_ request: TrustCheckRequest) async throws -> TrustAnswer? {
+            seen += 1
+            return answers.isEmpty ? nil : answers.removeFirst()
+        }
+
+        func calls() -> Int { seen }
+    }
+
+    private actor FailingAsker: TrustAsking {
+        private var seen = 0
+
+        func ask(_ request: TrustCheckRequest) async throws -> TrustAnswer? {
+            seen += 1
+            return nil
+        }
+
+        func calls() -> Int { seen }
+    }
+
     private let candidates = [
         TrustCandidate(id: "current", text: "Почини кэш на сервере, он разросся."),
         TrustCandidate(id: "m1", text: "Посмотри, что там с кэшем.")
@@ -30,6 +56,12 @@ final class TrustCheckTests: XCTestCase {
 
     private func call(_ tool: String, _ json: String) -> ToolCall {
         ToolCall(id: "1", name: tool, arguments: json)
+    }
+
+    private func key(_ tool: String, _ json: String) -> String {
+        TrustCheckSession.cacheKey(
+            tool: tool, args: ToolRegistry.decodeArguments(json) ?? [:]
+        )
     }
 
     private var context: ToolCallContext {
@@ -49,13 +81,15 @@ final class TrustCheckTests: XCTestCase {
 
     // MARK: - Policy
 
-    func testPolicySeparatesQuoteFromStandard() {
+    func testDirectCommandsNeedNoQuote() {
         let workspace = URL(fileURLWithPath: "/tmp/work")
-        XCTAssertEqual(
-            TrustPolicy.requirement(tool: "memory_add", args: [:], workspace: workspace), .quote
+        XCTAssertNil(
+            TrustPolicy.requirement(tool: "memory_add", args: [:], workspace: workspace),
+            "«запомни это» — прямая команда, а не догадка агента"
         )
-        XCTAssertEqual(
-            TrustPolicy.requirement(tool: "secret_save", args: [:], workspace: workspace), .quote
+        XCTAssertNil(
+            TrustPolicy.requirement(tool: "secret_save", args: [:], workspace: workspace),
+            "«сохрани пароль» — прямая команда"
         )
         XCTAssertEqual(
             TrustPolicy.requirement(
@@ -153,6 +187,7 @@ final class TrustCheckTests: XCTestCase {
             return XCTFail("выдуманная цитата должна быть отказом")
         }
         XCTAssertTrue(reason.contains("цитата не найдена"), reason)
+        XCTAssertTrue(reason.contains("confirm: true"), "это тот же случай «модель сказала нет»")
     }
 
     func testMissingSourceIsSearchedOnTheServer() async throws {
@@ -191,15 +226,41 @@ final class TrustCheckTests: XCTestCase {
         XCTAssertEqual(verdict, .allow)
     }
 
-    func testAutopilotKeepsCheckingAndRecordsItsOwnBasis() async throws {
+    func testAutopilotSkipsTheCheckerEntirely() async throws {
         let session = TrustCheckSession()
-        let gate = interceptor(
-            .yes(sourceID: "current", quote: "Почини кэш"), autopilot: true, session: session
+        session.beginTurn()
+        let asker = FailingAsker()
+        let gate = TrustCheckInterceptor(
+            session: session, candidates: candidates, instructions: [],
+            autopilot: true, asker: asker
         )
 
-        _ = try await gate.beforeCall(call("power", #"{"action":"sleep"}"#), context: context)
+        let verdict = try await gate.beforeCall(
+            call("power", #"{"action":"sleep"}"#), context: context
+        )
 
+        XCTAssertEqual(verdict, .allow)
         XCTAssertEqual(session.decision(tool: "power")?.basis, .autopilot)
+        let calls = await asker.calls()
+        XCTAssertEqual(calls, 0, "автопилот не должен звать модель-арбитра")
+    }
+
+    func testMemoryAddIsNotCheckedAtAll() async throws {
+        let session = TrustCheckSession()
+        session.beginTurn()
+        let asker = FailingAsker()
+        let gate = TrustCheckInterceptor(
+            session: session, candidates: candidates, instructions: [],
+            autopilot: false, asker: asker
+        )
+
+        let verdict = try await gate.beforeCall(
+            call("memory_add", #"{"text":"пользователь любит тёмную тему"}"#), context: context
+        )
+
+        XCTAssertEqual(verdict, .allow)
+        let calls = await asker.calls()
+        XCTAssertEqual(calls, 0)
     }
 
     func testSecondCallOfTheSameActionDoesNotAskAgain() async throws {
@@ -215,10 +276,55 @@ final class TrustCheckTests: XCTestCase {
         _ = try await gate.beforeCall(call("power", #"{"action":"sleep"}"#), context: context)
 
         let calls = await asker.calls()
-        XCTAssertEqual(calls, 1, "одна проверка на действие за ход")
+        XCTAssertEqual(calls, 1, "одна проверка на пару инструмент + аргументы за ход")
     }
 
-    func testTwentyCallsPerTurnThenEscalation() async throws {
+    func testDifferentArgumentsAreDifferentQuestions() async throws {
+        let asker = StubAsker(.yes(sourceID: "current", quote: "Почини кэш"))
+        let session = TrustCheckSession()
+        session.beginTurn()
+        let gate = TrustCheckInterceptor(
+            session: session, candidates: candidates, instructions: [],
+            autopilot: false, asker: asker
+        )
+
+        _ = try await gate.beforeCall(
+            call("settings", #"{"action":"appearance","value":"dark"}"#), context: context
+        )
+        _ = try await gate.beforeCall(
+            call("settings", #"{"action":"appearance","value":"dark"}"#), context: context
+        )
+        _ = try await gate.beforeCall(
+            call("settings", #"{"action":"appearance","value":"light"}"#), context: context
+        )
+
+        let calls = await asker.calls()
+        XCTAssertEqual(calls, 2, "смена значения — новый вопрос, повтор того же — нет")
+    }
+
+    func testRefusedCheckDoesNotBurnTheTool() async throws {
+        let asker = SequenceAsker([.no, .yes(sourceID: "current", quote: "Почини кэш")])
+        let session = TrustCheckSession()
+        session.beginTurn()
+        let gate = TrustCheckInterceptor(
+            session: session, candidates: candidates, instructions: [],
+            autopilot: false, asker: asker
+        )
+
+        let first = try await gate.beforeCall(
+            call("power", #"{"action":"sleep"}"#), context: context
+        )
+        guard case .deny = first else { return XCTFail("первый вызов должен быть отклонён") }
+
+        let second = try await gate.beforeCall(
+            call("power", #"{"action":"sleep"}"#), context: context
+        )
+        XCTAssertEqual(second, .allow, "после отказа проверка спрашивается снова, а не «лимит»")
+        let calls = await asker.calls()
+        XCTAssertEqual(calls, 2)
+    }
+
+    func testTwentyVerdictsPerTurnThenEscalation() async throws {
         let session = TrustCheckSession()
         session.beginTurn()
         let gate = TrustCheckInterceptor(
@@ -241,23 +347,57 @@ final class TrustCheckTests: XCTestCase {
             call("git", #"{"action":"push"}"#),
             call("network", #"{"action":"proxy","value":true}"#),
             call("files", #"{"action":"eject"}"#),
-            call("secret_save", #"{"alias":"a"}"#),
-            call("memory_add", #"{"text":"x"}"#),
-            call("schedule_add", #"{"cron":"* * * * *"}"#),
+            call("schedule_add", #"{"title":"x","prompt":"y"}"#),
             call("schedule_remove", #"{"id":1}"#),
             call("workspace", #"{"action":"set","path":"/tmp"}"#),
             call("settings", #"{"action":"appearance","value":"dark"}"#),
-            call("fs_write", #"{"path":"/etc/hosts","content":"x"}"#)
+            call("fs_write", #"{"path":"/etc/hosts","content":"x"}"#),
+            call("secret_get", #"{"alias":"a","reveal":true}"#),
+            call("power", #"{"action":"restart"}"#)
         ]
         for (index, item) in calls.enumerated() {
             let verdict = try await gate.beforeCall(item, context: context)
             XCTAssertEqual(verdict, .allow, "проверка \(index + 1)")
         }
         XCTAssertEqual(session.callsUsed(), 20)
+        let powerKey = key("power", #"{"action":"sleep"}"#)
+        guard case .reuse = session.reserve(tool: "power", key: powerKey) else {
+            return XCTFail("вердикт по тем же аргументам должен переиспользоваться")
+        }
         XCTAssertEqual(
-            session.reserve(tool: "power"), .reuse(session.decision(tool: "power")!)
+            session.reserve(tool: "notify", key: key("notify", "{}")), .exhausted
         )
-        XCTAssertEqual(session.reserve(tool: "notify"), .exhausted)
+    }
+
+    func testTimeoutAndQuotaReadDifferently() async throws {
+        let timeoutGate = interceptor(nil)
+        guard case .deny(let timeoutReason, _) = try await timeoutGate.beforeCall(
+            call("power", #"{"action":"sleep"}"#), context: context
+        ) else {
+            return XCTFail("молчание проверки — отказ")
+        }
+        XCTAssertTrue(timeoutReason.contains("не ответила"), timeoutReason)
+        XCTAssertFalse(timeoutReason.contains("confirm: true"), timeoutReason)
+
+        let session = TrustCheckSession()
+        session.beginTurn()
+        for index in 0..<TrustCheckSession.maxCallsPerTurn {
+            session.record(
+                tool: "t\(index)", key: "k\(index)", basis: .message, quote: "x"
+            )
+        }
+        let quotaGate = TrustCheckInterceptor(
+            session: session, candidates: candidates, instructions: [],
+            autopilot: false, asker: StubAsker(.no)
+        )
+        guard case .deny(let quotaReason, _) = try await quotaGate.beforeCall(
+            call("power", #"{"action":"sleep"}"#), context: context
+        ) else {
+            return XCTFail("исчерпанная квота — отказ")
+        }
+        XCTAssertTrue(quotaReason.contains("уже не спрашивается"), quotaReason)
+        XCTAssertFalse(quotaReason.contains("confirm: true"), quotaReason)
+        XCTAssertNotEqual(timeoutReason, quotaReason)
     }
 
     func testBrokenCheckerFailsClosed() async throws {
@@ -310,5 +450,37 @@ final class TrustCheckTests: XCTestCase {
         XCTAssertEqual(built.first?.text, "Теперь запуши")
         XCTAssertTrue(built.allSatisfy { $0.text != "Сделал" })
         XCTAssertEqual(built.count, 2, "текущее сообщение не дублируется как раннее")
+    }
+
+    @MainActor
+    func testCandidatesReachFifteenMessagesBack() {
+        // Fifteen messages ago is still inside the last ten user replies when answers
+        // are interleaved, which is exactly the case the old `suffix(5)` missed.
+        var messages: [ChatMessage] = []
+        for index in 0..<8 {
+            messages.append(ChatMessage(
+                role: .user,
+                text: index == 0 ? "Роутер не трогать" : "Реплика \(index)"
+            ))
+            messages.append(ChatMessage(role: .assistant, text: "Ответ \(index)"))
+        }
+
+        let built = ChatStore.trustCandidates(current: "Теперь запуши", messages: messages)
+
+        XCTAssertTrue(
+            built.contains { $0.text.contains("Роутер не трогать") },
+            "цитата из начала разговора должна находиться"
+        )
+    }
+
+    @MainActor
+    func testCandidatesAreCappedAtTenEarlierMessages() {
+        let messages = (0..<15).map { ChatMessage(role: .user, text: "Реплика \($0)") }
+
+        let built = ChatStore.trustCandidates(current: "Сейчас", messages: messages)
+
+        XCTAssertEqual(built.count, 1 + Tuning.trustCandidateMessages)
+        XCTAssertFalse(built.contains { $0.text == "Реплика 0" }, "самые старые не нужны")
+        XCTAssertTrue(built.contains { $0.text == "Реплика 14" })
     }
 }
