@@ -26,13 +26,22 @@ settings:
       # The test runner attaches to the host; hardened runtime without
       # get-task-allow makes it hang before the connection is established.
       ENABLE_HARDENED_RUNTIME: NO
+      # Debug is signed with the development certificate: it is only ever run
+      # on this machine and the test runner needs get-task-allow.
+      CODE_SIGN_IDENTITY: "Apple Development"
+    Release:
+      # Release is what gets handed to other people, so it must carry a
+      # Developer ID signature: only that one passes Gatekeeper on a foreign Mac.
+      # Hardened runtime is required for notarization.
+      CODE_SIGN_IDENTITY: "Developer ID Application"
+      ENABLE_HARDENED_RUNTIME: YES
+      CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     MACOSX_DEPLOYMENT_TARGET: "27.0"
     ARCHS: arm64
     ONLY_ACTIVE_ARCH: YES
-    CODE_SIGN_IDENTITY: "Apple Development"
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: "7D5ULU9N7J"
     ENABLE_HARDENED_RUNTIME: YES
