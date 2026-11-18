@@ -225,6 +225,15 @@ actor MemoryService {
         budgetTokens: Int = Tuning.memoryPromptBudgetTokens,
         relevance: [Int64: Double] = [:]
     ) throws -> [MemoryItem] {
+        try forPromptWithOverflow(budgetTokens: budgetTokens, relevance: relevance).items
+    }
+
+    /// R34.1: the prompt says how many records did not fit. A block that silently drops
+    /// half of what it knows reads as if that half never existed.
+    func forPromptWithOverflow(
+        budgetTokens: Int = Tuning.memoryPromptBudgetTokens,
+        relevance: [Int64: Double] = [:]
+    ) throws -> (items: [MemoryItem], omitted: Int) {
         try database.queue.read { db in
             // R30.3: corrections are always in the prompt, newest twenty of them; other
             // areas are bounded by the token budget. `scope = 'user'` keeps indexed
@@ -255,6 +264,7 @@ actor MemoryService {
             }
 
             var result: [MemoryItem] = []
+            var omitted = 0
             var used = 0
             for item in Array(lessons) + ordered {
                 // R30.8: a record longer than the line limit is not chopped into the
@@ -267,11 +277,14 @@ actor MemoryService {
                     continue
                 }
                 let cost = TokenEstimator.tokens(in: item.promptText)
-                guard used + cost <= budgetTokens else { continue }
+                guard used + cost <= budgetTokens else {
+                    omitted += 1
+                    continue
+                }
                 result.append(item)
                 used += cost
             }
-            return result
+            return (result, omitted)
         }
     }
 

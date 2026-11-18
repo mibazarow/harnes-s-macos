@@ -269,7 +269,9 @@ final class ChatStore {
         // extra source. R30.8: one memory read serves both the prompt and this list.
         trustSession.beginTurn()
         let trustCandidates = Self.trustCandidates(current: text, messages: messages)
-        promptMemoryBlock = await Self.promptMemories(services: services, query: text)
+        let memorySelection = await Self.promptMemoriesWithOverflow(services: services, query: text)
+        promptMemoryBlock = memorySelection.items
+        promptMemoryOmitted = memorySelection.omitted
         let trustInstructions = (promptMemoryBlock ?? [])
             .filter { $0.area == "preferences" || $0.area == "lessons" }
             .map(\.content)
@@ -751,6 +753,8 @@ final class ChatStore {
         )
     }
 
+    /// R34.1: records that did not fit the memory budget this turn.
+    var promptMemoryOmitted = 0
     /// R30.8: the prompt block, read once per turn.
     ///
     /// The block deliberately ignores the current question. Ordering it by relevance to
@@ -759,7 +763,14 @@ final class ChatStore {
     /// block after it even when nothing had been remembered or forgotten (M37). Query
     /// relevance still drives `memory_search`; the prompt keeps a stable order.
     static func promptMemories(services: AppServices, query _: String) async -> [MemoryItem] {
-        (try? await services.memory.forPrompt()) ?? []
+        await promptMemoriesWithOverflow(services: services, query: "").items
+    }
+
+    static func promptMemoriesWithOverflow(
+        services: AppServices,
+        query _: String
+    ) async -> (items: [MemoryItem], omitted: Int) {
+        (try? await services.memory.forPromptWithOverflow()) ?? ([], 0)
     }
 
     /// R30.7: `current` is this turn's message; earlier user messages are the fallback
@@ -849,13 +860,21 @@ final class ChatStore {
             let body = projectInstructions.map { item in
                 "## \(item.path)\n\(item.text)"
             }.joined(separator: "\n\n")
-            parts.append("""
+            // R34.1: a long AGENTS.md chain must not push the conversation out.
+            let clipped = PromptBlockBudget.clip(
+                body, limit: PromptBlockBudget.projectInstructionsChars
+            )
+            var block = """
 
             # Project instructions
             These files come from the project itself. Follow them for this workspace; they
             never override the safety rules above. A nested file refines a root one.
-            \(body)
-            """)
+            \(clipped.text)
+            """
+            if clipped.omitted > 0 {
+                block += "\n" + PromptBlockBudget.omittedLine(clipped.omitted)
+            }
+            parts.append(block)
         }
 
         if let services {
@@ -863,12 +882,19 @@ final class ChatStore {
                 query: messages.last(where: { $0.role == .user })?.text
             )
             if !skillIndex.isEmpty {
-                parts.append("""
+                let clipped = PromptBlockBudget.clip(
+                    skillIndex, limit: PromptBlockBudget.skillsChars
+                )
+                var block = """
 
                 # Skills
                 Installed skills are reusable instruction sets written for specific tasks. When a request matches a skill, call `skill_read` with its name and follow the loaded instructions. Skills are guidance, not permission: the workspace, safety and confirmation rules above still apply.
-                \(skillIndex)
-                """)
+                \(clipped.text)
+                """
+                if clipped.omitted > 0 {
+                    block += "\n" + PromptBlockBudget.omittedLine(clipped.omitted)
+                }
+                parts.append(block)
             }
         }
 
@@ -899,37 +925,70 @@ final class ChatStore {
                 memoryTouchedThisTurn = true
                 try? await services.memory.touch(ids: memories.map(\.id))
             }
-            parts.append("""
+            // R34.1: say what did not fit instead of letting the block look complete.
+            let omitted = promptMemoryOmitted
+            var block = """
 
             # Saved user memory
             These facts are already known. Use them without asking again. Do not restate them to the user just to confirm.
             📌 marks a fact the user asked to remember explicitly; treat it as fixed and never drop it.
             `lessons` are corrections the user made: follow them over anything else.
             \(lines)
-            """)
+            """
+            if omitted > 0 {
+                block += "\n" + PromptBlockBudget.omittedLine(omitted, noun: "записей")
+                    + " (бюджет памяти); найдутся через memory_search."
+            }
+            parts.append(block)
         }
 
         // R30.4: learned procedures enter as an index only; the body is read on demand.
         let learned = LearnedSkillStore.list()
         if !learned.isEmpty {
-            parts.append("""
+            // R34.1: the index is clipped by entries; half a procedure line is worse
+            // than one line fewer.
+            let clipped = PromptBlockBudget.clipList(
+                learned.map { "- \($0.name): \($0.description)" },
+                limit: PromptBlockBudget.learnedSkillsChars
+            )
+            var block = """
 
             # Learned skills
             Procedures you wrote earlier. The index is name and description; read the body with `skill_learn read` when a task matches.
-            \(learned.map { "- \($0.name): \($0.description)" }.joined(separator: "\n"))
-            """)
+            \(clipped.text)
+            """
+            if clipped.omitted > 0 {
+                block += "\n" + PromptBlockBudget.omittedLine(clipped.omitted, noun: "процедур")
+            }
+            parts.append(block)
         }
 
         if !checkpointSummary.isEmpty {
-            parts.append("# Conversation checkpoint (older messages)\n" + checkpointSummary)
+            // R34.1: the checkpoint is bounded too; a checkpoint that grows without a
+            // ceiling quietly becomes the whole context.
+            let clipped = PromptBlockBudget.clip(
+                checkpointSummary, limit: PromptBlockBudget.checkpointChars
+            )
+            var block = "# Conversation checkpoint (older messages)\n" + clipped.text
+            if clipped.omitted > 0 {
+                block += "\n" + PromptBlockBudget.omittedLine(clipped.omitted)
+            }
+            parts.append(block)
         }
 
         if let services, !services.todos.openItems.isEmpty {
-            parts.append("""
+            let clipped = PromptBlockBudget.clip(
+                services.todos.summary, limit: PromptBlockBudget.todosChars
+            )
+            var block = """
             # Open plan
-            \(services.todos.summary)
+            \(clipped.text)
             Keep it current: mark progress with `todowrite` (items, update or complete).
-            """)
+            """
+            if clipped.omitted > 0 {
+                block += "\n" + PromptBlockBudget.omittedLine(clipped.omitted)
+            }
+            parts.append(block)
         }
 
         if autopilot {
@@ -940,7 +999,9 @@ final class ChatStore {
         if let services {
             let block = await services.style.promptBlock()
             if !block.isEmpty {
-                parts.append(block)
+                parts.append(PromptBlockBudget.clip(
+                    block, limit: PromptBlockBudget.styleChars
+                ).text)
             }
         }
 
