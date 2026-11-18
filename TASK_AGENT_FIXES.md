@@ -46,6 +46,7 @@
 | R20.1 | `cf2350f` | `windows list/apps` с id и координатами в точках и пикселях |
 | R20.2 | `ee271dc` | `git`: структурный status, fetch/pull/push(confirm)/branch/switch/merge/show/blame/conflicts |
 | R20.3 | `31cf9e8` | `app_script` (AppleScript/JXA) |
+| R26.4 | `8e5ef94` | `notify read/dismiss/clear` через AX; приватные — `redacted: true`, `clear` только с `confirm` |
 | R26.3 | `083e1c0` | `share compose/send/airdrop/services`; отправка только с `confirm`, ошибка Mail показывается как есть |
 | R26.2 | `da16224` | `contacts search/get/create/update`; поиск по имени, телефону и почте, запись только с `confirm` |
 | R26.1 | `39054f2` | `calendar`: events/create/update/delete (только свои, `confirm`), calendars, free_busy, reminders; Info.plist строки |
@@ -72,7 +73,6 @@
 
 | # | Пункт | Где смотреть | Что именно |
 | --- | --- | --- | --- |
-| 12 | R26.4 | раздел ниже | чтение уведомлений |
 | 13 | R27.1–R27.2 | раздел ниже | глобальная клавиша, панель с выделением, наблюдение за вводом |
 | 14 | R30.1–R30.7 | раздел ниже | недоверенный контент, память с цитатой, уроки, self-skills, `unknown`, журнал, trust check |
 
@@ -834,7 +834,10 @@ Recording, FDA пробой, Calendars/Reminders, Contacts, Location, Bluetooth,
 
 ## R26 — данные и личные приложения: календарь, контакты, почта, уведомления
 
-**Статус: новое, не начато.** До сих пор «поставь встречу» идёт через `shortcut`, то есть
+**Статус: R26.1–R26.4 закрыты.** `calendar`, `contacts`, `share`, `notify read`; строки
+`Info.plist` добавлены, живые гранты выдаёт человек.
+
+До этой волны «поставь встречу» шло через `shortcut`, то есть
 человек обязан заранее создать шорткат. Правильный путь — EventKit и Contacts напрямую.
 Все четыре пункта требуют **новых строк в `Info.plist`** и новых TCC-грантов; промпт
 выдаёт система, обойти его нельзя, и в автопилоте грант не появится сам.
