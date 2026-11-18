@@ -22,7 +22,8 @@ actor MemoryService {
         quote: String? = nil,
         quoteMessageID: String? = nil,
         quoteVerified: Bool = false,
-        supersedesID: Int64? = nil
+        supersedesID: Int64? = nil,
+        importance: Int = 1
     ) throws -> MemoryItem {
         let content = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else {
@@ -77,11 +78,13 @@ actor MemoryService {
         let id: Int64 = try database.queue.write { db in
             try db.execute(sql: """
                 INSERT INTO memory (scope, content, kind, area, tags, source, pinned, content_hash,
-                    quote, quote_message_id, quote_verified, supersedes_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    quote, quote_message_id, quote_verified, supersedes_id, importance,
+                    created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, arguments: [
                     scope, content, kind, area, tagsJSON, source, pinned ? 1 : 0, hash,
-                    quote, quoteMessageID, quoteVerified ? 1 : 0, supersedesID, now, now
+                    quote, quoteMessageID, quoteVerified ? 1 : 0, supersedesID,
+                    max(0, min(importance, 3)), now, now
                 ])
             return db.lastInsertedRowID
         }
@@ -342,6 +345,31 @@ actor MemoryService {
         return removed
     }
 
+    /// R33.3: the only automatic deletion. A record is collected when it is worthless by
+    /// its own marker (`importance = 0`), never used, not pinned and untouched for half a
+    /// year. Everything else — including every record saved before the column existed,
+    /// which defaults to 1 — is left alone on purpose.
+    @discardableResult
+    func gc(now: Date = Date(), olderThanDays: Int = 180) throws -> Int {
+        let cutoff = ISO8601DateFormatter().string(
+            from: now.addingTimeInterval(-Double(olderThanDays) * 86_400)
+        )
+        let removed = try database.queue.write { db in
+            try db.execute(sql: """
+                DELETE FROM memory
+                WHERE importance = 0
+                  AND pinned = 0
+                  AND hits = 0
+                  AND COALESCE(last_used_at, updated_at) < ?
+                """, arguments: [cutoff])
+            return db.changesCount
+        }
+        if removed > 0 {
+            try pruneOrphanEmbeddings()
+        }
+        return removed
+    }
+
     /// Stable content hash used for deduplication and for reusing embeddings.
     /// Swift's `Hasher` is randomly seeded per process, so it cannot be persisted.
     nonisolated static func hash(_ text: String) -> String {
@@ -537,7 +565,8 @@ actor MemoryService {
             lastUsedAt: row["last_used_at"],
             area: row["area"] as String? ?? "fact",
             quote: row["quote"] as String?,
-            supersedesID: row["supersedes_id"] as Int64?
+            supersedesID: row["supersedes_id"] as Int64?,
+            importance: row["importance"] as Int? ?? 1
         )
     }
 }

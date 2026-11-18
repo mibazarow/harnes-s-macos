@@ -130,6 +130,9 @@ struct MemoryItem: Identifiable, Sendable, Equatable {
     var quote: String?
     /// R33.2: the record this one replaces. The old row stays, but out of the prompt.
     var supersedesID: Int64?
+    /// R33.3: 0 means "worthless, collect when untouched"; 1 is the default for every
+    /// record and keeps it forever. 2–3 are reserved for a future manual ranking.
+    var importance: Int = 1
     var score: Double?
 
     /// R30.8: `area/id`. The old slug was the first three words of the body, so every

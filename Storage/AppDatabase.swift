@@ -451,6 +451,22 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v20_memory_importance") { db in
+            // R33.3: garbage collection needs a signal that says "this record is
+            // worthless". Default 1 means every existing record is kept: only a record
+            // explicitly marked 0 can ever be collected, and only when untouched.
+            let columns = try db.columns(in: "memory").map(\.name)
+            if !columns.contains("importance") {
+                try db.execute(sql: """
+                    ALTER TABLE memory ADD COLUMN importance INTEGER NOT NULL DEFAULT 1;
+                    """)
+            }
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_memory_importance
+                    ON memory(importance, last_used_at);
+                """)
+        }
+
         return migrator
 
     }

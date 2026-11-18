@@ -85,6 +85,12 @@ struct AppServices: Sendable {
                     Logger(subsystem: "app.project-s.swift", category: "memory")
                         .info("Память: удалено \(pruned, privacy: .public) неиспользуемых записей")
                 }
+                // R33.3: narrow collection at launch. Only records marked worthless and
+                // untouched for half a year; everything else is kept.
+                if let collected = try? await services.memory.gc(), collected > 0 {
+                    Logger(subsystem: "app.project-s.swift", category: "memory")
+                        .info("Память: собрано \(collected, privacy: .public) пустых записей")
+                }
                 try? await services.memory.pruneOrphanEmbeddings()
             }
             return services
