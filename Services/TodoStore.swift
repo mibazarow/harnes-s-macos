@@ -35,8 +35,6 @@ final class TodoStore: @unchecked Sendable {
         }
     }
 
-    static let statuses = ["pending", "active", "done", "cancelled"]
-
     private(set) var items: [Item] = []
     /// True when the plan survived from a previous turn.
     private(set) var carriedOver = false

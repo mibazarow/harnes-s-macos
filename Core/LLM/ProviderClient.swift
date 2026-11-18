@@ -166,16 +166,21 @@ struct ProviderClient: Sendable {
                         maxTokens: ceiling
                     )
 
-                    var body = try Self.encodeRequest(
-                        model: model,
-                        messages: messages,
-                        reasoning: provider.reasoningLevel,
-                        tools: tools,
-                        sampling: options,
-                        cacheKey: Self.isLocal(baseURL: provider.baseURL) ? cacheKey : nil,
-                        cacheFields: Self.isLocal(baseURL: provider.baseURL)
-                    )
-                    request.httpBody = body
+                    // The body is rebuilt when the server rejects the sampling fields;
+                    // one builder keeps the two copies from drifting.
+                    func encodedBody(_ sampling: SamplingOptions) throws -> Data {
+                        try Self.encodeRequest(
+                            model: model,
+                            messages: messages,
+                            reasoning: provider.reasoningLevel,
+                            tools: tools,
+                            sampling: sampling,
+                            cacheKey: Self.isLocal(baseURL: provider.baseURL) ? cacheKey : nil,
+                            cacheFields: Self.isLocal(baseURL: provider.baseURL)
+                        )
+                    }
+
+                    request.httpBody = try encodedBody(options)
 
                     var bytes: URLSession.AsyncBytes
                     var response: URLResponse
@@ -200,16 +205,7 @@ struct ProviderClient: Sendable {
                         // cheaper and more robust than guessing per vendor.
                         if options.presencePenalty != nil, Self.rejectsSamplingFields(text) {
                             options = options.minimal
-                            body = try Self.encodeRequest(
-                                model: model,
-                                messages: messages,
-                                reasoning: provider.reasoningLevel,
-                                tools: tools,
-                                sampling: options,
-                                cacheKey: Self.isLocal(baseURL: provider.baseURL) ? cacheKey : nil,
-                                cacheFields: Self.isLocal(baseURL: provider.baseURL)
-                            )
-                            request.httpBody = body
+                            request.httpBody = try encodedBody(options)
                             continue
                         }
 
