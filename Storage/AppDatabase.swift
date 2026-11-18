@@ -358,6 +358,30 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v15_actions") { db in
+            // R30.6: the auditable trail. `because_*` answers "почему это было
+            // разрешено"; tokens and cost make a monthly ceiling possible later.
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS actions (
+                    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id        TEXT NOT NULL,
+                    message_id        TEXT NOT NULL,
+                    step              INTEGER NOT NULL DEFAULT 0,
+                    at                TEXT NOT NULL,
+                    tool              TEXT NOT NULL,
+                    args_summary      TEXT NOT NULL DEFAULT '',
+                    outcome           TEXT NOT NULL DEFAULT 'done',
+                    model             TEXT NOT NULL DEFAULT '',
+                    prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    cost_usd          REAL NOT NULL DEFAULT 0,
+                    because_kind      TEXT NOT NULL DEFAULT 'message',
+                    because_quote     TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS actions_at ON actions (at);
+                """)
+        }
+
         return migrator
     }
 }

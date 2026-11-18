@@ -63,6 +63,8 @@ struct ToolRegistry: Sendable {
     var isSubagent: Bool = false
     /// R30.5: the operations ledger, present in the app and absent in pure tests.
     var operations: OperationLedger?
+    /// R30.6: the action journal behind the `activity` tool.
+    var actions: ActionJournal?
     let memory: MemoryService?
     let embeddings: EmbeddingsService?
     let secrets: SecretsService?
@@ -94,6 +96,7 @@ struct ToolRegistry: Sendable {
         currentUserMessageID: Int64? = nil,
         isSubagent: Bool = false,
         operations: OperationLedger? = nil,
+        actions: ActionJournal? = nil,
         memory: MemoryService?,
         embeddings: EmbeddingsService?,
         secrets: SecretsService?,
@@ -117,6 +120,7 @@ struct ToolRegistry: Sendable {
         self.currentUserMessageID = currentUserMessageID
         self.isSubagent = isSubagent
         self.operations = operations
+        self.actions = actions
         self.memory = memory
         self.embeddings = embeddings
         self.secrets = secrets
@@ -370,6 +374,7 @@ struct ToolRegistry: Sendable {
             case "share": return await shareTool(args)
             case "observe": return await observeTool(args)
             case "skill_learn": return await skillLearnTool(args)
+            case "activity": return await activityTool(args)
             case "windows": return windowsTool(args)
             case "shortcut": return await shortcutTool(args)
             case "app_script": return await appScriptTool(args)

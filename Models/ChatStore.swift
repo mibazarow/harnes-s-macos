@@ -247,6 +247,7 @@ final class ChatStore {
             currentUserMessage: text,
             currentUserMessageID: nil,
             operations: services.operations,
+            actions: services.actions,
             memory: services.memory,
             embeddings: services.embeddings,
             secrets: services.secrets,
@@ -373,6 +374,20 @@ final class ChatStore {
                             isError: isError,
                             in: assistantID
                         )
+                        // R30.6: one row per step, reads included. The quote is the
+                        // user's own request — trust check (R30.7) is not enabled yet.
+                        try? await services.actions.record(ActionJournal.Draft(
+                            sessionID: promptCacheKey,
+                            messageID: assistantID.uuidString,
+                            step: stepIndex,
+                            tool: name,
+                            args: arguments,
+                            outcome: isError ? "failed" : "done",
+                            model: model,
+                            promptTokens: 0, completionTokens: 0, costUSD: 0,
+                            becauseKind: autopilot ? "autopilot" : "message",
+                            becauseQuote: text
+                        ))
                     case .usage(let promptTokens, let completionTokens, let cacheHit, let cacheMiss):
                         let ratio = promptTokens > 0 ? cacheHit * 100 / promptTokens : 0
                         Self.logLatency(
@@ -395,6 +410,22 @@ final class ChatStore {
                                 cost: cost
                             )
                             spent = totals.cost
+                            // R30.6: the model call itself, with its own cost. A local
+                            // model has cost 0 and the journal says so instead of "—".
+                            try? await services.actions.record(ActionJournal.Draft(
+                                sessionID: promptCacheKey,
+                                messageID: assistantID.uuidString,
+                                step: stepIndex,
+                                tool: "model",
+                                args: "",
+                                outcome: "done",
+                                model: model,
+                                promptTokens: promptTokens,
+                                completionTokens: completionTokens,
+                                costUSD: cost ?? 0,
+                                becauseKind: autopilot ? "autopilot" : "message",
+                                becauseQuote: text
+                            ))
                         }
                     case .truncated(let reason):
                         truncatedReason = reason
@@ -511,6 +542,7 @@ final class ChatStore {
             workspaceState: services.workspaceState,
             isSubagent: true,
             operations: services.operations,
+            actions: services.actions,
             memory: services.memory,
             embeddings: services.embeddings,
             secrets: nil,

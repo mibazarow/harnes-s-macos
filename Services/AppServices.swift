@@ -29,12 +29,15 @@ struct AppServices: Sendable {
     let workspaceState = WorkspaceState(AppPaths.workspaceDirectory)
     /// R30.5: mutating actions claim a row before they run.
     let operations: OperationLedger
+    /// R30.6: the auditable trail of steps.
+    let actions: ActionJournal
     /// Installs the embedding model into the data folder after a fresh install.
     let modelInstaller: EmbeddingModelInstaller?
 
     init(database: AppDatabase, modelInstaller: EmbeddingModelInstaller? = nil) {
         self.database = database
         self.operations = OperationLedger(database: database)
+        self.actions = ActionJournal(database: database)
         let providers = ProvidersService(database: database)
         self.providers = providers
         self.secrets = SecretsService(database: database)
@@ -102,6 +105,13 @@ final class AppModel {
         self.services = services
         self.chat = ChatStore(services: services)
         self.providerDirectory = ProviderDirectory(service: services?.providers)
+
+        // R30.6: retention at launch — old rows go to a CSV, then out of the database.
+        if let services {
+            Task.detached(priority: .utility) {
+                _ = try? await services.actions.archiveAndPrune()
+            }
+        }
 
         // R25.2: the layout at launch is the known-good state for `display restore_last`.
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {

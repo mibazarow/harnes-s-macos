@@ -402,6 +402,19 @@ extension ToolRegistry {
             ], required: ["query"])
         ),
         ToolDefinition(
+            name: "activity",
+            exposure: .deferred,
+            description: "Audit trail: list steps by day, show one, export CSV for a range, prune older than 30 days.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["list", "show", "export", "prune"]],
+                "id": ["type": "integer", "description": "show: action id"],
+                "limit": ["type": "integer", "description": "list: default 40"],
+                "from": ["type": "string", "description": "export: ISO date"],
+                "to": ["type": "string", "description": "export: ISO date"],
+                "confirm": ["type": "boolean", "description": "Required for prune"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "skill_learn",
             exposure: .deferred,
             description: "Procedures you write for yourself: save, patch one quote, list, read. Secrets scrubbed; hand-edited files locked.",
