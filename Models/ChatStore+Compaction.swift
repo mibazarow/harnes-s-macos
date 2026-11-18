@@ -22,7 +22,7 @@ extension ChatStore {
         let plan = composer.plan(
             systemPrompt: system,
             messages: promptMessages,
-            contextWindow: provider.contextWindow,
+            contextWindow: window(for: provider, model: model).window,
             thresholdPercent: min(100, max(10, fraction * 100)),
             summaryTokens: TokenEstimator.tokens(in: checkpointSummary),
             estimateScale: estimateScale,
@@ -338,7 +338,7 @@ extension ChatStore {
     func compactIfNeeded(provider: ProviderModel, model: String, services: AppServices) async {
         let scale = await calibration.scale(providerID: provider.id, model: model)
         let plan = contextPlan(
-            contextWindow: provider.contextWindow,
+            contextWindow: window(for: provider, model: model).window,
             thresholdPercent: compactionThreshold,
             summaryTokens: TokenEstimator.tokens(in: checkpointSummary),
             estimateScale: scale
@@ -383,7 +383,8 @@ extension ChatStore {
     ) async {
         guard let sample = await calibration.lastSample(providerID: provider.id, model: model) else { return }
         let usable = composer.budget(
-            for: provider.contextWindow, thresholdPercent: compactionThreshold
+            for: window(for: provider, model: model).window,
+            thresholdPercent: compactionThreshold
         ).usable
         let all = promptMessages
         guard all.count > 4 else { return }

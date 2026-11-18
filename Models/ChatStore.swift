@@ -324,7 +324,7 @@ final class ChatStore {
         var history = await buildHistory(
             text: text,
             attachments: attachments,
-            contextWindow: provider.contextWindow,
+            contextWindow: window(for: provider, model: model).window,
             provider: provider,
             model: model,
             services: services
@@ -561,7 +561,7 @@ final class ChatStore {
                 history = await buildHistory(
                     text: text,
                     attachments: attachments,
-                    contextWindow: provider.contextWindow,
+                    contextWindow: window(for: provider, model: model).window,
                     provider: provider,
                     model: model,
                     services: services
@@ -750,6 +750,14 @@ final class ChatStore {
             + "empty=\(findings.isEmpty) error=\(lastError ?? "-")")
         return SubagentOutcome(
             text: findings, error: lastError, steps: steps, calls: callsUsed, truncated: truncated
+        )
+    }
+
+    /// R34.2: the window actually used for budgets. A known model name wins over the
+    /// stored number unless the person set the number explicitly.
+    func window(for provider: ProviderModel, model: String) -> ContextWindowResolution {
+        ModelContextPreferences.resolve(
+            providerID: provider.id, model: model, providerWindow: provider.contextWindow
         )
     }
 
