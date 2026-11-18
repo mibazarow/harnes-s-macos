@@ -46,6 +46,7 @@
 | R20.1 | `cf2350f` | `windows list/apps` с id и координатами в точках и пикселях |
 | R20.2 | `ee271dc` | `git`: структурный status, fetch/pull/push(confirm)/branch/switch/merge/show/blame/conflicts |
 | R20.3 | `31cf9e8` | `app_script` (AppleScript/JXA) |
+| R26.2 | `da16224` | `contacts search/get/create/update`; поиск по имени, телефону и почте, запись только с `confirm` |
 | R26.1 | `39054f2` | `calendar`: events/create/update/delete (только свои, `confirm`), calendars, free_busy, reminders; Info.plist строки |
 | R25.11 | `355bcdc` | `system info/cpu/disk/permissions/tcc_panels`; инвентарь девяти грантов с путями панелей; `process` отложен ради бюджета |
 | R25.10 | `57b00dc` | `settings appearance/wallpaper/dock/menu_bar/hot_corners/focus/screensaver/accessibility`; запись с `confirm` и чтением назад |
@@ -70,7 +71,7 @@
 
 | # | Пункт | Где смотреть | Что именно |
 | --- | --- | --- | --- |
-| 12 | R26.2–R26.4 | раздел ниже | Contacts/share/чтение уведомлений; Info.plist уже добавлен |
+| 12 | R26.3–R26.4 | раздел ниже | share/чтение уведомлений; Info.plist уже добавлен |
 | 13 | R27.1–R27.2 | раздел ниже | глобальная клавиша, панель с выделением, наблюдение за вводом |
 | 14 | R30.1–R30.7 | раздел ниже | недоверенный контент, память с цитатой, уроки, self-skills, `unknown`, журнал, trust check |
 
