@@ -287,15 +287,19 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "system",
-            description: "Machine state in one call: memory and swap, power and charge, thermal, load and uptime, volumes, top processes. Read-only.",
+            description: "Machine state and grants: info, cpu, memory, thermal, power, disk, volumes, processes; permissions; tcc_panels.",
             parameters: schema([
+                "action": ["type": "string", "enum": ["text", "permissions", "tcc_panels"]],
+                "service": ["type": "string", "description": "tcc_panels: accessibility, screen_recording, full_disk_access, calendars, ..."],
                 "sections": ["type": "array", "items": ["type": "string"],
-                             "description": "memory, power, load, volumes, processes; omit for all"]
+                             "description": "info, cpu, memory, power, load, disk, volumes, processes; omit for all"],
+                "path": ["type": "string", "description": "disk: top-5 largest folders here"]
             ], required: [])
         ),
         ToolDefinition(
             name: "process",
-            description: "Processes and background commands. run starts one and returns an id (logs/wait/stop manage it). ps lists every process by name substring, info explains one pid, signal and kill_tree stop it.",
+            exposure: .deferred,
+            description: "Processes and background commands: run (returns an id), list, logs, wait, stop, ps, info, signal, kill_tree.",
             parameters: schema([
                 "action": ["type": "string", "enum": ["run", "list", "logs", "stop", "wait", "ps", "info", "signal", "kill_tree"]],
                 "command": ["type": "string", "description": "Shell command"],
@@ -313,7 +317,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "display",
             exposure: .deferred,
-            description: "Displays: list modes and layout, set_mode, arrangement, mirror, rotate, night_shift, restore_last. Changes need confirm.",
+            description: "Displays: list, set_mode, arrangement, mirror, rotate, night_shift, restore_last; confirm.",
             parameters: schema([
                 "action": ["type": "string", "enum": [
                     "list", "set_mode", "arrangement", "mirror", "rotate", "night_shift", "restore_last"
@@ -333,7 +337,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "power",
             exposure: .deferred,
-            description: "Power and sound: status, sleep, lock, caffeinate, brightness, volume, mute, media, audio, restart with confirm.",
+            description: "Power and sound: status, sleep, lock, caffeinate, brightness, volume, mute, media, audio, restart.",
             parameters: schema([
                 "action": ["type": "string", "enum": [
                     "status", "sleep", "lock", "display_off", "caffeinate", "low_power",
@@ -396,7 +400,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "settings",
             exposure: .deferred,
-            description: "Shell and appearance: appearance, wallpaper (path or solid:#RRGGBB), dock, menu_bar, hot_corners, focus, screensaver, accessibility. Mutations need confirm and read back.",
+            description: "Shell and appearance: appearance, wallpaper, dock, menu_bar, hot_corners, focus, screensaver, accessibility; confirm.",
             parameters: schema([
                 "action": ["type": "string", "enum": [
                     "appearance", "wallpaper", "dock", "menu_bar", "hot_corners",
@@ -413,7 +417,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "launchd",
             exposure: .deferred,
-            description: "Login item via SMAppService, this user's launch agents, and Time Machine: status, manual start, list, exclusions.",
+            description: "Login item, launch agents, Time Machine status, manual start, list, exclusions.",
             parameters: schema([
                 "action": ["type": "string", "enum": [
                     "login_item", "agents", "tm_status", "tm_start", "tm_list", "tm_exclusions"

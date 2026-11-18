@@ -209,8 +209,23 @@ struct ToolRegistry: Sendable {
     }
 
     func systemTool(_ args: [String: Any]) -> ToolResult {
-        let sections = Set((args["sections"] as? [String] ?? []).map { $0.lowercased() })
-        return .ok(SystemReport.text(sections: sections))
+        switch (args["action"] as? String)?.lowercased() ?? "text" {
+        case "permissions":
+            return .ok(GrantInventory.text())
+        case "tcc_panels":
+            guard let service = args["service"] as? String else {
+                return .fail("service обязателен: " + TCCPanels.services.keys.sorted().joined(separator: ", "))
+            }
+            guard TCCPanels.open(service) else {
+                return .fail("Панель «\(service)» не открылась: неизвестный сервис или URL. "
+                    + "Известные: " + TCCPanels.services.keys.sorted().joined(separator: ", "))
+            }
+            return .ok("Панель \(service) открыта. Галочку ставит человек: TCC кодом не пишется.")
+        default:
+            let sections = Set((args["sections"] as? [String] ?? []).map { $0.lowercased() })
+            let path = (args["path"] as? String).map(resolve)
+            return .ok(SystemReport.text(sections: sections, diskPath: path))
+        }
     }
 
     static func compactDescription(_ definition: ToolDefinition) -> String {
