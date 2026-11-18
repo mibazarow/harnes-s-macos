@@ -2,17 +2,18 @@ import Foundation
 
 /// R19.7: one JSON line per GUI action in `logs/ui_actions.log`. The agent must be able
 /// to prove what it pressed; the person must be able to read it without decoding.
-final class UIActionJournalInterceptor: ToolInterceptor, @unchecked Sendable {
-    let name = "ui_journal"
-    private let fileURL: URL
-    private let lock = NSLock()
-
-    init(directory: URL = AppPaths.logsDirectory) {
-        fileURL = directory.appendingPathComponent("ui_actions.log")
+enum UIActionJournal {
+    /// The journal is also written outside a tool call — the stop hotkey has no call —
+    /// so the writer is shared instead of living inside the interceptor.
+    static func append(_ entry: [String: String], directory: URL = AppPaths.logsDirectory) {
+        guard let data = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]),
+              let line = String(data: data, encoding: .utf8) else { return }
+        append(line: line, directory: directory)
     }
 
     /// Synchronous on purpose: a lock must not be held across an await.
-    private func append(_ line: String) {
+    static func append(line: String, directory: URL = AppPaths.logsDirectory) {
+        let fileURL = directory.appendingPathComponent("ui_actions.log")
         lock.lock()
         defer { lock.unlock() }
         try? AppPaths.ensureDirectory(fileURL.deletingLastPathComponent())
@@ -28,6 +29,17 @@ final class UIActionJournalInterceptor: ToolInterceptor, @unchecked Sendable {
         }
     }
 
+    private static let lock = NSLock()
+}
+
+final class UIActionJournalInterceptor: ToolInterceptor, @unchecked Sendable {
+    let name = "ui_journal"
+    private let directory: URL
+
+    init(directory: URL = AppPaths.logsDirectory) {
+        self.directory = directory
+    }
+
     func afterResult(
         _ call: ToolCall, result: ToolResult, context: ToolCallContext
     ) async -> ToolResult {
@@ -39,9 +51,7 @@ final class UIActionJournalInterceptor: ToolInterceptor, @unchecked Sendable {
             "result": result.isError ? "error" : "ok",
             "head": String(result.output.prefix(200))
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]),
-              let line = String(data: data, encoding: .utf8) else { return result }
-        append(line)
+        UIActionJournal.append(entry, directory: directory)
         return result
     }
 }

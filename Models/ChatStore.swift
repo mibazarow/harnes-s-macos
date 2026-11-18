@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -67,6 +68,8 @@ final class ChatStore {
     let toolCatalog = ToolCatalogState()
     /// Background children survive turns; the registry is rebuilt per turn, this is not.
     let backgroundProcesses = BackgroundProcessService()
+    /// R18.11: per-turn GUI budget, abort flag and focus bookkeeping.
+    let guiSession = GUIControlSession()
     /// Stable per app run; passed to every request so the provider keeps one cache slot
     /// warm instead of shuffling requests between slots.
     let promptCacheKey = UUID().uuidString
@@ -185,6 +188,20 @@ final class ChatStore {
         var assistantID = initialID
         var stepIndex = 0
 
+        // R18.11: a fresh stop flag and a fresh click/event budget for this turn. The
+        // focus restore runs on every exit path, including errors and Stop.
+        guiSession.beginTurn(
+            originalFrontmost: NSWorkspace.shared.frontmostApplication?.processIdentifier
+        )
+        AgentAbortSignal.shared.clear()
+        defer {
+            let current = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            if let pid = guiSession.restoreTarget(current: current) {
+                NSRunningApplication(processIdentifier: pid)?.activate()
+                Self.logLatency("focus_restored pid=\(pid)")
+            }
+        }
+
         // The plan outlives a turn while steps are open; mark it so the model knows the
         // checklist is a continuation, not something it wrote in this turn.
         services?.todos.beginTurn()
@@ -237,7 +254,9 @@ final class ChatStore {
             ledger: services.fileLedger,
             skillScope: services.skillScope,
             interceptors: ToolInterceptorChain(
-                [ArgumentRulesInterceptor(), BrowserGuardInterceptor(), SystemUIGuardInterceptor(), RateLimitInterceptor(), UIActionJournalInterceptor()],
+                [ArgumentRulesInterceptor(), BrowserGuardInterceptor(), SystemUIGuardInterceptor(),
+                 GUIControlGuardInterceptor(session: guiSession), RateLimitInterceptor(),
+                 UIActionJournalInterceptor()],
                 log: { line in ChatStore.logLatency(line) }
             ),
             catalog: toolCatalog,
@@ -462,6 +481,18 @@ final class ChatStore {
         model: String,
         services: AppServices
     ) async -> SubagentOutcome {
+        // A subagent is its own turn for the GUI budget, but shares the abort flag: the
+        // stop hotkey must kill a runaway child too.
+        let subagentSession = GUIControlSession()
+        subagentSession.beginTurn(
+            originalFrontmost: NSWorkspace.shared.frontmostApplication?.processIdentifier
+        )
+        defer {
+            let current = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            if let pid = subagentSession.restoreTarget(current: current) {
+                NSRunningApplication(processIdentifier: pid)?.activate()
+            }
+        }
         let registry = ToolRegistry(
             workspace: AppPaths.workspaceDirectory,
             memory: services.memory,
@@ -477,7 +508,9 @@ final class ChatStore {
             readOnly: readOnly,
             subagent: nil,
             interceptors: ToolInterceptorChain(
-                [ArgumentRulesInterceptor(), BrowserGuardInterceptor(), SystemUIGuardInterceptor(), RateLimitInterceptor(), UIActionJournalInterceptor()],
+                [ArgumentRulesInterceptor(), BrowserGuardInterceptor(), SystemUIGuardInterceptor(),
+                 GUIControlGuardInterceptor(session: subagentSession), RateLimitInterceptor(),
+                 UIActionJournalInterceptor()],
                 log: { line in ChatStore.logLatency(line) }
             ),
             catalog: toolCatalog,
@@ -905,6 +938,10 @@ final class ChatStore {
         // The buffer is part of the answer: flush before the bubble is frozen, or the
         // last few hundred milliseconds of text vanish on Stop.
         flush()
+        // R18.11: a cancelled task cannot be asked between steps, so the GUI guard has
+        // to see the stop too — otherwise a queued click still runs after Stop.
+        AgentAbortSignal.shared.abort("пользователь остановил ход")
+        guiSession.abort("пользователь остановил ход")
         streamTask?.cancel()
         commandTask?.cancel()
         streamTask = nil

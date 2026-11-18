@@ -97,6 +97,29 @@ final class AppModel {
         self.chat = ChatStore(services: services)
         self.providerDirectory = ProviderDirectory(service: services?.providers)
 
+        // R18.11: system-wide stop for a runaway GUI loop. If the combination is taken,
+        // the app still stops from the Stop button; the hotkey is reported, not faked.
+        let hotkeyInstalled = GlobalStopHotkey.shared.install {
+            AgentAbortSignal.shared.abort("hotkey \(GlobalStopHotkey.label)")
+            UIActionJournal.append([
+                "at": ISO8601DateFormatter().string(from: Date()),
+                "tool": "hotkey",
+                "args": GlobalStopHotkey.label,
+                "result": "abort",
+                "head": "аварийный стоп"
+            ])
+            NotificationCenter.default.post(name: .harnessAbortRequested, object: nil)
+        }
+        if !hotkeyInstalled {
+            ChatStore.logLatency("hotkey_failed combo=\(GlobalStopHotkey.label) reason=taken")
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: .harnessAbortRequested, object: nil, queue: .main
+        ) { [chat] _ in
+            chat.stop()
+        }
+
         if let services {
             // MCP servers are child processes; without this they survive the app.
             NotificationCenter.default.addObserver(

@@ -207,7 +207,8 @@ extension ToolRegistry {
                 "window_id": ["type": "integer", "description": "image: window to search, default the app's largest"],
                 "threshold": ["type": "number", "description": "image: match threshold, default 0.85"],
                 "confirm": ["type": "boolean", "description": "Required for System Settings actions"],
-                "verify": ["type": "boolean", "description": "click: compare the element area before/after"]
+                "verify": ["type": "boolean", "description": "click: compare the element area before/after"],
+                "expect_frontmost": ["type": "string", "description": "Abort if this app is not frontmost; nothing is sent"]
             ], required: ["action"])
         ),
         ToolDefinition(
@@ -226,7 +227,8 @@ extension ToolRegistry {
                 "to_x": ["type": "integer", "description": "drag target"],
                 "to_y": ["type": "integer"],
                 "dx": ["type": "integer", "description": "scroll pixels"],
-                "dy": ["type": "integer"]
+                "dy": ["type": "integer"],
+                "expect_frontmost": ["type": "string", "description": "Abort if this app is not frontmost"]
             ], required: ["action", "x", "y"])
         ),
         ToolDefinition(
@@ -277,7 +279,8 @@ extension ToolRegistry {
                 "action": ["type": "string", "enum": ["type", "key", "combo"]],
                 "text": ["type": "string", "description": "For type"],
                 "key": ["type": "string", "description": "return, tab, escape, arrows, f1-f12"],
-                "combo": ["type": "string", "description": "cmd+shift+4, ctrl+alt+delete"]
+                "combo": ["type": "string", "description": "cmd+shift+4, ctrl+alt+delete"],
+                "expect_frontmost": ["type": "string", "description": "Abort if this app is not frontmost"]
             ], required: ["action"])
         ),
         ToolDefinition(
