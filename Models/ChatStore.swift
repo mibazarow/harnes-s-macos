@@ -72,7 +72,10 @@ final class ChatStore {
     let guiSession = GUIControlSession()
     /// Stable per app run; passed to every request so the provider keeps one cache slot
     /// warm instead of shuffling requests between slots.
-    let promptCacheKey = UUID().uuidString
+    var promptCacheKey = UUID().uuidString
+    /// Workspace the current cache key belongs to; a switch rotates the key because the
+    /// system prompt and every relative path changed under the same prefix.
+    private var lastWorkspace: URL?
     /// First message of the task in progress. Everything before it belongs to closed
     /// tasks and may be pruned from the request.
     var taskStartIndex: Int = 0
@@ -190,6 +193,12 @@ final class ChatStore {
 
         // R18.11: a fresh stop flag and a fresh click/event budget for this turn. The
         // focus restore runs on every exit path, including errors and Stop.
+        let workspace = AppPaths.workspaceDirectory
+        if let lastWorkspace, lastWorkspace != workspace {
+            promptCacheKey = UUID().uuidString
+            Self.logLatency("workspace_switch to=\(workspace.path) cache_key=rotated")
+        }
+        lastWorkspace = workspace
         guiSession.beginTurn(
             originalFrontmost: NSWorkspace.shared.frontmostApplication?.processIdentifier
         )
@@ -234,6 +243,7 @@ final class ChatStore {
 
         let registry = ToolRegistry(
             workspace: AppPaths.workspaceDirectory,
+            workspaceState: services.workspaceState,
             memory: services.memory,
             embeddings: services.embeddings,
             secrets: services.secrets,
@@ -495,6 +505,7 @@ final class ChatStore {
         }
         let registry = ToolRegistry(
             workspace: AppPaths.workspaceDirectory,
+            workspaceState: services.workspaceState,
             memory: services.memory,
             embeddings: services.embeddings,
             secrets: nil,

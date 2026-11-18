@@ -44,7 +44,15 @@ enum AppPaths {
         modelsDirectory.appendingPathComponent("embeddinggemma-2", isDirectory: true)
     }
 
+    /// The folder tools treat as the project root. R20.4: the user can switch it with
+    /// the `workspace` tool; the choice lives in `config/workspaces.json` and falls back
+    /// to the default folder when the chosen one disappeared.
     static var workspaceDirectory: URL {
+        WorkspaceBookmarks.current()
+    }
+
+    /// The folder a fresh install starts in; also the fallback for a missing bookmark.
+    static var defaultWorkspaceDirectory: URL {
         dataDirectory.appendingPathComponent("workspace", isDirectory: true)
     }
 
@@ -75,7 +83,7 @@ enum AppPaths {
             configDirectory,
             userSkillsDirectory,
             modelsDirectory,
-            workspaceDirectory,
+            defaultWorkspaceDirectory,
             artifactsDirectory,
             versionsDirectory,
             trashDirectory,

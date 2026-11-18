@@ -52,7 +52,10 @@ final class ToolCatalogState: @unchecked Sendable {
 /// Declared as a struct, not an actor, so independent read-only calls can actually
 /// run in parallel — an actor serializes even `await`ed method calls.
 struct ToolRegistry: Sendable {
-    let workspace: URL
+    /// Shared root, not a snapshot: `workspace set` must reach every tool in the same
+    /// turn, and a struct registry cannot mutate itself between calls (R20.4).
+    let workspaceState: WorkspaceState
+    var workspace: URL { workspaceState.url }
     let memory: MemoryService?
     let embeddings: EmbeddingsService?
     let secrets: SecretsService?
@@ -79,6 +82,7 @@ struct ToolRegistry: Sendable {
 
     init(
         workspace: URL,
+        workspaceState: WorkspaceState? = nil,
         memory: MemoryService?,
         embeddings: EmbeddingsService?,
         secrets: SecretsService?,
@@ -97,7 +101,7 @@ struct ToolRegistry: Sendable {
         catalog: ToolCatalogState = ToolCatalogState(),
         processes: BackgroundProcessService? = nil
     ) {
-        self.workspace = workspace
+        self.workspaceState = workspaceState ?? WorkspaceState(workspace)
         self.memory = memory
         self.embeddings = embeddings
         self.secrets = secrets
@@ -323,6 +327,7 @@ struct ToolRegistry: Sendable {
             case "network": return await networkTool(args)
             case "watch": return watchTool(args)
             case "spotlight": return await spotlightTool(args)
+            case "workspace": return workspaceTool(args)
             case "windows": return windowsTool(args)
             case "shortcut": return await shortcutTool(args)
             case "app_script": return await appScriptTool(args)

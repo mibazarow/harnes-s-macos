@@ -344,6 +344,16 @@ extension ToolRegistry {
             ], required: ["query"])
         ),
         ToolDefinition(
+            name: "workspace",
+            exposure: .deferred,
+            description: "Show or switch the project root used by relative paths, git, search and the index. set needs an explicit path and confirm: true.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["get", "set", "list"]],
+                "path": ["type": "string", "description": "set: absolute path or ~/..."],
+                "confirm": ["type": "boolean", "description": "Required for set"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "task",
             exposure: .core,
             description: "Delegate a self-contained job to a fresh subagent with its own context. Returns only its final answer. Pass paths to hand over files or folders you already found, so the subagent does not search for them again.",
