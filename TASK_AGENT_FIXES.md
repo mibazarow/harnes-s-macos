@@ -46,6 +46,7 @@
 | R20.1 | `cf2350f` | `windows list/apps` с id и координатами в точках и пикселях |
 | R20.2 | `ee271dc` | `git`: структурный status, fetch/pull/push(confirm)/branch/switch/merge/show/blame/conflicts |
 | R20.3 | `31cf9e8` | `app_script` (AppleScript/JXA) |
+| R25.6 | `400bd38` | `launchd`: `login_item` (SMAppService), `agents` (launchctl print), `tm_status/start/list/exclusions`; автобэкап не воссоздаётся |
 | R25.3 | `c83d93c` | `windows spaces/move_to_space/mission_control/stage_manager`; приватные символы SkyLight/CoreDock, `unsupported` без них |
 | R25.2 | `d8444e3` | `display list/set_mode/arrangement/mirror/rotate/night_shift/restore_last`; снимок раскладки при старте; `screenshot window` через ScreenCaptureKit |
 | R25.1 | `e700eb2` | `power`: статус, сон, блокировка, `caffeinate`, яркость, громкость/mute, медиа, устройства звука, restart/shutdown с `confirm` и проверкой несохранённых |
@@ -64,7 +65,6 @@
 
 | # | Пункт | Где смотреть | Что именно |
 | --- | --- | --- | --- |
-| 7 | R25.6 | раздел ниже | `launchd`: автозапуск, агенты, Time Machine |
 | 8 | R25.7 | раздел ниже | непрерывный экран (последним) |
 | 9 | R25.9 | раздел ниже | Wi-Fi SSID и поиск устройств (ports/dns/http уже есть) |
 | 10 | R25.10 | раздел ниже | `settings`: оболочка и внешний вид |
@@ -502,7 +502,7 @@ DR провалится и гранты снова отвалятся. Вари�
 
 ## R25 — остальные аспекты машины: питание, дисплеи, звук, сеть, тома, поиск, оболочка, состояние
 
-**Статус: R25.1–R25.5, R25.8, R25.12 закрыты; R25.6, R25.7, R25.9–R25.11 открыты.** R18 даёт руки внутри приложений, R19 — экономику вызовов,
+**Статус: R25.1–R25.6, R25.8, R25.12 закрыты; R25.7, R25.9–R25.11 открыты.** R18 даёт руки внутри приложений, R19 — экономику вызовов,
 R20 — рабочий цикл, R25 закрывает то, чем человек управляет **системно**: питание,
 яркость, громкость и устройства звука, режимы дисплеев и ночной режим, виртуальные рабочие
 столы, тома и DMG с печатью, сеть и Wi-Fi, Spotlight, автозапуск и Time Machine, внешний
@@ -663,6 +663,11 @@ main/builtin), `set_mode`/`arrangement`/`mirror`/`rotate` с `confirm` и сни
   успех не изображать.
 
 ### R25.6 — `launchd`: автозапуск, свои агенты, Time Machine
+
+**Закрыто (`400bd38`).** `launchd` (deferred): `login_item` читает и меняет `SMAppService.mainApp`,
+`agents` разбирает `launchctl print gui/$UID` (`LaunchdParser`), Time Machine —
+`tm_status` (парсер plist-вывода), `tm_start` только вручную, `tm_list`, `tm_exclusions`.
+Агентов автобэкапа инструмент не создаёт. Тесты `LaunchdToolTests`.
 
 - `SMAppService.mainApp` — поставить/снять «запускать Harness при входе», статус читать
   всегда, чтобы агент не врал про «включено».
