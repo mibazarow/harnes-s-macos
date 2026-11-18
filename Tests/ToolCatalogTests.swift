@@ -13,8 +13,8 @@ final class ToolCatalogTests: XCTestCase {
     }
 
     func testAllToolsAreStillDefined() {
-        XCTAssertEqual(ToolRegistry.definitions.count, 76)
-        XCTAssertEqual(Set(ToolRegistry.definitions.map(\.name)).count, 76)
+        XCTAssertEqual(ToolRegistry.definitions.count, 77)
+        XCTAssertEqual(Set(ToolRegistry.definitions.map(\.name)).count, 77)
     }
 
     func testDeferredToolIsCompactUntilLoaded() async throws {

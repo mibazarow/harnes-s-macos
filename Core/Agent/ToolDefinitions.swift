@@ -394,6 +394,23 @@ extension ToolRegistry {
             ], required: ["query"])
         ),
         ToolDefinition(
+            name: "settings",
+            exposure: .deferred,
+            description: "Shell and appearance: appearance, wallpaper (path or solid:#RRGGBB), dock, menu_bar, hot_corners, focus, screensaver, accessibility. Mutations need confirm and read back.",
+            parameters: schema([
+                "action": ["type": "string", "enum": [
+                    "appearance", "wallpaper", "dock", "menu_bar", "hot_corners",
+                    "focus", "screensaver", "accessibility"
+                ]],
+                "value": ["type": "string", "description": "dark|light|auto; dock knob; corner; invert|zoom|cursor"],
+                "setting": ["type": "string", "description": "dock setting, corner action, on/off"],
+                "path": ["type": "string", "description": "wallpaper file or solid:#RRGGBB"],
+                "size": ["type": "integer", "description": "accessibility cursor size 1..4"],
+                "shortcut": ["type": "string", "description": "focus: shortcut name, default Set Focus"],
+                "confirm": ["type": "boolean", "description": "Required for mutations"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "launchd",
             exposure: .deferred,
             description: "Login item via SMAppService, this user's launch agents, and Time Machine: status, manual start, list, exclusions.",
