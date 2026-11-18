@@ -732,16 +732,15 @@ final class ChatStore {
         )
     }
 
-    /// R30.8: the prompt block, read once. Relevance to the current request orders the
-    /// records inside an area; the token budget then decides what fits. Hybrid search is
-    /// the same one `memory_search` uses, so there is no second ranking scheme.
-    static func promptMemories(services: AppServices, query: String) async -> [MemoryItem] {
-        var relevance: [Int64: Double] = [:]
-        let hits = await HybridSearch(
-            memory: services.memory, embeddings: services.embeddings
-        ).search(query, limit: 200)
-        for hit in hits { relevance[hit.item.id] = hit.score }
-        return (try? await services.memory.forPrompt(relevance: relevance)) ?? []
+    /// R30.8: the prompt block, read once per turn.
+    ///
+    /// The block deliberately ignores the current question. Ordering it by relevance to
+    /// the latest message looked helpful and cost the provider cache on every turn: the
+    /// memory block sits inside the system prefix, so a new order invalidated every
+    /// block after it even when nothing had been remembered or forgotten (M37). Query
+    /// relevance still drives `memory_search`; the prompt keeps a stable order.
+    static func promptMemories(services: AppServices, query _: String) async -> [MemoryItem] {
+        (try? await services.memory.forPrompt()) ?? []
     }
 
     /// R30.7: `current` is this turn's message; earlier user messages are the fallback
