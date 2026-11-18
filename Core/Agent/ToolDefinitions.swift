@@ -387,6 +387,21 @@ extension ToolRegistry {
             ], required: ["query"])
         ),
         ToolDefinition(
+            name: "launchd",
+            exposure: .deferred,
+            description: "Login item via SMAppService, this user's launch agents, and Time Machine: status, manual start, list, exclusions.",
+            parameters: schema([
+                "action": ["type": "string", "enum": [
+                    "login_item", "agents", "tm_status", "tm_start", "tm_list", "tm_exclusions"
+                ]],
+                "value": ["type": ["boolean", "string"],
+                          "description": "login_item on/off; tm_exclusions add/remove/check"],
+                "filter": ["type": "string", "description": "agents: label substring"],
+                "limit": ["type": "integer", "description": "agents default 60, tm_list default 20"],
+                "path": ["type": "string", "description": "tm_exclusions target"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "workspace",
             exposure: .deferred,
             description: "Project root for relative paths, git and search. set needs a path and confirm.",

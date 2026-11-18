@@ -333,6 +333,7 @@ struct ToolRegistry: Sendable {
             case "workspace": return workspaceTool(args)
             case "power": return await powerTool(args)
             case "display": return await displayTool(args)
+            case "launchd": return await launchdTool(args)
             case "windows": return windowsTool(args)
             case "shortcut": return await shortcutTool(args)
             case "app_script": return await appScriptTool(args)
