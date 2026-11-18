@@ -420,6 +420,23 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v18_summary_boundary") { db in
+            // M33: the checkpoint needs a high-water mark of messages it already covers.
+            // New folds take only what comes after it and append to the existing text;
+            // the old summary is never rebuilt. The pointer lives next to the checkpoint
+            // rather than in the `messages` table because it is one value for the chat,
+            // not a property of a message.
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS chat_state (
+                    id              INTEGER PRIMARY KEY CHECK (id = 1),
+                    summarized_up_to INTEGER NOT NULL DEFAULT 0,
+                    updated_at      TEXT NOT NULL DEFAULT ''
+                );
+                INSERT OR IGNORE INTO chat_state (id, summarized_up_to, updated_at)
+                VALUES (1, 0, '');
+                """)
+        }
+
         return migrator
 
     }

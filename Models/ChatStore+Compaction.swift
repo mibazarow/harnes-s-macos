@@ -251,9 +251,15 @@ extension ChatStore {
                 CompactionService.Checkpoint(
                     summary: summary,
                     coveredMessageCount: checkpointCovered,
-                    createdAt: Timestamps.now()
+                    createdAt: Timestamps.now(),
+                    summarizedUpTo: checkpointCovered
                 ),
                 database: services.database
+            )
+            // The pointer lives in its own table as well: a checkpoint rewritten by an
+            // older build must not move the boundary back (M33).
+            try? await services.compaction.saveSummarizedUpTo(
+                checkpointCovered, database: services.database
             )
             compactionFailures = 0
             compactionCooldownUntil = nil

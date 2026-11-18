@@ -11,12 +11,20 @@ actor CompactionService {
         var summary: String
         var coveredMessageCount: Int
         var createdAt: String
+        /// M33: the high-water mark of messages already folded into `summary`. New
+        /// compactions take only what is after it and append; the old text is never
+        /// re-summarized. Optional so checkpoints written before the column existed
+        /// still decode.
+        var summarizedUpTo: Int?
 
         enum CodingKeys: String, CodingKey {
             case summary
             case coveredMessageCount = "covered"
             case createdAt
+            case summarizedUpTo = "summarized_up_to"
         }
+
+        var boundary: Int { summarizedUpTo ?? coveredMessageCount }
     }
 
     private static let key = "compaction.checkpoint"
@@ -37,6 +45,28 @@ actor CompactionService {
 
         try database.queue.write { db in
             try AppStateStore.write(db, key: Self.key, value: raw)
+        }
+    }
+
+    /// M33: the boundary is also kept in its own table. The checkpoint JSON is a
+    /// document that older versions rewrite as a whole; the pointer has to survive that
+    /// and stay queryable on its own.
+    func loadSummarizedUpTo(database: AppDatabase) throws -> Int {
+        try database.queue.read { db in
+            try Int.fetchOne(
+                db, sql: "SELECT summarized_up_to FROM chat_state WHERE id = 1"
+            ) ?? 0
+        }
+    }
+
+    func saveSummarizedUpTo(_ count: Int, database: AppDatabase) throws {
+        try database.queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO chat_state (id, summarized_up_to, updated_at) VALUES (1, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    summarized_up_to = excluded.summarized_up_to,
+                    updated_at = excluded.updated_at
+                """, arguments: [count, Timestamps.now()])
         }
     }
 
@@ -83,16 +113,50 @@ actor CompactionService {
         let available = max(provider.contextWindow - outputFloor, 8_000)
         let budget = max(8_000, min(60_000, available))
 
-        var summary = previousSummary ?? ""
+        var delta = ""
         for batch in Self.batches(messages, budget: budget) {
-            summary = try await summarize(
+            // The old summary is context, not something to rewrite: the model is told to
+            // describe only the new fragment, and the caller appends it verbatim (M33).
+            let context = [previousSummary, delta]
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n\n")
+            let fragment = try await summarize(
                 batch: batch,
                 provider: provider,
                 model: model,
-                previousSummary: summary.isEmpty ? nil : summary
+                previousSummary: context.isEmpty ? nil : context
             )
+            delta = Self.merge(previous: delta, delta: fragment)
         }
-        return summary
+        return Self.merge(previous: previousSummary ?? "", delta: delta)
+    }
+
+    /// M33: the old summary is never re-summarized. It stays byte-identical and the new
+    /// fragment is appended; only the new part is cut when the document reaches its
+    /// ceiling. Rebuilding the whole text on every fold was what made the checkpoint
+    /// drift from the conversation and invalidated the prompt prefix.
+    static let summaryLimit = 24_000
+
+    static func merge(previous: String, delta: String, limit: Int = summaryLimit) -> String {
+        // The old text is kept exactly as it was: trimming it would already be a
+        // rewrite, and the test for "the first summary survives" compares bytes.
+        let old = previous
+        let oldBody = old.trimmingCharacters(in: .whitespacesAndNewlines)
+        let new = delta.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !oldBody.isEmpty else {
+            guard new.count > limit else { return new }
+            return String(new.prefix(limit)) + "\n…[саммари сокращено: было \(new.count) символов]"
+        }
+        guard !new.isEmpty else { return old }
+
+        let separator = "\n\n---\n\n"
+        let room = max(limit - old.count - separator.count, 0)
+        guard room > 0 else { return old }
+        let appended = new.count <= room
+            ? new
+            : String(new.prefix(room)) + "\n…[дописано частично: было \(new.count) символов]"
+        return old + separator + appended
     }
 
     /// Template the checkpoint must follow. Structure beats prose here: the next agent
@@ -176,9 +240,9 @@ actor CompactionService {
             prompt += """
 
 
-            Уже есть предыдущее саммари. Объедини его с фрагментом: новое важнее старого,
-            но прежние требования и решения сохраняй, пока фрагмент им не противоречит.
-            Не повторяй обёртки вроде <conversation-checkpoint>.
+            Уже сохранённое саммари. НЕ переписывай, не сокращай и не повторяй его:
+            оно останется в документе дословно. Опиши только новый фрагмент ниже,
+            в тех же секциях шаблона. Не повторяй обёртки вроде <conversation-checkpoint>.
 
             \(previous)
             """

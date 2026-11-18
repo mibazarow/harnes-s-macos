@@ -1307,7 +1307,10 @@ final class ChatStore {
         // silently dropped on restart.
         if let checkpoint = try? await services.compaction.loadCheckpoint(database: services.database) {
             checkpointSummary = checkpoint.summary
-            checkpointCovered = checkpoint.coveredMessageCount
+            let storedBoundary = (try? await services.compaction.loadSummarizedUpTo(
+                database: services.database
+            )) ?? 0
+            checkpointCovered = max(storedBoundary, checkpoint.boundary)
         }
 
         let stored: [StoredMessage]
