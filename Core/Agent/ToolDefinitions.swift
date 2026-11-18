@@ -226,6 +226,16 @@ extension ToolRegistry {
             ], required: ["action", "x", "y"])
         ),
         ToolDefinition(
+            name: "files",
+            exposure: .deferred,
+            description: "List volumes with free space, eject a volume (confirm), mount or unmount a DMG.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["volumes", "eject", "dmg_mount", "dmg_unmount"]],
+                "path": ["type": "string"], "name": ["type": "string", "description": "eject by volume name"],
+                "confirm": ["type": "boolean", "description": "eject"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "apps",
             exposure: .deferred,
             description: "List running apps; open a file, URL or app; activate, hide or quit (quit needs confirm).",

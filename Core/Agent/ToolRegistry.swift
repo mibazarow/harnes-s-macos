@@ -124,7 +124,7 @@ struct ToolRegistry: Sendable {
         "bash", "schedule_add", "schedule_remove", "memory_add", "memory_forget", "secret_save",
         "skill_install", "skill_remove", "index_workspace", "todowrite", "process", "app_script",
         "fs_copy", "fs_move", "fs_mkdir", "keyboard", "clipboard", "ui", "mouse",
-        "git", "apps"
+        "git", "apps", "files"
     ]
 
     /// Refuses a blind write.
@@ -312,6 +312,7 @@ struct ToolRegistry: Sendable {
             case "tool_load": return toolLoad(args)
             case "system": return systemTool(args)
             case "permissions": return permissionsTool()
+            case "files": return await filesTool(args)
             case "apps": return appsTool(args)
             case "notify": return await notifyTool(args)
             case "ui": return uiTool(args)
