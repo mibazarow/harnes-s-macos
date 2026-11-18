@@ -328,6 +328,7 @@ struct ToolRegistry: Sendable {
             case "watch": return watchTool(args)
             case "spotlight": return await spotlightTool(args)
             case "workspace": return workspaceTool(args)
+            case "power": return await powerTool(args)
             case "windows": return windowsTool(args)
             case "shortcut": return await shortcutTool(args)
             case "app_script": return await appScriptTool(args)

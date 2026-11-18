@@ -309,6 +309,27 @@ extension ToolRegistry {
             ], required: ["action"])
         ),
         ToolDefinition(
+            name: "power",
+            exposure: .deferred,
+            description: "Power, screen and sound: status, sleep, lock, display_off, caffeinate (seconds, off), low_power, brightness, volume, mute (input), media, audio devices, restart/shutdown (confirm, refuses with unsaved documents).",
+            parameters: schema([
+                "action": ["type": "string", "enum": [
+                    "status", "sleep", "lock", "display_off", "caffeinate", "low_power",
+                    "brightness", "volume", "mute", "media", "audio", "restart", "shutdown"
+                ]],
+                "value": ["type": ["integer", "string", "boolean"],
+                          "description": "0..100, on/off, 0/1, or a media command"],
+                "display": ["type": "integer", "description": "brightness: display index, default 0"],
+                "device": ["type": "string", "description": "audio: device name substring; omit to list"],
+                "id": ["type": "integer", "description": "audio: device id"],
+                "direction": ["type": "string", "enum": ["output", "input"]],
+                "input": ["type": "boolean", "description": "mute: the microphone"],
+                "seconds": ["type": "integer", "description": "caffeinate: default 300, max 3600"],
+                "off": ["type": "boolean", "description": "caffeinate off: release assertions"],
+                "confirm": ["type": "boolean", "description": "restart/shutdown"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "network",
             exposure: .deferred,
             description: "Network in one call: listening ports with owners, interfaces and gateway, DNS resolution, ping, HTTP status without the body. Read-only.",
