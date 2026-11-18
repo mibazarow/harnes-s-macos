@@ -267,6 +267,8 @@ HARNES_S_DATA/
 
 **Машина:** `system`, `process`, `network`, `spotlight`, `watch`, `windows`, `apps`, `power`, `display`, `keyboard`, `mouse`, `clipboard`, `files`, `settings`, `launchd`, `notify`, `ui`, `observe`, `activity`, `permissions`.
 
+`ui` — самый недооценённый: читает AX-дерево любого приложения (`tree`), ищет элементы по смыслу (`find`), нажимает по пути (`click` через `AXPress`, без координат), ходит по меню (`menu_list`, `menu_click`), ставит значения и фокус. Работает там, где нет ни API, ни CLI.
+
 **Агент:** `task`, `todowrite`, `todo_read`, `schedule_add`, `schedule_list`, `schedule_remove`, `skill_list`, `skill_read`, `skill_install`, `skill_remove`, `skill_learn`, `mcp_list`, `mcp_tools`, `tool_load`.
 
 **Знания:** `memory_add`, `memory_search`, `memory_forget`, `memory_list`, `secret_save`, `secret_get`, `secret_search`.
@@ -310,7 +312,7 @@ HARNES_S_DATA/
 - Только macOS и Apple Silicon.
 - MCP — только stdio; HTTP/SSE-транспорта нет.
 - Нет LSP-диагностики и плагинной системы.
-- Управление интерфейсом чужих приложений через Accessibility пока не включено: окна читаются, кнопки не нажимаются.
+- Управление интерфейсом чужих приложений через Accessibility работает: дерево, поиск по смыслу, нажатие по пути элемента (`AXPress`), пункты меню, `set_value`, фокус. Клик по координатам — только фолбэк, когда элемент press не поддерживает.
 - Голоса нет и не будет. Это решение, а не недоделка.
 - Онбординга нет: сразу настройки.
 - Качество компакции зависит от модели.
