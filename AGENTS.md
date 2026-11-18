@@ -16,6 +16,14 @@ Do not add a second remote or a mirror.
 The GitHub token lives in `DOCS/github-token.md` (gitignored, mode 0600) and is read
 by `/Users/mb/.config/github/credential-helper.sh`. Never print it, never commit it.
 
+## Commit messages
+
+Write every new commit message in Russian. History before this rule stays in English
+and is not rewritten.
+
+- Subject: imperative, Russian, no trailing period — `Починить здоровье браузера`.
+- Body: Russian, wrapped at ~90 characters, explaining why, not restating the diff.
+
 ## Build and test
 
 ```bash
