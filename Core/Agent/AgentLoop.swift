@@ -173,7 +173,9 @@ struct AgentLoop: Sendable {
                             // rewriting old messages later: the historical prefix must
                             // stay byte-identical for the provider's cache.
                             let content = Self.fitToolContent(
-                                Self.toolContent(for: result),
+                                Self.toolContent(
+                                    for: result, tool: call.name, arguments: call.arguments
+                                ),
                                 remaining: runOutputBudget - runOutputChars
                             )
                             runOutputChars += content.count
@@ -321,9 +323,20 @@ struct AgentLoop: Sendable {
     /// already renders `isError` and would otherwise show the prefix twice.
     static let toolErrorPrefix = "ОШИБКА: "
 
-    static func toolContent(for result: ToolResult) -> String {
+    static func toolContent(
+        for result: ToolResult,
+        tool: String? = nil,
+        arguments: String? = nil
+    ) -> String {
         let text = String(result.output.prefix(30_000))
-        return result.isError ? toolErrorPrefix + text : text
+        var content = result.isError ? toolErrorPrefix + text : text
+        // A failure that only says "не вышло" leaves the model to guess. The hint names
+        // different tools that reach the same goal and never points at an irreversible
+        // action (I31).
+        if result.isError, let tool, let hint = ToolAlternatives.format(tool: tool, arguments: arguments) {
+            content += "\n" + hint
+        }
+        return content
     }
 
     static let runOutputStub = "[вывод этого вызова не помещается в бюджет прогона]"
