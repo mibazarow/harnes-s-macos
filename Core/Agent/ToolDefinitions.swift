@@ -259,10 +259,13 @@ extension ToolRegistry {
         ToolDefinition(
             name: "notify",
             exposure: .deferred,
-            description: "Send a macOS notification with a title and body; refuses honestly when authorization is denied.",
+            description: "Send a notification; read the Notification Center via AX; dismiss one or clear all (confirm). Private ones come back redacted.",
             parameters: schema([
-                "title": ["type": "string"], "body": ["type": "string"]
-            ], required: ["title"])
+                "action": ["type": "string", "enum": ["send", "read", "dismiss", "clear"]],
+                "title": ["type": "string"], "body": ["type": "string"],
+                "path": ["type": "array", "items": ["type": "integer"], "description": "dismiss: path from read"],
+                "confirm": ["type": "boolean", "description": "Required for clear"]
+            ], required: [])
         ),
         ToolDefinition(
             name: "clipboard",
