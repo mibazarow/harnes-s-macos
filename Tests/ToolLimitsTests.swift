@@ -612,6 +612,36 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertTrue(result.output.contains("hello from home"), result.output)
     }
 
+    func testSchemasStateTheirLimits() throws {
+        // R32.4: a limit only the code knows is a limit the model cannot respect. The
+        // schema has to name the cap and what happens when it is hit.
+        func definition(_ name: String) throws -> ToolDefinition {
+            try XCTUnwrap(ToolRegistry.definitions.first { $0.name == name })
+        }
+        func parameter(_ name: String, _ field: String) throws -> String {
+            let properties = try XCTUnwrap(
+                definition(name).parameters["properties"]?.value as? [String: Any]
+            )
+            let property = try XCTUnwrap(properties[field] as? [String: Any])
+            return try XCTUnwrap(property["description"] as? String)
+        }
+
+        let readLimit = try parameter("fs_read", "limit")
+        XCTAssertTrue(readLimit.contains("max 2000"), readLimit)
+        XCTAssertTrue(try definition("fs_read").description.contains("обрезано"))
+
+        let readMany = try parameter("read_many", "limit")
+        XCTAssertTrue(readMany.contains("max 1000"), readMany)
+
+        let grepLimit = try parameter("fs_grep", "limit")
+        XCTAssertTrue(grepLimit.contains("max 500"), grepLimit)
+
+        // The cap documented for `fs_read` is the cap the code enforces.
+        XCTAssertEqual(
+            ToolRegistry.readLineLimit, 2_000, "схема и код должны называть один максимум"
+        )
+    }
+
     func testSchemasExposeTheDocumentedParameters() throws {
         // Silent drift between implementation and schema is how `fs_grep mode` shipped
         // without ever being callable. This test makes the contract explicit.

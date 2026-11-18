@@ -34,11 +34,11 @@ extension ToolRegistry {
         ToolDefinition(
             name: "fs_read",
             exposure: .core,
-            description: "Read a UTF-8 text file with line numbers.",
+            description: "Read a UTF-8 text file with line numbers. Default 40 lines, max 2000; a longer file ends with «обрезано» and the offset that continues it.",
             parameters: schema([
                 "path": ["type": "string", "description": "File path"],
-                "offset": ["type": "integer", "description": "First line, 1-based"],
-                "limit": ["type": "integer", "description": "Max lines, default 400"]
+                "offset": ["type": "integer", "description": "First line, 1-based; negative reads from the end"],
+                "limit": ["type": "integer", "description": "Max lines, default 40, max 2000"]
             ], required: ["path"])
         ),
         ToolDefinition(
@@ -75,11 +75,11 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "read_many",
-            description: "Read several files in one call. Returns each file with line numbers; the reply says what was cut and which offset continues it.",
+            description: "Read up to 20 files in one call with line numbers; the reply names what was cut and the offset that continues it.",
             parameters: schema([
                 "paths": ["type": "array", "items": ["type": "string"]],
                 "offset": ["type": "integer", "description": "First line in every file, 1-based"],
-                "limit": ["type": "integer", "description": "Max lines per file, default 200"]
+                "limit": ["type": "integer", "description": "Max lines per file, default 200, max 1000"]
             ], required: ["paths"])
         ),
         ToolDefinition(
@@ -156,7 +156,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "windows",
             exposure: .deferred,
-            description: "On-screen windows (id for screenshot) or running apps; bounds in points and pixels. Also Spaces, Mission Control and Stage Manager.",
+            description: "Windows (id for screenshot) or apps; bounds in points and pixels. Also Spaces, Mission Control and Stage Manager.",
             parameters: schema([
                 "action": ["type": "string", "enum": ["list", "apps", "move", "resize", "minimize", "close", "fullscreen", "to_display", "spaces", "move_to_space", "mission_control", "stage_manager"]],
                 "app": ["type": "string", "description": "list: only this application"],
@@ -192,7 +192,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "ui",
             exposure: .deferred,
-            description: "AX tree, search, press or focus by path; pixel fallback by image for canvas and games. Needs Accessibility; System Settings clicks need confirm.",
+            description: "AX tree, search, press or focus by path; pixel fallback for canvas and games. Needs Accessibility; System Settings clicks need confirm.",
             parameters: schema([
                 "action": ["type": "string", "enum": ["tree", "find", "click", "set_value", "focus", "menu_list", "menu_click"]],
                 "app": ["type": "string", "description": "App name or bundle id; default frontmost"],
@@ -458,7 +458,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "contacts",
             exposure: .deferred,
-            description: "Address book via Contacts: search by name, phone or email, get one card, create or update (confirm). Limited access shows only chosen cards.",
+            description: "Contacts: search by name, phone or email, get a card, create or update (confirm). Limited access shows only chosen cards.",
             parameters: schema([
                 "action": ["type": "string", "enum": ["search", "get", "create", "update"]],
                 "query": ["type": "string", "description": "search: name, phone or email"],
@@ -543,7 +543,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "task",
             exposure: .core,
-            description: "Delegate a self-contained job to a fresh subagent. Returns only its final answer; pass paths you already found so it does not search again.",
+            description: "Delegate a self-contained job to a fresh subagent. Returns only its final answer; pass known paths so it does not search again.",
             parameters: schema([
                 "prompt": ["type": "string", "description": "Full self-contained instruction"],
                 "read_only": ["type": "boolean", "description": "true = investigation only, no edits"],
@@ -624,7 +624,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "fs_grep",
             exposure: .core,
-            description: "Search with ripgrep: matches with context, count per file, outline of headings and declarations.",
+            description: "Search with ripgrep: matches with context, count per file, outline.",
             parameters: schema([
                 "pattern": ["type": "string"],
                 "path": ["type": "string", "description": "Directory or file, default '.'"],
@@ -634,7 +634,7 @@ extension ToolRegistry {
                 "literal": ["type": "boolean", "description": "Treat pattern as plain text"],
                 "before": ["type": "integer", "description": "Context lines before a match (0-10)"],
                 "after": ["type": "integer", "description": "Context lines after a match (0-20)"],
-                "limit": ["type": "integer", "description": "Max result lines, default 100"]
+                "limit": ["type": "integer", "description": "Max result lines, default 100, max 500"]
             ], required: ["pattern"])
         ),
         ToolDefinition(
@@ -646,7 +646,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "bash",
             exposure: .core,
-            description: "Run a shell command in the workspace. Output is cut to 2000 characters (full: true → 8000) and says how much was left; narrow the command.",
+            description: "Run a shell command in the workspace. Output is cut to 2000 characters (full: true → 8000) and says what was left; narrow the command.",
             parameters: schema([
                 "command": ["type": "string"],
                 "timeout_ms": ["type": "integer", "description": "Default 60000"],
@@ -673,7 +673,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "browser",
             exposure: .deferred,
-            description: "Persistent Chromium with a saved profile: tabs and logins live between calls. For logged-in sites, clicks, forms and network inspection.",
+            description: "Persistent Chromium with a saved profile: tabs and logins live between calls. For logged-in sites, clicks, forms, network.",
             parameters: schema([
                 "action": ["type": "string", "enum": [
                     "goto", "open", "text", "html", "click", "fill", "screenshot",

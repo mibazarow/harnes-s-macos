@@ -1,6 +1,11 @@
 import Foundation
 
 extension ToolRegistry {
+    /// R32.4: one number for the code and the schema. The schema said 400 while the
+    /// code read 40, so the model asked for ten times what it got.
+    static let readLineLimit = 2_000
+    static let readDefaultLines = 40
+
 // MARK: - Files
     func listFiles(_ args: [String: Any]) throws -> ToolResult {
         let url = resolve(args["path"] as? String ?? ".")
@@ -40,7 +45,7 @@ extension ToolRegistry {
         // enough to return, then the run-output budget replaced it with a stub, and the
         // model had to re-read the same file through od/base64. A bounded window is
         // answerable and the tail always says how to continue.
-        let limit = min(max(Self.int(args, "limit") ?? 40, 1), 2_000)
+        let limit = min(max(Self.int(args, "limit") ?? Self.readDefaultLines, 1), Self.readLineLimit)
         let window = try FileLines.read(url, offset: offset, limit: limit)
         guard !window.isEmpty else {
             return .ok("(пусто: " + (window.total.map { "в файле \($0) строк" } ?? "файл пуст") + ")")
