@@ -89,6 +89,10 @@ actor MemoryService {
             return db.lastInsertedRowID
         }
 
+        // R33.1: a fact that names a known person joins the graph right away. Failure
+        // here must not undo the save.
+        try? autoLinkPerson(id: id, content: content, area: area)
+
         return MemoryItem(
             id: id,
             scope: scope,
@@ -343,6 +347,86 @@ actor MemoryService {
             try pruneOrphanEmbeddings()
         }
         return removed
+    }
+
+    // MARK: - Links (R33.1)
+
+    /// One undirected edge, stored as two rows so a lookup is a plain index read.
+    func link(_ a: Int64, _ b: Int64, relation: String = "related") throws {
+        guard a != b else { return }
+        let now = Timestamps.now()
+        try database.queue.write { db in
+            for (from, to) in [(a, b), (b, a)] {
+                try db.execute(sql: """
+                    INSERT OR IGNORE INTO memory_links (from_id, to_id, relation, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """, arguments: [from, to, relation, now])
+            }
+        }
+    }
+
+    func unlink(_ a: Int64, _ b: Int64) throws {
+        try database.queue.write { db in
+            try db.execute(
+                sql: "DELETE FROM memory_links WHERE (from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?)",
+                arguments: [a, b, b, a]
+            )
+        }
+    }
+
+    /// Neighbours of the given records, as `neighbour -> seed`. The caller decides how
+    /// much a link is worth; this only reports the graph.
+    func neighbours(of ids: [Int64]) -> [Int64: Int64] {
+        guard !ids.isEmpty else { return [:] }
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        let rows = (try? database.queue.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT from_id, to_id FROM memory_links WHERE from_id IN (\(placeholders))
+                    """,
+                arguments: StatementArguments(ids)
+            )
+        }) ?? []
+        var result: [Int64: Int64] = [:]
+        for row in rows {
+            let from: Int64 = row["from_id"]
+            let to: Int64 = row["to_id"]
+            if result[to] == nil { result[to] = from }
+        }
+        return result
+    }
+
+    /// R33.1: after a fact is saved, link it to the people it names. A person record's
+    /// name is the longest capitalised word in its content; the check is deliberately
+    /// simple and local, so it never invents a link the text does not support.
+    func autoLinkPerson(id: Int64, content: String, area: String) throws {
+        guard area != "people" else { return }
+        let people = try database.queue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT id, content FROM memory
+                WHERE scope = 'user' AND area = 'people' AND id != ?
+                """, arguments: [id])
+        }
+        let lowercased = content.lowercased()
+        for row in people {
+            let personID: Int64 = row["id"]
+            let personContent: String = row["content"]
+            guard let name = Self.personName(personContent), name.count >= 3 else { continue }
+            if lowercased.contains(name.lowercased()) {
+                try link(id, personID, relation: "about")
+            }
+        }
+    }
+
+    /// The longest word that starts with a capital letter. Good enough for a name in a
+    /// one-line record, and it never matches a pronoun or a lowercase verb.
+    static func personName(_ text: String) -> String? {
+        let words = text.split { !$0.isLetter && $0 != "-" }
+        return words
+            .filter { $0.count >= 3 && $0.first?.isUppercase == true }
+            .max { $0.count < $1.count }
+            .map(String.init)
     }
 
     /// R33.3: the only automatic deletion. A record is collected when it is worthless by

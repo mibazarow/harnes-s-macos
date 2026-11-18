@@ -467,6 +467,22 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v21_memory_links") { db in
+            // R33.1: memory is flat, so "this fact is about that person" had no place to
+            // live. One row per edge; both directions are written by the service, so a
+            // lookup never has to union two shapes.
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS memory_links (
+                    from_id    INTEGER NOT NULL,
+                    to_id      INTEGER NOT NULL,
+                    relation   TEXT NOT NULL DEFAULT 'related',
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (from_id, to_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_memory_links_to ON memory_links(to_id);
+                """)
+        }
+
         return migrator
 
     }

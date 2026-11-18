@@ -36,6 +36,9 @@ enum HybridFusion {
 /// embedded, or no stored vector matches. The reason is logged once per search so a
 /// silent fallback is visible instead of guessed (P31).
 struct HybridSearch {
+    /// R33.1: a linked fact is worth this share of the match that found its person.
+    static let linkWeight = 0.6
+
     let memory: MemoryService
     let embeddings: EmbeddingsService
     var label: String = "hybrid_search"
@@ -93,7 +96,19 @@ struct HybridSearch {
         let lexicalRank = Dictionary(uniqueKeysWithValues: lexical.enumerated().map { ($1.id, $0) })
         let lexicalScores = Dictionary(uniqueKeysWithValues: lexical.map { ($0.id, $0.score ?? 0) })
         let semanticScore = Dictionary(uniqueKeysWithValues: semantic.map { ($0.id, $0.score) })
-        let fused = HybridFusion.fuse(lexical: lexicalScores, semantic: semanticScore)
+        var fused = HybridFusion.fuse(lexical: lexicalScores, semantic: semanticScore)
+
+        // R33.1: a hit on a person pulls in the facts linked to that person, even when
+        // the query words never appear in them. The link is worth less than a direct
+        // match (0.6 of the seed's score) and never outranks the record that found it.
+        let peopleSeeds = lexical.filter { $0.area == "people" }
+        if !peopleSeeds.isEmpty {
+            let neighbours = await memory.neighbours(of: peopleSeeds.map(\.id))
+            for (neighbour, seed) in neighbours {
+                let bonus = (lexicalScores[seed] ?? 0) * Self.linkWeight
+                if bonus > (fused[neighbour] ?? 0) { fused[neighbour] = bonus }
+            }
+        }
 
         var resolved: [Int64: MemoryItem] = Dictionary(
             uniqueKeysWithValues: lexical.map { ($0.id, $0) }
