@@ -178,13 +178,38 @@ extension ToolRegistry {
         // R25.2: ScreenCaptureKit takes a window frame even when the window is covered
         // or lives on another Space; `screencapture -l` does not. Fall back only if the
         // capture itself fails, not because the API is newer.
-        let windowID: Int? = {
-            if let id = Self.int(args, "window_id") { return id }
-            if let name = args["window"] as? String, !name.isEmpty {
-                return Self.windowID(named: name)
+        let windowID = Self.screenshotWindowID(args)
+
+        // R25.7: a short watch instead of screenshot → sleep → screenshot.
+        if Self.bool(args, "stream") ?? false {
+            guard let windowID else {
+                return .fail("stream: нужен window_id или window — поток идёт по окну.")
             }
-            return nil
-        }()
+            let duration = Double(Self.int(args, "duration_ms") ?? 3_000) / 1_000
+            let interval = Double(Self.int(args, "interval_ms") ?? 500) / 1_000
+            guard let watched = await ScreenStream.watch(
+                windowID: CGWindowID(windowID), duration: duration, interval: interval
+            ) else {
+                return .fail("stream: кадры не снимаются (нужен грант Screen Recording и видимое окно).")
+            }
+            var text = "frames=\(watched.result.frames) changed=\(watched.result.changedFrames)"
+            if !watched.result.regions.isEmpty {
+                let listed = watched.result.regions.prefix(12).map {
+                    String(format: "%.0f%%x%.0f%%", $0.minX * 100, $0.minY * 100)
+                }
+                text += " regions=\(listed.joined(separator: ","))"
+            }
+            if let image = watched.lastChanged {
+                let representation = NSBitmapImageRep(cgImage: image)
+                if let data = representation.representation(using: .png, properties: [:]) {
+                    try? data.write(to: path)
+                    Self.resampleIfNeeded(path, scaleDown: Self.double(args, "scale_down"),
+                                          maxHeight: Self.int(args, "max_height"))
+                    text += " shot=\(path.path)"
+                }
+            }
+            return .ok(text)
+        }
         if let windowID, await WindowCapture.capture(windowID: CGWindowID(windowID), to: path) {
             Self.resampleIfNeeded(path, scaleDown: Self.double(args, "scale_down"),
                                   maxHeight: Self.int(args, "max_height"))
@@ -213,6 +238,14 @@ extension ToolRegistry {
                               maxHeight: Self.int(args, "max_height"))
         return .ok("Скриншот: \(path.path)\nРазмер: \(Self.humanSize(FileLines.fileSize(path))). "
             + "Дальше: image_read(path:) для кропа/сжатия, ocr(path:) для текста.")
+    }
+
+    static func screenshotWindowID(_ args: [String: Any]) -> Int? {
+        if let id = Self.int(args, "window_id") { return id }
+        if let name = args["window"] as? String, !name.isEmpty {
+            return Self.windowID(named: name)
+        }
+        return nil
     }
 
     static func windowID(named name: String) -> Int? {

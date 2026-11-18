@@ -569,7 +569,10 @@ extension ToolRegistry {
                         "width": ["type": "integer"], "height": ["type": "integer"]
                     ]
                 ],
-                "save_to": ["type": "string", "description": "Output path, .png added if missing"]
+                "save_to": ["type": "string", "description": "Output path, .png added if missing"],
+                "stream": ["type": "boolean", "description": "Watch the window for changes instead of one frame"],
+                "duration_ms": ["type": "integer", "description": "stream: default 3000, max 15000"],
+                "interval_ms": ["type": "integer", "description": "stream: default 500, min 200"]
             ], required: [])
         ),
         ToolDefinition(

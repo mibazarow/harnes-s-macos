@@ -17,12 +17,29 @@ enum WindowCapture {
     /// one, and the caller already reports the fallback's error.
     @available(macOS 14.0, *)
     static func capture(windowID: CGWindowID, to path: URL) async -> Bool {
+        guard let image = await frame(windowID: windowID) else { return false }
+        let representation = NSBitmapImageRep(cgImage: image)
+        guard let data = representation.representation(using: .png, properties: [:]) else {
+            return false
+        }
+        do {
+            try data.write(to: path)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// One frame of the window. Shared by `screenshot window` and the R25.7 stream, so
+    /// both use the same pixels and the same grant.
+    @available(macOS 14.0, *)
+    static func frame(windowID: CGWindowID) async -> CGImage? {
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(
                 false, onScreenWindowsOnly: false
             )
             guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
-                return false
+                return nil
             }
             let filter = SCContentFilter(desktopIndependentWindow: window)
             let configuration = SCStreamConfiguration()
@@ -30,17 +47,11 @@ enum WindowCapture {
             configuration.width = max(1, Int(window.frame.width * scale))
             configuration.height = max(1, Int(window.frame.height * scale))
             configuration.showsCursor = false
-            let image = try await SCScreenshotManager.captureImage(
+            return try await SCScreenshotManager.captureImage(
                 contentFilter: filter, configuration: configuration
             )
-            let representation = NSBitmapImageRep(cgImage: image)
-            guard let data = representation.representation(using: .png, properties: [:]) else {
-                return false
-            }
-            try data.write(to: path)
-            return true
         } catch {
-            return false
+            return nil
         }
     }
 }
