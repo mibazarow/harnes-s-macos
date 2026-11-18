@@ -88,6 +88,9 @@ struct ToolRegistry: Sendable {
     let interceptors: ToolInterceptorChain
     /// Shared across turns so `tool_load` stays in effect until the session ends.
     let catalog: ToolCatalogState
+    /// I34: the same call returning the same result twice is a dead end; the third is
+    /// refused before it runs. Shared by value copies of this registry.
+    let repeatGuard: ToolRepeatGuard
 
     init(
         workspace: URL,
@@ -113,7 +116,8 @@ struct ToolRegistry: Sendable {
         skillScope: ActiveSkillScope? = nil,
         interceptors: ToolInterceptorChain = ToolInterceptorChain(),
         catalog: ToolCatalogState = ToolCatalogState(),
-        processes: BackgroundProcessService? = nil
+        processes: BackgroundProcessService? = nil,
+        repeatGuard: ToolRepeatGuard = ToolRepeatGuard()
     ) {
         self.workspaceState = workspaceState ?? WorkspaceState(workspace)
         self.currentUserMessage = currentUserMessage
@@ -138,6 +142,7 @@ struct ToolRegistry: Sendable {
         self.skillScope = skillScope
         self.interceptors = interceptors
         self.catalog = catalog
+        self.repeatGuard = repeatGuard
     }
 
     static let mutatingTools: Set<String> = [
@@ -264,7 +269,11 @@ struct ToolRegistry: Sendable {
         case .denied(let result):
             return result
         case .allowed(let allowed):
+            if repeatGuard.shouldRefuse(name: allowed.name, arguments: allowed.arguments) {
+                return .fail(ToolRepeatGuard.refusal)
+            }
             let result = await executeAllowed(allowed)
+            repeatGuard.record(name: allowed.name, arguments: allowed.arguments, output: result.output)
             return await interceptors.after(allowed, result: result, context: context)
         }
     }
