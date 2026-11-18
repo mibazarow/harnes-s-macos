@@ -46,6 +46,7 @@
 | R20.1 | `cf2350f` | `windows list/apps` с id и координатами в точках и пикселях |
 | R20.2 | `ee271dc` | `git`: структурный status, fetch/pull/push(confirm)/branch/switch/merge/show/blame/conflicts |
 | R20.3 | `31cf9e8` | `app_script` (AppleScript/JXA) |
+| R25.1 | `e700eb2` | `power`: статус, сон, блокировка, `caffeinate`, яркость, громкость/mute, медиа, устройства звука, restart/shutdown с `confirm` и проверкой несохранённых |
 | R20.4 | `af8634a` | `workspace get/set/list`: `confirm`, общий `WorkspaceState`, ротация кэша префикса, промпт проекта заново |
 | R20.5 | `6357629` | `fs_copy`/`fs_move`/`fs_mkdir` с overwrite/confirm/dry_run |
 | R22 | `9f4be74` | подпись Apple Development, DR по сертификату; Debug без hardened runtime для тестов |
@@ -61,7 +62,6 @@
 
 | # | Пункт | Где смотреть | Что именно |
 | --- | --- | --- | --- |
-| 4 | R25.1 | раздел ниже | `power`: батарея, яркость, звук, медиа |
 | 5 | R25.2 | раздел ниже | `display`: режимы и раскладка |
 | 6 | R25.3 | раздел ниже | Spaces/Mission Control/Stage Manager |
 | 7 | R25.6 | раздел ниже | `launchd`: автозапуск, агенты, Time Machine |
@@ -502,7 +502,7 @@ DR провалится и гранты снова отвалятся. Вари�
 
 ## R25 — остальные аспекты машины: питание, дисплеи, звук, сеть, тома, поиск, оболочка, состояние
 
-**Статус: R25.4, R25.5, R25.8, R25.12 закрыты; R25.1–R25.3, R25.6, R25.7, R25.9–R25.11 открыты.** R18 даёт руки внутри приложений, R19 — экономику вызовов,
+**Статус: R25.1, R25.4, R25.5, R25.8, R25.12 закрыты; R25.2, R25.3, R25.6, R25.7, R25.9–R25.11 открыты.** R18 даёт руки внутри приложений, R19 — экономику вызовов,
 R20 — рабочий цикл, R25 закрывает то, чем человек управляет **системно**: питание,
 яркость, громкость и устройства звука, режимы дисплеев и ночной режим, виртуальные рабочие
 столы, тома и DMG с печатью, сеть и Wi-Fi, Spotlight, автозапуск и Time Machine, внешний
@@ -549,6 +549,14 @@ R20 — рабочий цикл, R25 закрывает то, чем челов�
 живом, вернул реальное состояние, снял скриншот и строку журнала».
 
 ### R25.1 — `power`: питание, яркость, звук, медиа
+
+**Закрыто (`e700eb2`).** `power` (deferred): `status`, `sleep`, `lock` (`SACLockScreenImmediate`),
+`display_off`, `caffeinate` (+`off`, авто-снятие), `low_power`, `brightness`
+(DisplayServices), `volume`/`mute` (CoreAudio HAL, отдельно микрофон), `media`
+(MediaRemote), `audio` (список и переключение устройств), `restart`/`shutdown` только с
+`confirm` и отказом при `AXEdited`+`AXDocument`. Приватные символы кэшируются в
+`PrivateSymbols`; отсутствие символа — честный `unsupported`. Тесты `PowerToolTests`.
+Живые значения (громкость, яркость, lock) — за пользователем.
 
 `action: sleep | lock | display_off | caffeinate | low_power | brightness | volume | mute | media | restart | shutdown`
 
