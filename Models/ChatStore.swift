@@ -244,6 +244,8 @@ final class ChatStore {
         let registry = ToolRegistry(
             workspace: AppPaths.workspaceDirectory,
             workspaceState: services.workspaceState,
+            currentUserMessage: text,
+            currentUserMessageID: nil,
             memory: services.memory,
             embeddings: services.embeddings,
             secrets: services.secrets,
@@ -740,9 +742,18 @@ final class ChatStore {
         }
 
         if let services, let memories = try? await services.memory.forPrompt(limit: 40), !memories.isEmpty {
-            let lines = memories.map { item in
-                let mark = item.pinned ? "📌 " : ""
-                return "- \(mark)[\(item.kind)] \(item.content)"
+            // R30.2/R30.3: grouped by area, one line per record, body truncated. Lessons
+            // are corrections and are always here; they outrank facts.
+            var grouped: [String: [MemoryItem]] = [:]
+            for item in memories { grouped[item.area, default: []].append(item) }
+            let order = ["lessons", "about", "preferences", "people", "routines", "decision", "fact"]
+            let lines = order.compactMap { area -> String? in
+                guard let items = grouped[area], !items.isEmpty else { return nil }
+                let body = items.map { item in
+                    let mark = item.pinned ? "📌 " : ""
+                    return "- \(mark)\(item.address): \(String(item.content.prefix(200)))"
+                }.joined(separator: "\n")
+                return "## \(area)\n\(body)"
             }.joined(separator: "\n")
             if !memoryTouchedThisTurn {
                 memoryTouchedThisTurn = true
@@ -753,6 +764,7 @@ final class ChatStore {
             # Saved user memory
             These facts are already known. Use them without asking again. Do not restate them to the user just to confirm.
             📌 marks a fact the user asked to remember explicitly; treat it as fixed and never drop it.
+            `lessons` are corrections the user made: follow them over anything else.
             \(lines)
             """)
         }

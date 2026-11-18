@@ -515,7 +515,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "task",
             exposure: .core,
-            description: "Delegate a self-contained job to a fresh subagent with its own context. Returns only its final answer. Pass paths to hand over files or folders you already found, so the subagent does not search for them again.",
+            description: "Delegate a self-contained job to a fresh subagent. Returns only its final answer; pass paths you already found so it does not search again.",
             parameters: schema([
                 "prompt": ["type": "string", "description": "Full self-contained instruction"],
                 "read_only": ["type": "boolean", "description": "true = investigation only, no edits"],
@@ -618,7 +618,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "bash",
             exposure: .core,
-            description: "Run a shell command in the workspace. Output is cut to 2000 characters by default (full: true raises it to 8000) and the reply says how much was left. Narrow the command instead of asking for everything.",
+            description: "Run a shell command in the workspace. Output is cut to 2000 characters (full: true → 8000) and the reply says how much was left; narrow the command instead.",
             parameters: schema([
                 "command": ["type": "string"],
                 "timeout_ms": ["type": "integer", "description": "Default 60000"],
@@ -773,10 +773,13 @@ extension ToolRegistry {
         ToolDefinition(
             name: "memory_add",
             exposure: .core,
-            description: "Save a durable fact to user memory. Use for stable preferences, project conventions, decisions and corrections the user makes. Do not save one-off task state, things readable from files, secrets (use secret_save) or anything the user did not confirm.",
+            description: "Save a durable fact: stable preferences, conventions, decisions, corrections. Not task state, file contents, secrets, or unconfirmed guesses.",
             parameters: schema([
                 "text": ["type": "string", "description": "One self-contained fact, without pronouns"],
                 "kind": ["type": "string", "description": "fact | decision | preference | pattern"],
+                "area": ["type": "string", "description": "about | preferences | people | routines | lessons | decision | fact"],
+                "quote": ["type": "string", "description": "Verbatim fragment of the user's message"],
+                "source_message_id": ["type": "string", "description": "Optional id of the user's message"],
                 "pinned": ["type": "boolean", "description": "true when the user asked to remember this explicitly"]
             ], required: ["text"])
         ),

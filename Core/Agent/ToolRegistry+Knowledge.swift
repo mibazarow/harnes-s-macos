@@ -50,10 +50,49 @@ extension ToolRegistry {
         guard let memory else { return .fail("Память недоступна") }
         guard let text = args["text"] as? String else { return .fail("text обязателен") }
         let pinned = Self.bool(args, "pinned") ?? false
+        let area = (args["area"] as? String)?.lowercased() ?? "fact"
+        guard MemoryProvenance.areas.contains(area) else {
+            return .fail("area: " + MemoryProvenance.areas.sorted().joined(separator: " | "))
+        }
+
+        // R30.2: no quote, no record. The exception is an explicit "remember this", where
+        // the command itself is the source. Tool results and model answers never qualify:
+        // the only text checked is the user's own message for this turn.
+        guard let userMessage = currentUserMessage, !userMessage.isEmpty else {
+            return .fail("Память пишется только в ходе, начатом сообщением пользователя. "
+                + "В фоновом прогоне или сабагенте источник цитаты отсутствует.")
+        }
+        if let source = args["source_message_id"] {
+            let given = (source as? Int64).map(String.init) ?? (source as? Int).map(String.init)
+                ?? (source as? String)
+            if let given, let currentUserMessageID, given != String(currentUserMessageID) {
+                return .fail("source_message_id указывает не на текущее сообщение пользователя. "
+                    + "Цитата должна быть из него.")
+            }
+        }
+        let quote: String
+        if let raw = args["quote"] as? String, !raw.trimmingCharacters(in: .whitespaces).isEmpty {
+            guard MemoryProvenance.verify(quote: raw, in: userMessage) else {
+                return .fail("Цитата не найдена в текущем сообщении пользователя. "
+                    + "Запись не создана: память не может опираться на ответ модели, "
+                    + "результат инструмента или страницу.")
+            }
+            quote = MemoryProvenance.clamp(raw)
+        } else if pinned {
+            quote = MemoryProvenance.clamp(userMessage)
+        } else {
+            return .fail("memory_add требует дословную цитату из сообщения пользователя (quote) "
+                + "или pinned: true, если пользователь прямо сказал «запомни».")
+        }
+
         let item = try await memory.add(
             text,
             kind: (args["kind"] as? String) ?? "fact",
-            pinned: pinned
+            pinned: pinned,
+            area: area,
+            quote: quote,
+            quoteMessageID: currentUserMessageID.map(String.init),
+            quoteVerified: true
         )
 
         if let embeddings {

@@ -311,6 +311,37 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v13_memory_provenance") { db in
+            // R30.2: memory grows only from the user's own words. `area` is a new axis
+            // next to `kind`; `quote` keeps the verbatim fragment that authorized the
+            // record, and `quote_verified` says the server checked it.
+            let columns = try db.columns(in: "memory").map(\.name)
+            if !columns.contains("area") {
+                try db.execute(sql: "ALTER TABLE memory ADD COLUMN area TEXT NOT NULL DEFAULT 'fact';")
+            }
+            if !columns.contains("quote") {
+                try db.execute(sql: "ALTER TABLE memory ADD COLUMN quote TEXT;")
+            }
+            if !columns.contains("quote_message_id") {
+                try db.execute(sql: "ALTER TABLE memory ADD COLUMN quote_message_id TEXT;")
+            }
+            if !columns.contains("quote_verified") {
+                try db.execute(sql: """
+                    ALTER TABLE memory ADD COLUMN quote_verified INTEGER NOT NULL DEFAULT 0;
+                    """)
+            }
+            // Existing records were accepted by the person already: they are trusted
+            // without a quote, and their area follows the old kind where it maps.
+            try db.execute(sql: """
+                UPDATE memory SET quote_verified = 1 WHERE quote_verified = 0;
+                UPDATE memory SET area = 'preferences' WHERE kind IN ('preference', 'style');
+                UPDATE memory SET area = 'people' WHERE kind IN ('person', 'people');
+                UPDATE memory SET area = 'routines' WHERE kind IN ('routine', 'schedule');
+                UPDATE memory SET area = 'lessons' WHERE kind IN ('lesson', 'correction');
+                UPDATE memory SET area = 'decision' WHERE kind = 'decision';
+                """)
+        }
+
         return migrator
     }
 }

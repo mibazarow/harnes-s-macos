@@ -124,7 +124,22 @@ struct MemoryItem: Identifiable, Sendable, Equatable {
     let pinned: Bool
     let hits: Int
     let lastUsedAt: String?
+    /// R30.2: the axis the prompt groups by. `kind` stays for compatibility.
+    var area: String = "fact"
+    /// The verbatim fragment of the user's message that authorized this record.
+    var quote: String?
     var score: Double?
+
+    /// `area/slug` as the prompt shows it: a stable short name, not a database id.
+    var address: String {
+        let words = content
+            .lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .prefix(3)
+            .map(String.init)
+        let slug = words.isEmpty ? String(id) : words.joined(separator: "-")
+        return "\(area)/\(slug)"
+    }
 
     var snippet: String {
         let singleLine = content.replacingOccurrences(of: "\n", with: " ")

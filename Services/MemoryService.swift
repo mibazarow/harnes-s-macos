@@ -17,7 +17,11 @@ actor MemoryService {
         tags: [String] = [],
         source: String = "chat",
         pinned: Bool = false,
-        contentHash: String? = nil
+        contentHash: String? = nil,
+        area: String = "fact",
+        quote: String? = nil,
+        quoteMessageID: String? = nil,
+        quoteVerified: Bool = false
     ) throws -> MemoryItem {
         let content = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else {
@@ -34,9 +38,15 @@ actor MemoryService {
             let tagsJSON = String(data: try JSONEncoder().encode(mergedTags), encoding: .utf8) ?? "[]"
             try database.queue.write { db in
                 try db.execute(sql: """
-                    UPDATE memory SET content = ?, kind = ?, tags = ?, pinned = ?, content_hash = ?, updated_at = ?
+                    UPDATE memory SET content = ?, kind = ?, area = ?, tags = ?, pinned = ?,
+                        content_hash = ?, quote = COALESCE(?, quote),
+                        quote_message_id = COALESCE(?, quote_message_id),
+                        quote_verified = MAX(quote_verified, ?), updated_at = ?
                     WHERE id = ?
-                    """, arguments: [content, kind, tagsJSON, mergedPin ? 1 : 0, hash, now, duplicate.id])
+                    """, arguments: [
+                        content, kind, area, tagsJSON, mergedPin ? 1 : 0, hash,
+                        quote, quoteMessageID, quoteVerified ? 1 : 0, now, duplicate.id
+                    ])
             }
 
             return MemoryItem(
@@ -48,7 +58,9 @@ actor MemoryService {
                 createdAt: duplicate.createdAt,
                 pinned: mergedPin,
                 hits: duplicate.hits,
-                lastUsedAt: duplicate.lastUsedAt
+                lastUsedAt: duplicate.lastUsedAt,
+                area: area,
+                quote: quote ?? duplicate.quote
             )
         }
 
@@ -60,9 +72,13 @@ actor MemoryService {
 
         let id: Int64 = try database.queue.write { db in
             try db.execute(sql: """
-                INSERT INTO memory (scope, content, kind, tags, source, pinned, content_hash, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, arguments: [scope, content, kind, tagsJSON, source, pinned ? 1 : 0, hash, now, now])
+                INSERT INTO memory (scope, content, kind, area, tags, source, pinned, content_hash,
+                    quote, quote_message_id, quote_verified, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, arguments: [
+                    scope, content, kind, area, tagsJSON, source, pinned ? 1 : 0, hash,
+                    quote, quoteMessageID, quoteVerified ? 1 : 0, now, now
+                ])
             return db.lastInsertedRowID
         }
 
@@ -75,7 +91,9 @@ actor MemoryService {
             createdAt: now,
             pinned: pinned,
             hits: 0,
-            lastUsedAt: nil
+            lastUsedAt: nil,
+            area: area,
+            quote: quote
         )
     }
 
@@ -173,12 +191,18 @@ actor MemoryService {
     /// prompt cache. Recency is not part of the order; `last_used_at` only drives pruning.
     func forPrompt(limit: Int = 40) throws -> [MemoryItem] {
         try database.queue.read { db in
-            try Row.fetchAll(db, sql: """
-                SELECT * FROM memory
-                ORDER BY pinned DESC, id ASC
-                LIMIT ?
-                """, arguments: [limit])
-            .map(Self.item(from:))
+            // R30.3: corrections are always in the prompt, newest twenty of them; other
+            // areas are bounded by the limit. Both lists keep a stable order so the
+            // prefix stays byte-identical and the provider cache survives.
+            let lessons = try Row.fetchAll(db, sql: """
+                SELECT * FROM memory WHERE area = 'lessons'
+                ORDER BY id DESC LIMIT 20
+                """).map(Self.item(from:)).reversed() as [MemoryItem]
+            let others = try Row.fetchAll(db, sql: """
+                SELECT * FROM memory WHERE area != 'lessons'
+                ORDER BY pinned DESC, id ASC LIMIT ?
+                """, arguments: [limit]).map(Self.item(from:))
+            return Array(lessons) + others
         }
     }
 
@@ -405,7 +429,9 @@ actor MemoryService {
             createdAt: row["created_at"],
             pinned: (row["pinned"] as Int? ?? 0) != 0,
             hits: row["hits"] as Int? ?? 0,
-            lastUsedAt: row["last_used_at"]
+            lastUsedAt: row["last_used_at"],
+            area: row["area"] as String? ?? "fact",
+            quote: row["quote"] as String?
         )
     }
 }

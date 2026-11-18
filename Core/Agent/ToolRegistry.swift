@@ -56,6 +56,9 @@ struct ToolRegistry: Sendable {
     /// turn, and a struct registry cannot mutate itself between calls (R20.4).
     let workspaceState: WorkspaceState
     var workspace: URL { workspaceState.url }
+    /// R30.2: the user's message for this turn — the only text memory may cite.
+    var currentUserMessage: String?
+    var currentUserMessageID: Int64?
     let memory: MemoryService?
     let embeddings: EmbeddingsService?
     let secrets: SecretsService?
@@ -83,6 +86,8 @@ struct ToolRegistry: Sendable {
     init(
         workspace: URL,
         workspaceState: WorkspaceState? = nil,
+        currentUserMessage: String? = nil,
+        currentUserMessageID: Int64? = nil,
         memory: MemoryService?,
         embeddings: EmbeddingsService?,
         secrets: SecretsService?,
@@ -102,6 +107,8 @@ struct ToolRegistry: Sendable {
         processes: BackgroundProcessService? = nil
     ) {
         self.workspaceState = workspaceState ?? WorkspaceState(workspace)
+        self.currentUserMessage = currentUserMessage
+        self.currentUserMessageID = currentUserMessageID
         self.memory = memory
         self.embeddings = embeddings
         self.secrets = secrets
