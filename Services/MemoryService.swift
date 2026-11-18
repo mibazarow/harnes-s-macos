@@ -384,19 +384,36 @@ actor MemoryService {
 
         do {
             return try database.queue.read { db in
-                try Row.fetchAll(db, sql: """
+                // Read more than asked: the priors can move a record a few positions,
+                // and cutting to `limit` before ranking would hide the candidates the
+                // priors exist to promote (P34).
+                let rows = try Row.fetchAll(db, sql: """
                     SELECT m.*, bm25(memory_fts) AS rank
                     FROM memory_fts
                     JOIN memory m ON m.id = memory_fts.rowid
                     WHERE memory_fts MATCH ?
                     ORDER BY rank
                     LIMIT ?
-                    """, arguments: [match, limit])
-                .map { row in
+                    """, arguments: [match, limit * 4])
+
+                let now = Date()
+                let formatter = ISO8601DateFormatter()
+                let ranked = rows.map { row -> MemoryItem in
                     var item = Self.item(from: row)
-                    item.score = (row["rank"] as Double?) ?? nil
+                    let lastUsed = (item.lastUsedAt ?? item.createdAt)
+                        .flatMap { formatter.date(from: $0) }
+                    item.score = MemoryRanker.score(
+                        relevance: MemoryRanker.relevance(bm25: row["rank"]),
+                        hits: item.hits,
+                        lastUsed: lastUsed,
+                        now: now
+                    )
                     return item
                 }
+                return ranked
+                    .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+                    .prefix(limit)
+                    .map { $0 }
             }
         } catch {
             return try list(limit: limit)
