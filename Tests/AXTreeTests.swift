@@ -58,6 +58,22 @@ final class AXTreeTests: XCTestCase {
         }
     }
 
+    func testDangerousMenuItemNeedsConfirmation() async throws {
+        let guardrail = SystemUIGuardInterceptor()
+        let call = ToolCall(
+            id: "1", name: "ui",
+            arguments: #"{"action":"menu_click","app":"Disk Utility","path_titles":["Erase"]}"#
+        )
+        let verdict = try await guardrail.beforeCall(
+            call, context: ToolCallContext(workspace: URL(fileURLWithPath: "/tmp"), readOnly: false)
+        )
+        if case .deny(let reason, _) = verdict {
+            XCTAssertTrue(reason.contains("Erase"), reason)
+        } else {
+            XCTFail("опасный пункт без confirm должен быть отклонён")
+        }
+    }
+
     func testGuardAllowsConfirmedAndOrdinaryApps() async throws {
         let guardrail = SystemUIGuardInterceptor()
         for arguments in [
