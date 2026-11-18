@@ -46,6 +46,7 @@
 | R20.1 | `cf2350f` | `windows list/apps` с id и координатами в точках и пикселях |
 | R20.2 | `ee271dc` | `git`: структурный status, fetch/pull/push(confirm)/branch/switch/merge/show/blame/conflicts |
 | R20.3 | `31cf9e8` | `app_script` (AppleScript/JXA) |
+| R20.4 | `af8634a` | `workspace get/set/list`: `confirm`, общий `WorkspaceState`, ротация кэша префикса, промпт проекта заново |
 | R20.5 | `6357629` | `fs_copy`/`fs_move`/`fs_mkdir` с overwrite/confirm/dry_run |
 | R22 | `9f4be74` | подпись Apple Development, DR по сертификату; Debug без hardened runtime для тестов |
 | R23 | `31cf9e8` | `shortcut list/run/view` |
@@ -60,7 +61,6 @@
 
 | # | Пункт | Где смотреть | Что именно |
 | --- | --- | --- | --- |
-| 3 | R20.4 | раздел ниже | `workspace get/set/list` с подтверждением и пересборкой реестра |
 | 4 | R25.1 | раздел ниже | `power`: батарея, яркость, звук, медиа |
 | 5 | R25.2 | раздел ниже | `display`: режимы и раскладка |
 | 6 | R25.3 | раздел ниже | Spaces/Mission Control/Stage Manager |
@@ -265,7 +265,7 @@ R19.0–R19.7 сделаны (`748e505`…`6742bf9`): ленивый катал�
 
 ## R20 — дыры до «ассистент умеет всё, что позволяет macOS»
 
-**Статус: закрыты R20.0, R20.1, R20.2, R20.3, R20.5. Открыт только R20.4 (смена workspace).**
+**Статус: R20 закрыт полностью (R20.0–R20.5).**
 R18 даёт ввод, R19 — экономику и диагностику. R20 закрывает то, что ломает
 **рабочий цикл кодинг-агента**: без него R18/R19 бесполезны в реальной задаче.
 Пункты отсортированы по реальной боли, а не по красоте. Все факты ниже проверены
@@ -273,7 +273,12 @@ R18 даёт ввод, R19 — экономику и диагностику. R20
 
 ### R20.4 — смена рабочей папки
 
-`workspace` фиксируется в `ToolRegistry.init` (`ToolRegistry.swift:24,64`) и
+**Закрыто (`af8634a`).** `WorkspaceState` — общий корень для всех реестров; `workspace`
+`get/set/list`; `set` требует явный путь и `confirm: true`, отказывает на `/`, `~` и
+системных каталогах, пишет `config/workspaces.json`; `ChatStore` ротирует `promptCacheKey`
+и пересобирает промпт проекта. Тесты `WorkspaceToolTests`.
+
+Историческая справка: `workspace` фиксируется в `ToolRegistry.init` (`ToolRegistry.swift:24,64`) и
 инструмента смены нет: `fs_*` ещё можно навести абсолютным путём, а `git_*`,
 `index_workspace`, `project_overview` по умолчанию работают только в стартовой
 папке. На практике это значит: ассистент живёт в `harnes-s-macos` и в любой
