@@ -115,7 +115,6 @@ enum GrantInventory {
     static func contacts() -> State {
         switch CNContactStore.authorizationStatus(for: .contacts) {
         case .authorized: return .granted
-        case .limited: return .limited
         case .denied: return .denied
         case .restricted: return .denied
         case .notDetermined: return .unknown

@@ -398,6 +398,23 @@ extension ToolRegistry {
             ], required: ["query"])
         ),
         ToolDefinition(
+            name: "contacts",
+            exposure: .deferred,
+            description: "Address book via Contacts: search by name, phone or email, get one card, create or update (confirm). Limited access shows only chosen cards.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["search", "get", "create", "update"]],
+                "query": ["type": "string", "description": "search: name, phone or email"],
+                "id": ["type": "string", "description": "get/update: contact identifier"],
+                "given_name": ["type": "string"], "family_name": ["type": "string"],
+                "organization": ["type": "string"],
+                "phones": ["type": "array", "items": ["type": "string"]],
+                "emails": ["type": "array", "items": ["type": "string"]],
+                "note": ["type": "string"],
+                "limit": ["type": "integer", "description": "search: default 10"],
+                "confirm": ["type": "boolean", "description": "create/update"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "calendar",
             exposure: .deferred,
             description: "Calendar and reminders via EventKit: events, create/update/delete (delete needs confirm and only own events), calendars, free_busy, reminders. ISO-8601 dates only.",
