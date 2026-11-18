@@ -46,6 +46,7 @@
 | R20.1 | `cf2350f` | `windows list/apps` с id и координатами в точках и пикселях |
 | R20.2 | `ee271dc` | `git`: структурный status, fetch/pull/push(confirm)/branch/switch/merge/show/blame/conflicts |
 | R20.3 | `31cf9e8` | `app_script` (AppleScript/JXA) |
+| R27.2 | `49bb6da` | `observe start/stop/status/summary/clear/record/replay`; CGEventTap listenOnly, только метаданные, replay с `confirm` |
 | R27.1 | `2ac08cf` | ⌃⌥Space, `NSPanel` с полем, `AXSelectedText` из frontmost, возврат фокуса, список «не мешать» |
 | R26.4 | `8e5ef94` | `notify read/dismiss/clear` через AX; приватные — `redacted: true`, `clear` только с `confirm` |
 | R26.3 | `083e1c0` | `share compose/send/airdrop/services`; отправка только с `confirm`, ошибка Mail показывается как есть |
@@ -74,7 +75,6 @@
 
 | # | Пункт | Где смотреть | Что именно |
 | --- | --- | --- | --- |
-| 13 | R27.2 | раздел ниже | наблюдение за вводом и макросы |
 | 14 | R30.1–R30.7 | раздел ниже | недоверенный контент, память с цитатой, уроки, self-skills, `unknown`, журнал, trust check |
 
 **Только живой прогон (код готов):** R15.5, приёмка прунинга, R16.6 (Chrome/CDP),
@@ -916,7 +916,7 @@ Recording, FDA пробой, Calendars/Reminders, Contacts, Location, Bluetooth,
 
 ## R27 — вызов ассистента и наблюдение: то, что делает из Харнеса Siri
 
-**Статус: R27.1 закрыт, R27.2 открыт.** Всё выше — «агент, когда его позвали в чате». Этот пункт —
+**Статус: R27 закрыт.** Всё выше — «агент, когда его позвали в чате». Этот пункт —
 «агент в системе»: клавиша, панель, контекст экрана и умение запомнить, что делает
 человек. Без него полное управление машиной остаётся односторонним.
 
