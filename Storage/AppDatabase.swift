@@ -382,12 +382,11 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        // An applied migration is never replayed — GRDB keeps a ledger — so the first
+        // version of this one stays exactly as it shipped, or an old base and a fresh
+        // one diverge. The rule it *should* have used lives in `v17_lesson_match`,
+        // which runs on both.
         migrator.registerMigration("v16_lesson_area") { db in
-            // R30.8: corrections used to be saved as `preferences`, so the `lessons`
-            // area — which the prompt ranks above everything — stayed empty. Move the
-            // records that read as corrections, once. The pattern is deliberately
-            // narrow: a preference that happens to start with "не" is still a correction
-            // in this base, and a wrong move is visible and reversible by hand.
             try db.execute(sql: """
                 UPDATE memory SET area = 'lessons', kind = 'lesson'
                 WHERE area = 'preferences'
@@ -401,7 +400,28 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v17_lesson_match") { db in
+            // R30.8 follow-up: v16 matched only a sentence-initial «не», and every
+            // correction in this base is phrased mid-sentence — «Миха не хочет…»,
+            // «Миха запрещает…», «Миха работает только…». Match the prohibition
+            // anywhere in the text instead and pick up what v16 missed.
+            // `area = 'preferences'` bounds the move, so nothing filed as a fact or a
+            // decision can be swallowed by the pattern.
+            try db.execute(sql: """
+                UPDATE memory SET area = 'lessons', kind = 'lesson'
+                WHERE area = 'preferences'
+                  AND (
+                       kind IN ('lesson', 'correction')
+                       OR lower(content) LIKE '% нельзя %'
+                       OR lower(content) LIKE '% запрещ%'
+                       OR lower(content) LIKE '% никогда %'
+                       OR lower(content) LIKE '% не %'
+                     )
+                """)
+        }
+
         return migrator
+
     }
 }
 

@@ -1,4 +1,5 @@
 import XCTest
+import GRDB
 @testable import Harness
 
 /// R30.2/R30.3: memory accepts only a verbatim quote from the user's own message, and
@@ -290,5 +291,45 @@ final class MemoryProvenanceTests: XCTestCase {
 
         let second = try await memory.backfillContentHashes()
         XCTAssertEqual(second, 0, "бэкфилл идемпотентен")
+    }
+
+    /// v16 matched only a sentence-initial «не» and left every mid-sentence correction
+    /// behind, so the `lessons` area stayed empty on a real base. v17 matches anywhere.
+    func testMigrationsMoveMidSentenceCorrectionsToLessons() async throws {
+        // A fresh base already has both migrations applied, so the rule is exercised
+        // directly: what v17 moves and what it leaves alone.
+        let scratch = try AppDatabase(inMemory: true)
+        try await scratch.queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO memory (scope, content, kind, area, tags, source, pinned,
+                    quote, quote_verified, created_at, updated_at)
+                VALUES ('user', 'Миха не хочет голосового интерфейса у HARNES-S.',
+                        'preference', 'preferences', '[]', 'chat', 1, 'не надо', 1, ?, ?)
+                """, arguments: [Timestamps.now(), Timestamps.now()])
+            try db.execute(sql: """
+                INSERT INTO memory (scope, content, kind, area, tags, source, pinned,
+                    quote, quote_verified, created_at, updated_at)
+                VALUES ('user', 'Миха называет ассистента «Харя».',
+                        'preference', 'preferences', '[]', 'chat', 0, 'называй', 1, ?, ?)
+                """, arguments: [Timestamps.now(), Timestamps.now()])
+            try db.execute(sql: """
+                UPDATE memory SET area = 'lessons', kind = 'lesson'
+                WHERE area = 'preferences'
+                  AND (
+                       kind IN ('lesson', 'correction')
+                       OR lower(content) LIKE '% нельзя %'
+                       OR lower(content) LIKE '% запрещ%'
+                       OR lower(content) LIKE '% никогда %'
+                       OR lower(content) LIKE '% не %'
+                     )
+                """)
+        }
+
+        let areas = try await scratch.queue.read { db in
+            try String.fetchAll(db, sql: "SELECT area FROM memory ORDER BY id")
+        }
+        XCTAssertEqual(areas.count, 2)
+        XCTAssertEqual(areas[0], "lessons", "исправление в середине фразы уехало в lessons")
+        XCTAssertEqual(areas[1], "preferences", "обычная привычка осталась на месте")
     }
 }
