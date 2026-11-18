@@ -59,6 +59,64 @@ extension ToolRegistry {
             }
             return .ok(lines.isEmpty ? "Приложений не найдено." : lines.joined(separator: "\n"))
 
+        case "spaces":
+            guard let entries = SpaceControl.entries() else {
+                return .fail("unsupported: CGSCopyManagedDisplaySpaces не найден в SkyLight. "
+                    + "Список рабочих столов недоступен; успех не изображаю.")
+            }
+            let lines = entries.map { entry -> String in
+                var line = "display=\(entry.display) space=\(entry.index) id=\(entry.id)"
+                if entry.active { line += " active" }
+                if let windows = entry.windows { line += " windows=\(windows)" }
+                return line
+            }
+            return .ok(lines.isEmpty ? "Рабочих столов не найдено." : lines.joined(separator: "\n"))
+
+        case "move_to_space":
+            guard let windowID = Self.int(args, "id") else { return .fail("id окна обязателен") }
+            guard let space = Self.int(args, "space") else {
+                return .fail("space обязателен: номер или id из windows spaces")
+            }
+            guard Self.bool(args, "confirm") ?? false else {
+                return .fail("move_to_space требует confirm: true: окно уедет с глаз.")
+            }
+            guard let entries = SpaceControl.entries() else {
+                return .fail("unsupported: CGSMoveWindowsToManagedSpace недоступен.")
+            }
+            let target = entries.first { $0.id == space }
+                ?? entries.first { $0.display == 0 && $0.index == space }
+            guard let target else {
+                return .fail("Рабочий стол \(space) не найден. Список: windows spaces.")
+            }
+            guard let moved = SpaceControl.move(window: windowID, to: target.id) else {
+                return .fail("unsupported: CGSMoveWindowsToManagedSpace не найден в SkyLight.")
+            }
+            return moved
+                ? .ok("Окно \(windowID) отправлено на стол \(target.index) (id=\(target.id)).")
+                : .fail("Перемещение окна отказало на уровне системы.")
+
+        case "mission_control":
+            let show = Self.bool(args, "value") ?? true
+            guard let toggled = SpaceControl.missionControl(show: show) else {
+                return .fail("unsupported: CoreDockSendNotification не найден. Mission Control "
+                    + "не открыт.")
+            }
+            return toggled ? .ok("Mission Control: \(show ? "показан" : "скрыт").")
+                : .fail("CoreDock отклонил уведомление.")
+
+        case "stage_manager":
+            if let on = Self.bool(args, "value") {
+                guard let actual = StageManager.set(enabled: on) else {
+                    return .fail("Stage Manager: запись не подтвердилась чтением "
+                        + "(нужен перезапуск WindowManager или ручное переключение).")
+                }
+                return .ok("Stage Manager: \(actual ? "включён" : "выключен").")
+            }
+            guard let current = StageManager.isEnabled() else {
+                return .fail("unsupported: настройка com.apple.WindowManager не читается.")
+            }
+            return .ok("Stage Manager: \(current ? "включён" : "выключен").")
+
         case "move", "resize", "minimize", "close", "fullscreen", "to_display":
             guard InputAccess.isTrusted else { return .fail(InputAccess.refusal) }
             guard let id = Self.int(args, "id") else { return .fail("id обязателен") }
@@ -113,7 +171,8 @@ extension ToolRegistry {
             }
 
         default:
-            return .fail("action: list | apps | move | resize | minimize | close | fullscreen | to_display")
+            return .fail("action: list | apps | move | resize | minimize | close | fullscreen "
+                + "| to_display | spaces | move_to_space | mission_control | stage_manager")
         }
     }
 

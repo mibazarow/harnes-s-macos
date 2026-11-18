@@ -156,16 +156,18 @@ extension ToolRegistry {
         ToolDefinition(
             name: "windows",
             exposure: .deferred,
-            description: "On-screen windows (id for screenshot) or running apps; bounds in points and pixels.",
+            description: "On-screen windows (id for screenshot) or running apps; bounds in points and pixels. Also Spaces, Mission Control and Stage Manager.",
             parameters: schema([
-                "action": ["type": "string", "enum": ["list", "apps", "move", "resize", "minimize", "close", "fullscreen", "to_display"]],
+                "action": ["type": "string", "enum": ["list", "apps", "move", "resize", "minimize", "close", "fullscreen", "to_display", "spaces", "move_to_space", "mission_control", "stage_manager"]],
                 "app": ["type": "string", "description": "list: only this application"],
                 "filter": ["type": "string", "description": "apps: name substring"],
                 "id": ["type": "integer", "description": "Window id from list"],
                 "x": ["type": "integer"], "y": ["type": "integer"],
                 "w": ["type": "integer"], "h": ["type": "integer"],
                 "display": ["type": "integer", "description": "to_display: index"],
-                "value": ["type": "boolean", "description": "fullscreen: on/off"]
+                "value": ["type": "boolean", "description": "fullscreen/mission_control/stage_manager: on/off"],
+                "space": ["type": "integer", "description": "move_to_space: space index or id"],
+                "confirm": ["type": "boolean", "description": "move_to_space"]
             ], required: ["action"])
         ),
         ToolDefinition(
