@@ -128,6 +128,27 @@ final class AppModel {
             chat.stop()
         }
 
+        // R27.1: the assistant chord opens a panel with the selected text of the app the
+        // person was in. A taken combination is logged, not silently replaced.
+        HotkeyPanelController.shared.excludedBundleIDs = UserDefaults.standard
+            .string(forKey: "harness.hotkey.excluded")?
+            .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty } ?? []
+        let assistantInstalled = AssistantHotkey.shared.install(HotkeyConfig.default) { [chat] in
+            Task { @MainActor in
+                HotkeyPanelController.shared.show { text, context in
+                    var message = text
+                    if let selected = context.selectedText {
+                        message += "\n\nВыделенный текст из \(context.appName):\n\(selected)"
+                    }
+                    chat.send(message)
+                }
+            }
+        }
+        if !assistantInstalled {
+            ChatStore.logLatency("hotkey_failed combo=\(HotkeyConfig.default.label) reason=taken")
+        }
+
         if let services {
             // MCP servers are child processes; without this they survive the app.
             NotificationCenter.default.addObserver(
