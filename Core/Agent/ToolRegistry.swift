@@ -232,7 +232,7 @@ struct ToolRegistry: Sendable {
         let first = definition.description
             .split(separator: ".", maxSplits: 1, omittingEmptySubsequences: true)
             .first.map(String.init) ?? definition.description
-        let short = first.count > 110 ? String(first.prefix(110)) + "…" : first
+        let short = first.count > 96 ? String(first.prefix(96)) + "…" : first
         // The name is already in the list above; the marker only has to say how to get
         // the full schema. Spelling the tool name out here cost ~120 tokens across the
         // catalog, which is the difference between fitting the budget and not.
@@ -353,6 +353,7 @@ struct ToolRegistry: Sendable {
             case "calendar": return await calendarTool(args)
             case "contacts": return await contactsTool(args)
             case "share": return await shareTool(args)
+            case "observe": return await observeTool(args)
             case "windows": return windowsTool(args)
             case "shortcut": return await shortcutTool(args)
             case "app_script": return await appScriptTool(args)

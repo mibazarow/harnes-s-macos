@@ -401,6 +401,20 @@ extension ToolRegistry {
             ], required: ["query"])
         ),
         ToolDefinition(
+            name: "observe",
+            exposure: .deferred,
+            description: "Watch activity as metadata only (app, kind, key, point), summarise, record and replay a macro with confirm. Never records text.",
+            parameters: schema([
+                "action": ["type": "string", "enum": [
+                    "status", "start", "stop", "summary", "clear",
+                    "record_start", "record_stop", "replay"
+                ]],
+                "gap_seconds": ["type": "integer", "description": "summary: pause that closes a segment, default 5"],
+                "path": ["type": "string", "description": "replay: macro file"],
+                "confirm": ["type": "boolean", "description": "Required for replay"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "share",
             exposure: .deferred,
             description: "Mail and AirDrop: compose opens a ready letter, send needs confirm and reports Mail's error, airdrop opens the picker, services lists names.",
@@ -433,7 +447,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "calendar",
             exposure: .deferred,
-            description: "Calendar and reminders via EventKit: events, create/update/delete (delete needs confirm and only own events), calendars, free_busy, reminders. ISO-8601 dates only.",
+            description: "Calendar and reminders: events, create/update/delete (confirm, own events only), calendars, free_busy, reminders. ISO-8601 dates.",
             parameters: schema([
                 "action": ["type": "string", "enum": [
                     "events", "create_event", "update_event", "delete_event", "calendars",
