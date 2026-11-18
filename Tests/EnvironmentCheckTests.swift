@@ -36,6 +36,17 @@ final class EnvironmentCheckTests: XCTestCase {
         XCTAssertTrue(second.isEmpty)
     }
 
+    func testPythonIsNotAnnouncedUnprompted() {
+        // R35.2: only when a chat really reads an .xlsx, or when asked directly.
+        let missing = EnvironmentState(git: true, python3: false, ripgrep: true)
+        XCTAssertTrue(EnvironmentCheck.notices(current: missing, previous: nil).isEmpty)
+        XCTAssertEqual(
+            EnvironmentCheck.notices(current: missing, previous: nil, asked: true)
+                .map(\.dependency),
+            [.python3]
+        )
+    }
+
     func testFlippedStateIsReportedAgain() {
         let missing = EnvironmentState(git: false, python3: true, ripgrep: true)
         let hadGit = EnvironmentState(git: true, python3: true, ripgrep: true)

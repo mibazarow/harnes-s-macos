@@ -96,6 +96,9 @@ enum EnvironmentCheck {
     ) -> [(dependency: Dependency, text: String)] {
         Dependency.allCases.compactMap { dependency in
             guard !current[dependency] else { return nil }
+            // R35.2: python3 is announced only when it is actually needed — a chat that
+            // never opens an .xlsx has no reason to hear about it.
+            if dependency == .python3, !asked { return nil }
             if asked { return (dependency, message(for: dependency)) }
             // No memory of a previous run: report once. With memory, report only a
             // change from "present" to "missing"; a still-missing dependency stays quiet.
