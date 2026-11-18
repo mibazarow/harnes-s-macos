@@ -242,20 +242,57 @@ extension ToolRegistry {
         // Bounding boxes are needed to click on a found label, so they are in pixel
         // coordinates with a top-left origin — the same space the mouse lives in.
         let withCoords = Self.bool(args, "coords") ?? false
+        // R18.10: `hit` adds the centre of every box in screen points, so "find the word
+        // and click it" needs no arithmetic on the model side. The capture must be
+        // traceable to a display (or a window), otherwise points would be a guess.
+        let withHit = Self.bool(args, "hit") ?? false
         let width = CGFloat(cgImage.width)
         let height = CGFloat(cgImage.height)
+        let frame = withHit ? Self.hitFrame(args: args, pixelSize: CGSize(width: width, height: height)) : nil
         let lines = (request.results ?? []).compactMap { observation -> String? in
             guard let text = observation.topCandidates(1).first?.string else { return nil }
-            guard withCoords else { return text }
+            guard withCoords || withHit else { return text }
             let box = observation.boundingBox
             let x = box.minX * width
             let y = (1 - box.maxY) * height
-            return String(
+            var line = String(
                 format: "%@ [x=%.0f y=%.0f w=%.0f h=%.0f]",
                 text, x, y, box.width * width, box.height * height
             )
+            if withHit {
+                let center = CGPoint(x: x + box.width * width / 2, y: y + box.height * height / 2)
+                if let frame {
+                    let point = ScreenGeometry.point(
+                        fromRegionPixels: center, origin: frame.origin, scale: frame.scale
+                    )
+                    line += String(format: " center=%.0f,%.0f", point.x, point.y)
+                } else {
+                    line += " center=px:\(Int(center.x)),\(Int(center.y)) (display неизвестен: "
+                        + "передай display или window_id)"
+                }
+            }
+            return line
         }
         return .ok(lines.isEmpty ? "Текст не распознан." : lines.joined(separator: "\n"))
+    }
+
+    /// Where the captured pixels sit on screen, in points.
+    static func hitFrame(args: [String: Any], pixelSize: CGSize) -> (origin: CGPoint, scale: CGFloat)? {
+        let screens = displays()
+        if let id = int(args, "window_id") {
+            guard let rect = windowBounds(id: id) else { return nil }
+            let scale = ScreenGeometry.displayIndex(
+                for: CGPoint(x: rect.midX, y: rect.midY), screens: screens
+            ).map { screens[$0].scale } ?? 1
+            return (rect.origin, scale)
+        }
+        if let index = int(args, "display"), index >= 0, index < screens.count {
+            return (screens[index].origin, screens[index].scale)
+        }
+        guard let index = ScreenGeometry.displayIndex(forPixelSize: pixelSize, screens: screens) else {
+            return nil
+        }
+        return (screens[index].origin, screens[index].scale)
     }
 
 // MARK: - Helpers

@@ -22,8 +22,11 @@ extension ToolRegistry {
             let lines = node.lines(depth: 0, maxNodes: budget, budget: &linesBudget)
             return .ok("pid=\(pid) узлов≈\(lines.count)\n" + lines.joined(separator: "\n"))
         case "find":
+            if let image = args["image"] as? String {
+                return pixelFind(image: image, args: args, pid: pid)
+            }
             guard let query = args["query"] as? String, !query.isEmpty else {
-                return .fail("query обязателен")
+                return .fail("query обязателен (или image для поиска по шаблону)")
             }
             var budget = 8_000
             let node = AXBridge.snapshot(root, depth: 0, budget: &budget)
@@ -33,7 +36,7 @@ extension ToolRegistry {
                 query, regex: Self.bool(args, "regex") ?? false,
                 limit: limit, budget: &searchBudget
             )
-            guard !found.isEmpty else { return .ok("Ничего не найдено по «\(query)».") }
+            guard !found.isEmpty else { return .ok("ax: empty — ничего не найдено по «\(query)».") }
             return .ok(found.map { node in
                 var line = "\(node.path.description) \(node.role)"
                 if !node.title.isEmpty { line += " «\(node.title)»" }
@@ -44,6 +47,9 @@ extension ToolRegistry {
                 return line
             }.joined(separator: "\n"))
         case "click":
+            if let image = args["image"] as? String {
+                return pixelClick(image: image, args: args, pid: pid)
+            }
             guard let path = Self.path(args), let element = AXBridge.element(at: path, in: root) else {
                 return .fail("path не найден; сначала вызови ui tree или find.")
             }
@@ -161,5 +167,144 @@ extension ToolRegistry {
             return "\nverify: кадры не сняты."
         }
         return "\nverify: changed=\(changed) before=\(before) after=\(after)"
+    }
+}
+
+/// R18.10: the pixel fallback. AX is the primary path; this exists for canvas, WebGL,
+/// games and Metal views where the tree is empty. Coordinates are converted to screen
+/// points, an ambiguous template is refused, and a click proves itself with a
+/// before/after frame instead of claiming success.
+extension ToolRegistry {
+    struct PixelRegion {
+        let rect: CGRect
+        let scale: CGFloat
+    }
+
+    static func pixelRegion(_ args: [String: Any], pid: pid_t) -> PixelRegion? {
+        let rect: CGRect?
+        if let id = int(args, "window_id") {
+            rect = windowBounds(id: id)
+        } else {
+            rect = appWindowBounds(pid: pid)
+        }
+        guard let rect, rect.width >= 4, rect.height >= 4 else { return nil }
+        let screens = displays()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let scale = ScreenGeometry.displayIndex(for: center, screens: screens)
+            .map { screens[$0].scale } ?? 1
+        return PixelRegion(rect: rect, scale: scale)
+    }
+
+    static func windowBounds(id: Int) -> CGRect? {
+        let raw = CGWindowListCopyWindowInfo(
+            [.optionIncludingWindow], CGWindowID(id)
+        ) as? [[String: Any]] ?? []
+        return raw.compactMap(windowRect).first
+    }
+
+    static func appWindowBounds(pid: pid_t) -> CGRect? {
+        let raw = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] ?? []
+        let own = raw.filter {
+            ($0[kCGWindowOwnerPID as String] as? pid_t) == pid
+                && ($0[kCGWindowLayer as String] as? Int) == 0
+        }
+        return own.compactMap(windowRect)
+            .filter { $0.width > 4 && $0.height > 4 }
+            .max { $0.width * $0.height < $1.width * $1.height }
+    }
+
+    private static func windowRect(_ window: [String: Any]) -> CGRect? {
+        guard let bounds = window[kCGWindowBounds as String] as? [String: CGFloat] else { return nil }
+        return CGRect(
+            x: bounds["X"] ?? 0, y: bounds["Y"] ?? 0,
+            width: bounds["Width"] ?? 0, height: bounds["Height"] ?? 0
+        )
+    }
+
+    /// Template hits in screen points, with the capture's own scale measured from the
+    /// file rather than assumed: `screencapture` decides the backing size.
+    private func templateHits(image: String, args: [String: Any], pid: pid_t)
+        -> (matches: [PixelMatch], scale: CGFloat, origin: CGPoint, capture: URL)? {
+        guard CGPreflightScreenCaptureAccess() else { return nil }
+        let templateURL = resolve(image)
+        guard let templateImage = NSImage(contentsOf: templateURL),
+              let template = templateImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+        guard let region = Self.pixelRegion(args, pid: pid) else { return nil }
+        guard let capture = ScreenshotVerify.capture(rect: region.rect, tag: "pixel"),
+              let shot = NSImage(contentsOf: capture),
+              let source = shot.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+        let scale = region.rect.width > 0 ? CGFloat(source.width) / region.rect.width : region.scale
+        let threshold = (args["threshold"] as? Double) ?? PixelMatchPolicy.threshold
+        let limit = min(max(Self.int(args, "limit") ?? PixelMatchPolicy.maxCandidates, 1), 10)
+        let matches = TemplateMatcher.matches(
+            in: source, template: template, threshold: threshold, limit: limit
+        )
+        return (matches, scale, region.rect.origin, capture)
+    }
+
+    func pixelFind(image: String, args: [String: Any], pid: pid_t) -> ToolResult {
+        guard FileManager.default.fileExists(atPath: resolve(image).path) else {
+            return .fail("Файл шаблона не найден: \(image)")
+        }
+        guard let found = templateHits(image: image, args: args, pid: pid) else {
+            return .fail("Не удалось снять область окна: нужен грант Screen Recording "
+                + "и видимое окно приложения (или window_id).")
+        }
+        guard !found.matches.isEmpty else {
+            return .ok("pixel: empty — шаблон не найден (порог \(PixelMatchPolicy.threshold)).")
+        }
+        let lines = found.matches.map { match -> String in
+            let point = ScreenGeometry.point(
+                fromRegionPixels: match.center, origin: found.origin, scale: found.scale
+            )
+            return String(
+                format: "score=%.3f center=%.0f,%.0f px=%.0f,%.0f size=%d×%d",
+                match.score, point.x, point.y, match.center.x, match.center.y,
+                match.width, match.height
+            )
+        }
+        let head = PixelMatchPolicy.isAmbiguous(found.matches)
+            ? "ambiguous: true — кандидаты слишком близки, не нажимай наугад."
+            : "ambiguous: false"
+        return .ok("\(head)\n" + lines.joined(separator: "\n"))
+    }
+
+    func pixelClick(image: String, args: [String: Any], pid: pid_t) -> ToolResult {
+        guard let found = templateHits(image: image, args: args, pid: pid) else {
+            return .fail("Не удалось снять область окна: нужен грант Screen Recording "
+                + "и видимое окно приложения (или window_id).")
+        }
+        guard !found.matches.isEmpty else { return .fail("Шаблон не найден на экране.") }
+        if PixelMatchPolicy.isAmbiguous(found.matches) {
+            return .fail("ambiguous: два кандидата с близким score. "
+                + "Уточни шаблон (уникальный фрагмент) и повтори.")
+        }
+        let match = found.matches[0]
+        let point = ScreenGeometry.point(
+            fromRegionPixels: match.center, origin: found.origin, scale: found.scale
+        )
+        let beforeData = try? Data(contentsOf: found.capture)
+        Self.click(at: point)
+        Thread.sleep(forTimeInterval: 0.35)
+        guard let region = Self.pixelRegion(args, pid: pid),
+              let afterURL = ScreenshotVerify.capture(rect: region.rect, tag: "pixel-after"),
+              let afterData = try? Data(contentsOf: afterURL) else {
+            return .ok(String(
+                format: "Клик по шаблону: center=%.0f,%.0f score=%.3f; кадр после не снят.",
+                point.x, point.y, match.score
+            ))
+        }
+        Self.resampleIfNeeded(afterURL, scaleDown: nil, maxHeight: 720)
+        let changed = beforeData.map { ScreenshotVerify.changed(before: $0, after: afterData) } ?? false
+        return .ok(String(
+            format: "Клик по шаблону: center=%.0f,%.0f score=%.3f changed=%@ shot=%@",
+            point.x, point.y, match.score, changed ? "true" : "false", afterURL.path
+        ))
     }
 }

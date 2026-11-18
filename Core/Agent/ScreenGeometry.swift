@@ -33,4 +33,20 @@ enum ScreenGeometry {
     static func displayIndex(for point: CGPoint, screens: [DisplaySpace]) -> Int? {
         screens.firstIndex { $0.frame.contains(point) }
     }
+
+    /// R18.10: a capture is a rectangle in points (a window, a display, a clip), and the
+    /// OCR or template hit is a pixel inside it. This is the conversion that makes a
+    /// found word clickable without the model doing arithmetic.
+    static func point(fromRegionPixels pixel: CGPoint, origin: CGPoint, scale: CGFloat) -> CGPoint {
+        CGPoint(x: pixel.x / scale + origin.x, y: pixel.y / scale + origin.y)
+    }
+
+    /// Which display produced a capture of this pixel size. Used when `ocr` gets only a
+    /// file path and the scale is not stated: the backing size identifies the screen.
+    static func displayIndex(forPixelSize size: CGSize, screens: [DisplaySpace]) -> Int? {
+        screens.firstIndex {
+            abs($0.size.width * $0.scale - size.width) < 2
+                && abs($0.size.height * $0.scale - size.height) < 2
+        }
+    }
 }

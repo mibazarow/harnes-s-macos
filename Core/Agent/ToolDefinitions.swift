@@ -190,7 +190,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "ui",
             exposure: .deferred,
-            description: "AX tree of an app, search by role/title/value, press or focus an element by path. Needs Accessibility; System Settings clicks need confirm.",
+            description: "AX tree of an app, search by role/title/value, press or focus an element by path. Pixel fallback (find/click with image) is only for canvas, WebGL and games. Needs Accessibility; System Settings clicks need confirm.",
             parameters: schema([
                 "action": ["type": "string", "enum": ["tree", "find", "click", "set_value", "focus", "menu_list", "menu_click"]],
                 "app": ["type": "string", "description": "App name or bundle id; default frontmost"],
@@ -203,6 +203,9 @@ extension ToolRegistry {
                 "path": ["type": "array", "items": ["type": "integer"], "description": "Element path from tree or find"],
                 "value": ["type": "string", "description": "set_value"],
                 "path_titles": ["type": "array", "items": ["type": "string"], "description": "menu_click via path"],
+                "image": ["type": "string", "description": "find/click: fragment PNG, template match in the window; ambiguous hits are refused"],
+                "window_id": ["type": "integer", "description": "image: window to search, default the app's largest"],
+                "threshold": ["type": "number", "description": "image: match threshold, default 0.85"],
                 "confirm": ["type": "boolean", "description": "Required for System Settings actions"],
                 "verify": ["type": "boolean", "description": "click: compare the element area before/after"]
             ], required: ["action"])
@@ -501,11 +504,14 @@ extension ToolRegistry {
         ToolDefinition(
             name: "ocr",
             exposure: .deferred,
-            description: "Extract text from an image with the macOS Vision framework. coords=true also returns pixel bounding boxes for clicking.",
+            description: "Extract text from an image with the macOS Vision framework. coords=true adds pixel boxes; hit=true adds their centres in screen points for clicking.",
             parameters: schema([
                 "path": ["type": "string"],
                 "lang": ["type": "array", "items": ["type": "string"], "description": "Languages, default [ru, en]"],
-                "coords": ["type": "boolean", "description": "Include pixel bounding boxes"]
+                "coords": ["type": "boolean", "description": "Include pixel bounding boxes"],
+                "hit": ["type": "boolean", "description": "Add centre of each box in screen points"],
+                "display": ["type": "integer", "description": "hit: display index when the size does not identify it"],
+                "window_id": ["type": "integer", "description": "hit: the capture is this window"]
             ], required: ["path"])
         ),
         ToolDefinition(
