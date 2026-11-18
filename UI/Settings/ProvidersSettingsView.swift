@@ -297,10 +297,42 @@ struct ProviderEditorView: View {
                             .frame(width: 110)
                             .multilineTextAlignment(.trailing)
                             .font(AppFont.mono(13))
+                            .onChange(of: provider.contextWindow) { _, _ in
+                                // R34.2: typing a number is an explicit override. The
+                                // model-derived value would otherwise silently replace it.
+                                ModelContextPreferences.setManual(true, providerID: provider.id)
+                            }
                         Stepper("", value: $provider.contextWindow, in: 2_000...4_000_000, step: 8_000)
                             .labelsHidden()
                         Text("токенов")
                             .foregroundStyle(.secondary)
+                    }
+
+                    // R34.3: what is actually used, and where the number came from.
+                    let resolution = ModelContextPreferences.resolve(
+                        providerID: provider.id,
+                        model: provider.defaultModel ?? provider.models.first ?? "",
+                        providerWindow: provider.contextWindow
+                    )
+                    let budget = ContextComposer().budget(
+                        for: resolution.window,
+                        thresholdPercent: settings.compactionThresholdPercent
+                    )
+                    Text("Окно: \(resolution.window.formatted()) · бюджет \(budget.usable.formatted()) "
+                        + "(источник: \(resolution.source.label)) · сжатие на \(budget.thresholdTokens.formatted())")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if ModelContextPreferences.isManual(providerID: provider.id) {
+                        Button("Сбросить ручное окно") {
+                            ModelContextPreferences.setManual(false, providerID: provider.id)
+                            if let known = ModelContextPreferences.knownWindow(
+                                for: provider.defaultModel ?? ""
+                            ) {
+                                provider.contextWindow = known
+                            }
+                        }
+                        .font(.caption)
                     }
 
                     if provider.contextWindow > 300_000 {
