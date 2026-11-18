@@ -32,7 +32,8 @@
 | R18.8 | `37fc784`, `5ab4164`, `8e2abab` | guard Системных настроек, опасных пунктов меню, лимит 20 UI-событий/с |
 | R18.9 | `748e505` | `exposure` у встроенных схем; отправляемый каталог держится в 5 600 |
 | R18.10 | `bd34537` | `ocr hit: true` — центры в точках; `ui find/click image:` — шаблон, `ambiguous`, `changed` + уменьшенный кадр |
-| R18.11 (часть) | существовало | Esc → `chat.stop()` |
+| R18.11 | `a3eadde` | ⌃⌥⌘. через `RegisterEventHotKey`, 40 кликов / 300 событий на ход, `no_progress`, `frontmost_changed`, возврат фокуса; Esc → `chat.stop()` |
+
 | R19.0 | `748e505` | `tool_load`, отложенные схемы, замер каталога |
 | R19.1 | `fd4a7cf` | `notify`: UNUserNotificationCenter, отказ с путём в панель |
 | R19.2 | `9c6694e`, `75894a2` | `system`: память/swap, питание, thermal, load, тома, топ по памяти |
@@ -59,7 +60,6 @@
 
 | # | Пункт | Где смотреть | Что именно |
 | --- | --- | --- | --- |
-| 2 | R18.11 | раздел ниже | глобальный ⌃⌥⌘., потолки 40 кликов/300 событий, `no_progress`, `frontmost_changed`, возврат фокуса |
 | 3 | R20.4 | раздел ниже | `workspace get/set/list` с подтверждением и пересборкой реестра |
 | 4 | R25.1 | раздел ниже | `power`: батарея, яркость, звук, медиа |
 | 5 | R25.2 | раздел ниже | `display`: режимы и раскладка |
@@ -179,6 +179,9 @@ R23 (календарь/osascript), `DOCS/screenshots/git.png`, `llm.sh status` 
 - **Глобальный стоп.** Hotkey ⌃⌥⌘. (`RegisterEventHotKey`) отменяет очередь событий,
   взводит флаг `aborted` до конца хода и пишет причину в `ui_actions.log`. Без него
   единственный способ остановить разошедшийся цикл — закрыть приложение.
+  **Сделано (`a3eadde`):** `GlobalStopHotkey`, `AgentAbortSignal`, `GUIControlSession` +
+  `GUIControlGuardInterceptor`; занятая комбинация даёт `hotkey_failed` в `latency.log`,
+  а не тихий отказ.
 - **Потолки на ход:** не больше 40 кликов и 300 событий CGEvent; 20 кликов подряд без
   изменения дерева (`tree_diff` пуст) → отказ `no_progress` с последним деревом.
 - **Смена frontmost без ожидания** (`expect_frontmost`) → отказ `frontmost_changed`, ни
