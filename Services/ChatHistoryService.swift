@@ -40,19 +40,23 @@ actor ChatHistoryService {
         }
     }
 
+    /// One row shape for both directions. Decoding keeps the last two fields optional
+    /// because rows written before they existed are still in the table; encoding always
+    /// fills them, so the bytes on disk are unchanged.
+    private struct ExchangeRow: Codable {
+        let callID: String
+        let name: String
+        let arguments: String
+        let output: String
+        let isError: Bool
+        let originalLength: Int?
+        let isTrivial: Bool?
+    }
+
     static func encodeExchanges(_ exchanges: [ToolExchange]) -> String? {
         guard !exchanges.isEmpty else { return nil }
-        struct Row: Encodable {
-            let callID: String
-            let name: String
-            let arguments: String
-            let output: String
-            let isError: Bool
-            let originalLength: Int
-            let isTrivial: Bool
-        }
         let rows = exchanges.map {
-            Row(
+            ExchangeRow(
                 callID: $0.callID,
                 name: $0.name,
                 arguments: $0.arguments,
@@ -68,16 +72,7 @@ actor ChatHistoryService {
 
     static func decodeExchanges(_ raw: String?) -> [ToolExchange] {
         guard let raw, let data = raw.data(using: .utf8) else { return [] }
-        struct Row: Decodable {
-            let callID: String
-            let name: String
-            let arguments: String
-            let output: String
-            let isError: Bool
-            let originalLength: Int?
-            let isTrivial: Bool?
-        }
-        guard let rows = try? JSONDecoder().decode([Row].self, from: data) else { return [] }
+        guard let rows = try? JSONDecoder().decode([ExchangeRow].self, from: data) else { return [] }
         return rows.map {
             ToolExchange(
                 callID: $0.callID,

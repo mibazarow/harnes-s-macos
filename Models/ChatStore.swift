@@ -1052,15 +1052,20 @@ final class ChatStore {
             )
         }
         pruneAtBoundary = false
-        var plan = composer.plan(
-            systemPrompt: system,
-            messages: promptMessages(pruning: pruning.replacements),
-            contextWindow: contextWindow,
-            thresholdPercent: compactionThreshold,
-            summaryTokens: TokenEstimator.tokens(in: checkpointSummary),
-            estimateScale: scale,
-            toolTokens: schemaTokens
-        )
+        // The same seven-argument plan is built after every fold; three copies had
+        // already started to differ in comments only.
+        func makePlan() -> ContextPlan {
+            composer.plan(
+                systemPrompt: system,
+                messages: promptMessages(pruning: pruning.replacements),
+                contextWindow: contextWindow,
+                thresholdPercent: compactionThreshold,
+                summaryTokens: TokenEstimator.tokens(in: checkpointSummary),
+                estimateScale: scale,
+                toolTokens: schemaTokens
+            )
+        }
+        var plan = makePlan()
 
         // Measured pressure: the plan can say "fits" while the provider's last answer
         // reported a prompt above the threshold. Then the measurement wins.
@@ -1088,15 +1093,7 @@ final class ChatStore {
                    await compact(fold, provider: provider, model: model, services: services) {
                     system = await buildSystemPrompt(services: services)
                     compactedInWindow = true
-                    plan = composer.plan(
-                        systemPrompt: system,
-                        messages: promptMessages(pruning: pruning.replacements),
-                        contextWindow: contextWindow,
-                        thresholdPercent: compactionThreshold,
-                        summaryTokens: TokenEstimator.tokens(in: checkpointSummary),
-                        estimateScale: scale,
-                        toolTokens: schemaTokens
-                    )
+                    plan = makePlan()
                     notice("История сжата по факту: провайдер сообщил \(sample?.measured ?? 0) токенов.")
                 }
             }
@@ -1113,15 +1110,7 @@ final class ChatStore {
             if compacted {
                 // The checkpoint lives inside the system prompt, so both are rebuilt.
                 system = await buildSystemPrompt(services: services)
-                plan = composer.plan(
-                    systemPrompt: system,
-                    messages: promptMessages(pruning: pruning.replacements),
-                    contextWindow: contextWindow,
-                    thresholdPercent: compactionThreshold,
-                    summaryTokens: TokenEstimator.tokens(in: checkpointSummary),
-                    estimateScale: scale,
-                    toolTokens: schemaTokens
-                )
+                plan = makePlan()
                 compactedInWindow = true
                 notice("Сжал историю перед отправкой: \(dropped) сообщений.")
             } else {

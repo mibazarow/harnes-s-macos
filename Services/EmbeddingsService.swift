@@ -83,22 +83,38 @@ actor EmbeddingsService {
         return vector
     }
 
+    /// One statement for both the single and the batch path; they differed only in the
+    /// timestamp source and drifted apart otherwise.
+    private static func upsert(
+        _ db: Database,
+        refKind: String,
+        refID: String,
+        vector: Vector,
+        textHash: String?,
+        updatedAt: String
+    ) throws {
+        try db.execute(sql: """
+            INSERT INTO embeddings (ref_kind, ref_id, model, dim, vector, text_hash, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ref_kind, ref_id, model) DO UPDATE SET
+                dim = excluded.dim,
+                vector = excluded.vector,
+                text_hash = excluded.text_hash,
+                updated_at = excluded.updated_at
+            """, arguments: [
+            refKind, refID, vector.model, vector.values.count,
+            Self.encode(vector.values), textHash, updatedAt
+        ])
+    }
+
     /// Stores a vector. `textHash` lets an identical chunk reuse an existing vector
     /// instead of running the model again.
     func store(refKind: String, refID: String, vector: Vector, textHash: String? = nil) throws {
-        let blob = Self.encode(vector.values)
         try database.queue.write { db in
-            try db.execute(sql: """
-                INSERT INTO embeddings (ref_kind, ref_id, model, dim, vector, text_hash, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(ref_kind, ref_id, model) DO UPDATE SET
-                    dim = excluded.dim,
-                    vector = excluded.vector,
-                    text_hash = excluded.text_hash,
-                    updated_at = excluded.updated_at
-                """, arguments: [
-                refKind, refID, vector.model, vector.values.count, blob, textHash, Timestamps.now()
-            ])
+            try Self.upsert(
+                db, refKind: refKind, refID: refID, vector: vector,
+                textHash: textHash, updatedAt: Timestamps.now()
+            )
         }
     }
 
@@ -162,23 +178,10 @@ actor EmbeddingsService {
         let now = Timestamps.now()
         try database.queue.write { db in
             for item in items {
-                try db.execute(sql: """
-                    INSERT INTO embeddings (ref_kind, ref_id, model, dim, vector, text_hash, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(ref_kind, ref_id, model) DO UPDATE SET
-                        dim = excluded.dim,
-                        vector = excluded.vector,
-                        text_hash = excluded.text_hash,
-                        updated_at = excluded.updated_at
-                    """, arguments: [
-                    refKind,
-                    item.refID,
-                    item.vector.model,
-                    item.vector.values.count,
-                    Self.encode(item.vector.values),
-                    item.textHash,
-                    now
-                ])
+                try Self.upsert(
+                    db, refKind: refKind, refID: item.refID, vector: item.vector,
+                    textHash: item.textHash, updatedAt: now
+                )
             }
         }
     }
