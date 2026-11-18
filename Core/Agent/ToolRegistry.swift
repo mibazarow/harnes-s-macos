@@ -59,6 +59,8 @@ struct ToolRegistry: Sendable {
     /// R30.2: the user's message for this turn — the only text memory may cite.
     var currentUserMessage: String?
     var currentUserMessageID: Int64?
+    /// R30.4: a subagent may read learned skills and report them, never write.
+    var isSubagent: Bool = false
     let memory: MemoryService?
     let embeddings: EmbeddingsService?
     let secrets: SecretsService?
@@ -88,6 +90,7 @@ struct ToolRegistry: Sendable {
         workspaceState: WorkspaceState? = nil,
         currentUserMessage: String? = nil,
         currentUserMessageID: Int64? = nil,
+        isSubagent: Bool = false,
         memory: MemoryService?,
         embeddings: EmbeddingsService?,
         secrets: SecretsService?,
@@ -109,6 +112,7 @@ struct ToolRegistry: Sendable {
         self.workspaceState = workspaceState ?? WorkspaceState(workspace)
         self.currentUserMessage = currentUserMessage
         self.currentUserMessageID = currentUserMessageID
+        self.isSubagent = isSubagent
         self.memory = memory
         self.embeddings = embeddings
         self.secrets = secrets
@@ -361,6 +365,7 @@ struct ToolRegistry: Sendable {
             case "contacts": return await contactsTool(args)
             case "share": return await shareTool(args)
             case "observe": return await observeTool(args)
+            case "skill_learn": return await skillLearnTool(args)
             case "windows": return windowsTool(args)
             case "shortcut": return await shortcutTool(args)
             case "app_script": return await appScriptTool(args)

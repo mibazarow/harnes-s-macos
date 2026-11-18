@@ -91,7 +91,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "search_code",
             exposure: .deferred,
-            description: "Search the workspace code by meaning and by keywords. Uses the semantic index when it exists and falls back to scanning files when it does not, so indexing is optional.",
+            description: "Search workspace code by meaning and keywords; uses the semantic index when present and falls back to scanning files.",
             parameters: schema([
                 "query": ["type": "string"],
                 "limit": ["type": "integer", "description": "Default 8"]
@@ -290,6 +290,7 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "system",
+            exposure: .deferred,
             description: "Machine state and grants: info, cpu, memory, thermal, power, disk, volumes, processes; permissions; tcc_panels.",
             parameters: schema([
                 "action": ["type": "string", "enum": ["text", "permissions", "tcc_panels"]],
@@ -399,6 +400,20 @@ extension ToolRegistry {
                 "scope": ["type": "string", "description": "home (default), computer, network or an absolute path"],
                 "limit": ["type": "integer", "description": "Max results, default 20"]
             ], required: ["query"])
+        ),
+        ToolDefinition(
+            name: "skill_learn",
+            exposure: .deferred,
+            description: "Procedures you write for yourself: save, patch one quote, list, read. Secrets scrubbed; hand-edited files locked.",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["save", "patch", "list", "read"]],
+                "name": ["type": "string", "description": "Lowercase latin, digits, dashes"],
+                "description": ["type": "string", "description": "One line, up to 200 characters"],
+                "body": ["type": "string", "description": "Procedure steps, up to 6000 characters"],
+                "old": ["type": "string", "description": "patch: exact quote to replace"],
+                "new": ["type": "string", "description": "patch: replacement"],
+                "source_message_id": ["type": "string", "description": "The user's message that started the task"]
+            ], required: ["action"])
         ),
         ToolDefinition(
             name: "observe",
@@ -565,7 +580,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "git",
             exposure: .deferred,
-            description: "Git with an action: status (structured), fetch, pull, push (confirm), branch, switch, merge, show, blame, conflicts. Destructive forms refused.",
+            description: "Git: status, fetch, pull, push (confirm), branch, switch, merge, show, blame, conflicts; destructive forms refused.",
             parameters: schema([
                 "action": ["type": "string", "enum": ["status", "fetch", "pull", "push", "branch", "switch", "merge", "show", "blame", "conflicts"]],
                 "cwd": ["type": "string", "description": "Repository path, default workspace"],
@@ -629,7 +644,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "webfetch",
             exposure: .deferred,
-            description: "LAST RESORT for static pages only, after scrapling and browser failed. Extracts readable text (drops nav, footer, scripts, duplicate lines) and supports pagination.",
+            description: "LAST RESORT for static pages, after scrapling and browser failed. Readable text without nav/footer/scripts; supports pagination.",
             parameters: schema([
                 "url": ["type": "string"],
                 "offset": ["type": "integer", "description": "Skip this many characters, default 0"],
@@ -679,7 +694,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "ocr",
             exposure: .deferred,
-            description: "Extract text from an image with the macOS Vision framework. coords=true adds pixel boxes; hit=true adds their centres in screen points for clicking.",
+            description: "Extract text via Vision. coords=true adds pixel boxes; hit=true adds centres in screen points.",
             parameters: schema([
                 "path": ["type": "string"],
                 "lang": ["type": "array", "items": ["type": "string"], "description": "Languages, default [ru, en]"],
@@ -692,7 +707,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "doc_read",
             exposure: .deferred,
-            description: "Read a document by extension: pdf (page range), docx, xlsx, pptx, odt, rtf, and plain text/markdown. Use it instead of fs_read for these formats.",
+            description: "Read pdf (page range), docx, xlsx, pptx, odt, rtf, text; use it instead of fs_read for these.",
             parameters: schema([
                 "path": ["type": "string"],
                 "page_from": ["type": "integer", "description": "PDF first page, 1-based"],
@@ -726,7 +741,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "image_read",
             exposure: .deferred,
-            description: "Inspect or transform an image or a PDF page (EXIF orientation, crop, rotate, resize) and return a PNG the chat can display. No external tools needed.",
+            description: "Inspect or transform an image or PDF page (EXIF, crop, rotate, resize); returns a PNG the chat can show.",
             parameters: schema([
                 "path": ["type": "string", "description": "Image or PDF"],
                 "page": ["type": "integer", "description": "PDF page, default 1"],
@@ -816,7 +831,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "secret_get",
             exposure: .deferred,
-            description: "Read a saved secret by alias. By default the value stays masked; reveal=true returns it and sends it to the provider in this conversation.",
+            description: "Read a saved secret by alias. Masked by default; reveal=true sends it to the provider in this chat.",
             parameters: schema([
                 "alias": ["type": "string"],
                 "reveal": ["type": "boolean", "description": "false (default) = mask, true = return the value"]
@@ -878,7 +893,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "mcp_tools",
             exposure: .deferred,
-            description: "Inspect MCP tools. Omit arguments to list all servers and tools; pass server to list one server; pass server and tool to get the full JSON schema.",
+            description: "MCP tools: omit args to list servers and tools; pass server; pass server+tool for the JSON schema.",
             parameters: schema([
                 "server": ["type": "string", "description": "Server name; omit for all servers"],
                 "tool": ["type": "string", "description": "Tool name; requires server"]

@@ -508,6 +508,7 @@ final class ChatStore {
         let registry = ToolRegistry(
             workspace: AppPaths.workspaceDirectory,
             workspaceState: services.workspaceState,
+            isSubagent: true,
             memory: services.memory,
             embeddings: services.embeddings,
             secrets: nil,
@@ -766,6 +767,17 @@ final class ChatStore {
             📌 marks a fact the user asked to remember explicitly; treat it as fixed and never drop it.
             `lessons` are corrections the user made: follow them over anything else.
             \(lines)
+            """)
+        }
+
+        // R30.4: learned procedures enter as an index only; the body is read on demand.
+        let learned = LearnedSkillStore.list()
+        if !learned.isEmpty {
+            parts.append("""
+
+            # Learned skills
+            Procedures you wrote earlier. The index is name and description; read the body with `skill_learn read` when a task matches.
+            \(learned.map { "- \($0.name): \($0.description)" }.joined(separator: "\n"))
             """)
         }
 
