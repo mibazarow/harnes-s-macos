@@ -43,6 +43,9 @@ final class ChatStore {
     var lastContextWindow: Int?
     private var registry: ToolRegistry?
     private var memoryTouchedThisTurn = false
+    /// R30.8: the memory block is read once per turn and shared by the prompt and the
+    /// trust instructions. Nil means "outside a turn" — the prompt then reads its own.
+    private var promptMemoryBlock: [MemoryItem]?
     var compactionTask: Task<Void, Never>?
     /// Compaction is expensive and can fail for reasons outside our control (provider
     /// down, summary rejected). Without a cooldown a broken summary would be retried on
@@ -192,6 +195,8 @@ final class ChatStore {
         // reasoning on top of an answer the user has already read.
         var assistantID = initialID
         var stepIndex = 0
+        // The memory snapshot belongs to this turn; the next one reads fresh records.
+        defer { promptMemoryBlock = nil }
 
         // R18.11: a fresh stop flag and a fresh click/event budget for this turn. The
         // focus restore runs on every exit path, including errors and Stop.
@@ -243,13 +248,15 @@ final class ChatStore {
             return
         }
 
-        // R30.7: the checker sees the user's own words only — this turn's message and a
-        // few earlier ones. Standing preferences from memory are the only extra source.
+        // R30.7: the checker sees the user's own words only — this turn's message and
+        // the last ten earlier ones. Standing preferences from memory are the only
+        // extra source. R30.8: one memory read serves both the prompt and this list.
         trustSession.beginTurn()
         let trustCandidates = Self.trustCandidates(current: text, messages: messages)
-        let trustInstructions = (try? await services.memory.forPrompt(limit: 12))?
+        promptMemoryBlock = await Self.promptMemories(services: services, query: text)
+        let trustInstructions = (promptMemoryBlock ?? [])
             .filter { $0.area == "preferences" || $0.area == "lessons" }
-            .map(\.content) ?? []
+            .map(\.content)
 
         let registry = ToolRegistry(
             workspace: AppPaths.workspaceDirectory,
@@ -712,13 +719,25 @@ final class ChatStore {
         )
     }
 
+    /// R30.8: the prompt block, read once. Relevance to the current request orders the
+    /// records inside an area; the token budget then decides what fits. Hybrid search is
+    /// the same one `memory_search` uses, so there is no second ranking scheme.
+    static func promptMemories(services: AppServices, query: String) async -> [MemoryItem] {
+        var relevance: [Int64: Double] = [:]
+        let hits = await HybridSearch(
+            memory: services.memory, embeddings: services.embeddings
+        ).search(query, limit: 200)
+        for hit in hits { relevance[hit.item.id] = hit.score }
+        return (try? await services.memory.forPrompt(relevance: relevance)) ?? []
+    }
+
     /// R30.7: `current` is this turn's message; earlier user messages are the fallback
     /// sources. Assistant text, tool results and file content never become candidates.
     static func trustCandidates(current: String, messages: [ChatMessage]) -> [TrustCandidate] {
         var result = [TrustCandidate(id: "current", text: String(current.prefix(4_000)))]
         let earlier = messages
             .filter { $0.role == .user && $0.text != current }
-            .suffix(5)
+            .suffix(Tuning.trustCandidateMessages)
             .reversed()
         for (index, message) in earlier.enumerated() {
             result.append(TrustCandidate(
@@ -822,9 +841,18 @@ final class ChatStore {
             }
         }
 
-        if let services, let memories = try? await services.memory.forPrompt(limit: 40), !memories.isEmpty {
-            // R30.2/R30.3: grouped by area, one line per record, body truncated. Lessons
-            // are corrections and are always here; they outrank facts.
+        let memories: [MemoryItem]
+        if let promptMemoryBlock {
+            memories = promptMemoryBlock
+        } else if let services {
+            memories = (try? await services.memory.forPrompt()) ?? []
+        } else {
+            memories = []
+        }
+        if let services, !memories.isEmpty {
+            // R30.2/R30.3: grouped by area, one line per record. Lessons are corrections
+            // and are always here; they outrank facts. R30.8: the body is 600 characters
+            // and the block is already bounded by tokens, not by a row count.
             var grouped: [String: [MemoryItem]] = [:]
             for item in memories { grouped[item.area, default: []].append(item) }
             let order = ["lessons", "about", "preferences", "people", "routines", "decision", "fact"]
@@ -832,7 +860,7 @@ final class ChatStore {
                 guard let items = grouped[area], !items.isEmpty else { return nil }
                 let body = items.map { item in
                     let mark = item.pinned ? "📌 " : ""
-                    return "- \(mark)\(item.address): \(String(item.content.prefix(200)))"
+                    return "- \(mark)\(item.promptText)"
                 }.joined(separator: "\n")
                 return "## \(area)\n\(body)"
             }.joined(separator: "\n")

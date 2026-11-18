@@ -75,6 +75,12 @@ struct AppServices: Sendable {
             let database = try AppDatabase(path: AppPaths.databaseURL)
             let services = AppServices(database: database, modelInstaller: EmbeddingModelInstaller())
             Task.detached(priority: .utility) {
+                // R30.8: records from before the hash column are invisible to the
+                // duplicate check; fill their hashes once at launch.
+                if let filled = try? await services.memory.backfillContentHashes(), filled > 0 {
+                    Logger(subsystem: "app.project-s.swift", category: "memory")
+                        .info("Память: досчитано \(filled, privacy: .public) хешей")
+                }
                 if let pruned = try? await services.memory.pruneUnused(), pruned > 0 {
                     Logger(subsystem: "app.project-s.swift", category: "memory")
                         .info("Память: удалено \(pruned, privacy: .public) неиспользуемых записей")

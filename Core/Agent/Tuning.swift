@@ -30,6 +30,17 @@ enum Tuning {
     /// Ceiling for the serialized tool catalog, used by the schema budget test.
     static let schemaTokenBudget = 5_600
 
+    /// R30.8: the memory block is bounded by tokens, not by a row count. Forty rows cut
+    /// a third of a 57-record base while the newest records stayed invisible; 3 000
+    /// tokens fit roughly the same text but spend it by area priority.
+    static let memoryPromptBudgetTokens = 3_000
+
+    /// One memory line in the prompt. 200 characters cut most records mid-thought.
+    static let memoryPromptBodyChars = 600
+
+    /// R30.7: how many earlier user messages the trust checker may quote.
+    static let trustCandidateMessages = 10
+
     /// How aggressively finished tool output is replaced by a stub in the request.
     /// `budget` decides on its own: no dependency on compaction, so the chain
     /// "savings depend on compaction, compaction on threshold, threshold on calibration"

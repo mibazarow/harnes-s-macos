@@ -130,15 +130,33 @@ struct MemoryItem: Identifiable, Sendable, Equatable {
     var quote: String?
     var score: Double?
 
-    /// `area/slug` as the prompt shows it: a stable short name, not a database id.
+    /// R30.8: `area/id`. The old slug was the first three words of the body, so every
+    /// edit changed the address and the prompt carried things like
+    /// `fact/📌-preferences/пользователя-зовут-миха`. An id never moves with the text.
     var address: String {
-        let words = content
-            .lowercased()
-            .split { !$0.isLetter && !$0.isNumber }
-            .prefix(3)
-            .map(String.init)
-        let slug = words.isEmpty ? String(id) : words.joined(separator: "-")
-        return "\(area)/\(slug)"
+        "\(area)/\(id)"
+    }
+
+    /// Body shown in the prompt. Short records are verbatim; a long one is cut at a
+    /// sentence boundary instead of mid-word.
+    var promptBody: String {
+        Self.promptBody(content, limit: Tuning.memoryPromptBodyChars)
+    }
+
+    /// `address: body`, the unit the prompt renders and the token budget measures.
+    var promptText: String {
+        "\(address): \(promptBody)"
+    }
+
+    static func promptBody(_ text: String, limit: Int) -> String {
+        guard text.count > limit else { return text }
+        let head = String(text.prefix(limit))
+        let boundaries: Set<Character> = [".", "!", "?", "…", "\n"]
+        if let cut = head.lastIndex(where: { boundaries.contains($0) }),
+           head.distance(from: head.startIndex, to: cut) >= limit / 3 {
+            return String(head[...cut]) + "…"
+        }
+        return head + "…"
     }
 
     var snippet: String {

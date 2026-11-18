@@ -382,6 +382,25 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v16_lesson_area") { db in
+            // R30.8: corrections used to be saved as `preferences`, so the `lessons`
+            // area — which the prompt ranks above everything — stayed empty. Move the
+            // records that read as corrections, once. The pattern is deliberately
+            // narrow: a preference that happens to start with "не" is still a correction
+            // in this base, and a wrong move is visible and reversible by hand.
+            try db.execute(sql: """
+                UPDATE memory SET area = 'lessons', kind = 'lesson'
+                WHERE area = 'preferences'
+                  AND (kind IN ('lesson', 'correction')
+                       OR trim(content) LIKE 'не %'
+                       OR trim(content) LIKE 'Не %'
+                       OR trim(content) LIKE 'нельзя %'
+                       OR trim(content) LIKE 'Нельзя %'
+                       OR trim(content) LIKE 'никогда %'
+                       OR trim(content) LIKE 'Никогда %')
+                """)
+        }
+
         return migrator
     }
 }

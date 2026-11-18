@@ -137,7 +137,7 @@ final class MemoryProvenanceTests: XCTestCase {
             }
         }
 
-        let prompt = try await memory.forPrompt(limit: 40)
+        let prompt = try await memory.forPrompt()
 
         let lessons = prompt.filter { $0.area == "lessons" }
         XCTAssertEqual(lessons.count, 20)
@@ -146,12 +146,149 @@ final class MemoryProvenanceTests: XCTestCase {
         XCTAssertEqual(prompt.first?.area, "lessons", "уроки идут первыми")
     }
 
-    func testAddressIsAreaPlusSlug() async throws {
+    func testAddressIsAreaPlusStableID() async throws {
         let item = try await memory.add(
             "Любит тёмную тему", kind: "preference", area: "preferences",
             quote: "люблю тёмную", quoteVerified: true
         )
-        XCTAssertTrue(item.address.hasPrefix("preferences/"), item.address)
-        XCTAssertTrue(item.address.contains("любит"), item.address)
+        XCTAssertEqual(item.address, "preferences/\(item.id)")
+
+        // Editing the text must not move the address: the old slug was the first three
+        // words of the body, so every rewrite renamed the record.
+        try await database.queue.write { db in
+            try db.execute(
+                sql: "UPDATE memory SET content = ? WHERE id = ?",
+                arguments: ["Любит светлую тему", item.id]
+            )
+        }
+        let reloaded = try await memory.item(id: item.id)
+        XCTAssertEqual(reloaded?.address, item.address)
+    }
+
+    func testLessonKindImpliesTheLessonsArea() async throws {
+        let tools = registry(userMessage: "Не называй сроки, запомни это")
+        let result = try await tools.memoryAdd([
+            "text": "Не называть сроки в ответах",
+            "kind": "lesson",
+            "quote": "не называй сроки"
+        ])
+
+        XCTAssertFalse(result.isError, result.output)
+        let items = try await memory.list()
+        let item = try XCTUnwrap(items.first)
+        XCTAssertEqual(item.kind, "lesson")
+        XCTAssertEqual(item.area, "lessons")
+    }
+
+    func testPromptBudgetTrimsByAreaPriorityNotByID() async throws {
+        // Twenty facts come first by id; two preferences come last. A budget that fits
+        // roughly the preferences plus a few facts must keep the preferences, which the
+        // old `pinned DESC, id ASC LIMIT 40` did only by accident.
+        try await database.queue.write { db in
+            for index in 0..<20 {
+                try db.execute(sql: """
+                    INSERT INTO memory (scope, content, kind, area, tags, source, pinned,
+                        quote, quote_verified, created_at, updated_at)
+                    VALUES ('user', ?, 'fact', 'fact', '[]', 'chat', 0, 'запомни', 1, ?, ?)
+                    """, arguments: [
+                        "Факт номер \(index) " + String(repeating: "подробность ", count: 10),
+                        Timestamps.now(), Timestamps.now()
+                    ])
+            }
+            for index in 0..<2 {
+                try db.execute(sql: """
+                    INSERT INTO memory (scope, content, kind, area, tags, source, pinned,
+                        quote, quote_verified, created_at, updated_at)
+                    VALUES ('user', ?, 'preference', 'preferences', '[]', 'chat', 0,
+                        'запомни', 1, ?, ?)
+                    """, arguments: ["Предпочтение \(index)", Timestamps.now(), Timestamps.now()])
+            }
+        }
+
+        let prompt = try await memory.forPrompt(budgetTokens: 60)
+        let areas = prompt.map(\.area)
+        XCTAssertTrue(areas.contains("preferences"), "приоритетная область должна выжить: \(areas)")
+        XCTAssertLessThan(
+            prompt.filter { $0.area == "fact" }.count, 20,
+            "бюджет должен резать хвост, а не отдавать всё"
+        )
+        XCTAssertEqual(areas.first, "preferences", "порядок областей: preferences выше fact")
+    }
+
+    func testLongBodyIsNotCutMidSentence() throws {
+        let body = String(repeating: "Первое предложение закончено. ", count: 20) + "Хвост."
+        let item = MemoryItem(
+            id: 7, scope: "user", content: body, kind: "fact", tags: [],
+            createdAt: Timestamps.now(), pinned: false, hits: 0, lastUsedAt: nil,
+            area: "fact"
+        )
+
+        let shown = item.promptBody
+        XCTAssertLessThanOrEqual(shown.count, Tuning.memoryPromptBodyChars + 1)
+        XCTAssertTrue(shown.hasSuffix("…"), "обрезанный текст помечается")
+        XCTAssertTrue(
+            shown.dropLast().hasSuffix("."),
+            "обрезка должна попадать на конец предложения: \(shown.suffix(40))"
+        )
+        XCTAssertTrue(body.hasPrefix(shown.dropLast()), "начало записи должно остаться дословным")
+    }
+
+    func testShortBodyIsShownInFull() throws {
+        let body = String(repeating: "слово ", count: 50) + "конец"
+        XCTAssertLessThan(body.count, Tuning.memoryPromptBodyChars)
+        let item = MemoryItem(
+            id: 8, scope: "user", content: body, kind: "fact", tags: [],
+            createdAt: Timestamps.now(), pinned: false, hits: 0, lastUsedAt: nil,
+            area: "fact"
+        )
+        XCTAssertEqual(item.promptBody, body)
+    }
+
+    func testLongRecordsEnterByRelevanceNotByID() async throws {
+        let short = try await memory.add(
+            "Короткий факт", area: "fact", quote: "запомни", quoteVerified: true
+        )
+        let long = try await memory.add(
+            String(repeating: "Длинное объяснение. ", count: 60),
+            area: "fact", quote: "запомни", quoteVerified: true
+        )
+
+        let withRelevance = try await memory.forPrompt(relevance: [short.id: 0.9])
+        XCTAssertTrue(withRelevance.contains { $0.id == short.id })
+        XCTAssertFalse(
+            withRelevance.contains { $0.id == long.id },
+            "длинная запись без релевантности не должна попадать в промпт обрезанной"
+        )
+
+        let pinnedLong = try await memory.add(
+            String(repeating: "Закреплённое объяснение. ", count: 60),
+            pinned: true, area: "fact", quote: "запомни", quoteVerified: true
+        )
+        let pinnedPrompt = try await memory.forPrompt(relevance: [short.id: 0.9])
+        XCTAssertTrue(
+            pinnedPrompt.contains { $0.id == pinnedLong.id },
+            "закреплённое не выбрасывается никогда"
+        )
+    }
+
+    func testBackfillFillsHashesForLegacyRows() async throws {
+        try await database.queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO memory (scope, content, kind, area, tags, source, pinned,
+                    quote, quote_verified, created_at, updated_at)
+                VALUES ('user', 'Запись без хеша', 'fact', 'fact', '[]', 'chat', 0,
+                    'запомни', 1, ?, ?)
+                """, arguments: [Timestamps.now(), Timestamps.now()])
+        }
+        let before = try await memory.item(hash: MemoryService.hash("Запись без хеша"))
+        XCTAssertNil(before)
+
+        let filled = try await memory.backfillContentHashes()
+        XCTAssertEqual(filled, 1)
+        let after = try await memory.item(hash: MemoryService.hash("Запись без хеша"))
+        XCTAssertEqual(after?.content, "Запись без хеша")
+
+        let second = try await memory.backfillContentHashes()
+        XCTAssertEqual(second, 0, "бэкфилл идемпотентен")
     }
 }

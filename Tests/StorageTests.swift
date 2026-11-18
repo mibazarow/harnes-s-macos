@@ -87,7 +87,7 @@ final class StorageTests: XCTestCase {
         let pinned = try await memory.add("Железобетонный факт", pinned: true)
         try await memory.touch(ids: [loose.id])
 
-        let prompt = try await memory.forPrompt(limit: 10)
+        let prompt = try await memory.forPrompt()
         XCTAssertEqual(prompt.first?.id, pinned.id)
         XCTAssertEqual(prompt.last?.id, loose.id)
     }
@@ -141,13 +141,13 @@ final class StorageTests: XCTestCase {
         let first = try await memory.add("Первая заметка")
         let second = try await memory.add("Вторая заметка")
 
-        let before = try await memory.forPrompt(limit: 10).map(\.id)
+        let before = try await memory.forPrompt().map(\.id)
         XCTAssertEqual(before, [first.id, second.id])
 
         // Using the older one must not reorder the prompt block: a shifting prefix
         // would invalidate the provider cache on every turn.
         try await memory.touch(ids: [first.id])
-        let after = try await memory.forPrompt(limit: 10).map(\.id)
+        let after = try await memory.forPrompt().map(\.id)
         XCTAssertEqual(after, before)
     }
 

@@ -810,10 +810,10 @@ extension ToolRegistry {
         ToolDefinition(
             name: "memory_add",
             exposure: .core,
-            description: "Save a durable fact: stable preferences, conventions, decisions, corrections. Not task state, file contents, secrets, or unconfirmed guesses.",
+            description: "Save a fact: preferences, decisions, corrections. Corrections use kind=lesson. Not task state, files, secrets, or guesses.",
             parameters: schema([
                 "text": ["type": "string", "description": "One self-contained fact, without pronouns"],
-                "kind": ["type": "string", "description": "fact | decision | preference | pattern"],
+                "kind": ["type": "string", "description": "fact | decision | preference | pattern | lesson"],
                 "area": ["type": "string", "description": "about | preferences | people | routines | lessons | decision | fact"],
                 "quote": ["type": "string", "description": "Verbatim fragment of the user's message"],
                 "source_message_id": ["type": "string", "description": "Optional id of the user's message"],

@@ -50,7 +50,12 @@ extension ToolRegistry {
         guard let memory else { return .fail("Память недоступна") }
         guard let text = args["text"] as? String else { return .fail("text обязателен") }
         let pinned = Self.bool(args, "pinned") ?? false
-        let area = (args["area"] as? String)?.lowercased() ?? "fact"
+        let kind = ((args["kind"] as? String) ?? "fact").lowercased()
+        // R30.8: a correction is a lesson by definition, and `lessons` is the area the
+        // prompt ranks above facts. Asking the model for both was a step it skipped.
+        let area = kind == "lesson"
+            ? "lessons"
+            : ((args["area"] as? String)?.lowercased() ?? "fact")
         guard MemoryProvenance.areas.contains(area) else {
             return .fail("area: " + MemoryProvenance.areas.sorted().joined(separator: " | "))
         }
@@ -87,7 +92,7 @@ extension ToolRegistry {
 
         let item = try await memory.add(
             text,
-            kind: (args["kind"] as? String) ?? "fact",
+            kind: kind,
             pinned: pinned,
             area: area,
             quote: quote,

@@ -186,23 +186,84 @@ actor MemoryService {
         }
     }
 
-    /// Memories injected into the prompt. Order is stable — pinned first, then by id —
-    /// so the prefix stays byte-identical between turns and the provider can reuse its
-    /// prompt cache. Recency is not part of the order; `last_used_at` only drives pruning.
-    func forPrompt(limit: Int = 40) throws -> [MemoryItem] {
+    /// Memories injected into the prompt. R30.8: bounded by tokens, not by rows.
+    ///
+    /// Order is stable — the prompt groups by area, pinned first inside an area — so the
+    /// prefix stays byte-identical between turns and the provider can reuse its prompt
+    /// cache. When the block does not fit, areas are served in prompt order and only the
+    /// overflow at the end is dropped: the old `id ASC` limit hid the newest records.
+    /// `relevance` (id → score) breaks ties inside an area for the current turn's query.
+    func forPrompt(
+        budgetTokens: Int = Tuning.memoryPromptBudgetTokens,
+        relevance: [Int64: Double] = [:]
+    ) throws -> [MemoryItem] {
         try database.queue.read { db in
             // R30.3: corrections are always in the prompt, newest twenty of them; other
-            // areas are bounded by the limit. Both lists keep a stable order so the
-            // prefix stays byte-identical and the provider cache survives.
+            // areas are bounded by the token budget. `scope = 'user'` keeps indexed
+            // workspace chunks out of the prompt: they live in the same table.
             let lessons = try Row.fetchAll(db, sql: """
-                SELECT * FROM memory WHERE area = 'lessons'
+                SELECT * FROM memory WHERE scope = 'user' AND area = 'lessons'
                 ORDER BY id DESC LIMIT 20
                 """).map(Self.item(from:)).reversed() as [MemoryItem]
             let others = try Row.fetchAll(db, sql: """
-                SELECT * FROM memory WHERE area != 'lessons'
-                ORDER BY pinned DESC, id ASC LIMIT ?
-                """, arguments: [limit]).map(Self.item(from:))
-            return Array(lessons) + others
+                SELECT * FROM memory WHERE scope = 'user' AND area != 'lessons'
+                """).map(Self.item(from:))
+
+            let priority = ["about", "preferences", "people", "routines", "decision", "fact"]
+            let rank = Dictionary(
+                uniqueKeysWithValues: priority.enumerated().map { ($1, $0) }
+            )
+            let ordered = others.sorted { left, right in
+                let leftRank = rank[left.area] ?? priority.count
+                let rightRank = rank[right.area] ?? priority.count
+                if leftRank != rightRank { return leftRank < rightRank }
+                if left.pinned != right.pinned { return left.pinned }
+                let leftScore = relevance[left.id] ?? 0
+                let rightScore = relevance[right.id] ?? 0
+                if leftScore != rightScore { return leftScore > rightScore }
+                return left.id < right.id
+            }
+
+            var result: [MemoryItem] = []
+            var used = 0
+            for item in Array(lessons) + ordered {
+                // R30.8: a record longer than the line limit is not chopped into the
+                // prompt at random. When the turn has a query, such a record enters only
+                // if search found it relevant; a pinned record always stays.
+                let isLesson = item.area == "lessons"
+                if !isLesson, !item.pinned, !relevance.isEmpty,
+                   item.content.count > Tuning.memoryPromptBodyChars,
+                   relevance[item.id] == nil {
+                    continue
+                }
+                let cost = TokenEstimator.tokens(in: item.promptText)
+                guard used + cost <= budgetTokens else { continue }
+                result.append(item)
+                used += cost
+            }
+            return result
+        }
+    }
+
+    /// R30.8: records created before the hash column was added were invisible to the
+    /// exact-duplicate check, so `memory_add` could not recognise what was already saved.
+    /// Backfill runs at launch and is idempotent.
+    @discardableResult
+    func backfillContentHashes() throws -> Int {
+        try database.queue.write { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT id, content FROM memory WHERE content_hash IS NULL OR content_hash = ''"
+            )
+            for row in rows {
+                let content: String = row["content"]
+                let id: Int64 = row["id"]
+                try db.execute(
+                    sql: "UPDATE memory SET content_hash = ? WHERE id = ?",
+                    arguments: [Self.hash(content), id]
+                )
+            }
+            return rows.count
         }
     }
 
