@@ -179,6 +179,8 @@ final class ChatStore {
             return
         }
 
+        announceEnvironmentIfNeeded()
+
         let assistantID = appendAssistant()
 
         isStreaming = true
@@ -192,6 +194,16 @@ final class ChatStore {
         let message = ChatMessage(role: .assistant, text: "", state: .streaming)
         messages.append(message)
         return messages[messages.count - 1].id
+    }
+
+    /// R35: on the first turn of a fresh chat, say once what this machine is missing.
+    /// A separate system line, not part of the answer: it must never be sent to the
+    /// model as if the assistant had said it, and it must not repeat on every launch.
+    private func announceEnvironmentIfNeeded() {
+        guard !messages.contains(where: { $0.role == .user }) else { return }
+        let lines = EnvironmentNoticeStore().takeNotices(current: EnvironmentCheck.state())
+        guard !lines.isEmpty else { return }
+        notice(lines.joined(separator: "\n\n"))
     }
 
     private func runTurn(text: String, attachments: [ChatAttachment], assistantID initialID: UUID) async {

@@ -272,7 +272,15 @@ struct ToolRegistry: Sendable {
             if repeatGuard.shouldRefuse(name: allowed.name, arguments: allowed.arguments) {
                 return .fail(ToolRepeatGuard.refusal)
             }
-            let result = await executeAllowed(allowed)
+            var result = await executeAllowed(allowed)
+            // R35.4: a missing binary is a machine fact, not a tool bug. Answer with the
+            // same sentence a person saw at launch instead of `command not found`.
+            if result.isError,
+               let human = EnvironmentCheck.toolError(
+                    tool: allowed.name, output: result.output, state: EnvironmentCheck.state()
+               ) {
+                result = .fail(human)
+            }
             repeatGuard.record(name: allowed.name, arguments: allowed.arguments, output: result.output)
             return await interceptors.after(allowed, result: result, context: context)
         }
