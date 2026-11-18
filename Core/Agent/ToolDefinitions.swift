@@ -155,6 +155,7 @@ extension ToolRegistry {
         ),
         ToolDefinition(
             name: "windows",
+            exposure: .deferred,
             description: "On-screen windows (id for screenshot) or running apps; bounds in points and pixels.",
             parameters: schema([
                 "action": ["type": "string", "enum": ["list", "apps", "move", "resize", "minimize", "close", "fullscreen", "to_display"]],
