@@ -226,6 +226,19 @@ extension ToolRegistry {
             ], required: ["action", "x", "y"])
         ),
         ToolDefinition(
+            name: "apps",
+            exposure: .deferred,
+            description: "List running apps; open a file, URL or app; activate, hide or quit (quit needs confirm).",
+            parameters: schema([
+                "action": ["type": "string", "enum": ["list", "open", "activate", "hide", "quit"]],
+                "target": ["type": "string", "description": "open: path or URL"],
+                "path": ["type": "string", "description": "open: alias for target"],
+                "app": ["type": "string", "description": "name or bundle id"],
+                "pid": ["type": "integer"],
+                "confirm": ["type": "boolean", "description": "quit"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "notify",
             exposure: .deferred,
             description: "Send a macOS notification with a title and body; refuses honestly when authorization is denied.",
