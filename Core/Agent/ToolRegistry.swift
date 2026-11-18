@@ -45,6 +45,22 @@ final class ToolCatalogState: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return loaded.sorted()
     }
+
+    /// R32.2: tools the model already reached for this session. A tool used two steps
+    /// ago is almost always still relevant, and this is the cheapest possible signal.
+    private var used: [String] = []
+
+    func recordUse(_ name: String) {
+        lock.lock(); defer { lock.unlock() }
+        used.removeAll { $0 == name }
+        used.append(name)
+        if used.count > 12 { used.removeFirst(used.count - 12) }
+    }
+
+    func recentlyUsed() -> Set<String> {
+        lock.lock(); defer { lock.unlock() }
+        return Set(used)
+    }
 }
 
 /// Stateless dispatcher: every dependency is an injected actor or a value.
@@ -196,20 +212,41 @@ struct ToolRegistry: Sendable {
             if let skillScope, !(await skillScope.allows(definition.name)) { continue }
             allowed.append(definition)
         }
-        var result = allowed.map { definition -> ProviderToolSchema in
+        // R32.2: deferred tools are chosen for this turn instead of all being hidden
+        // behind one line. The ranking sees the user's message, so "поставь будильник"
+        // brings `schedule_add` in full; everything else stays a name and one line, and
+        // tools that do not fit the budget are left out entirely.
+        let selection = ToolSelector.select(
+            definitions: allowed,
+            query: currentUserMessage ?? "",
+            recent: catalog.recentlyUsed(),
+            loaded: Set(catalog.loadedNames())
+        )
+
+        var result: [ProviderToolSchema] = []
+        for definition in allowed {
             if definition.exposure == .deferred, !catalog.isLoaded(definition.name) {
-                // One line is enough to know the tool exists and ask for its schema.
-                return ProviderToolSchema(
-                    name: definition.name,
-                    description: Self.compactDescription(definition),
-                    parameters: ["type": AnySendable("object"), "properties": AnySendable([String: Any]())]
-                )
+                if selection.expanded.contains(definition.name) {
+                    result.append(ProviderToolSchema(
+                        name: definition.name,
+                        description: definition.description,
+                        parameters: definition.parameters
+                    ))
+                } else if selection.compact.contains(definition.name) {
+                    // One line is enough to know the tool exists and ask for its schema.
+                    result.append(ProviderToolSchema(
+                        name: definition.name,
+                        description: Self.compactDescription(definition),
+                        parameters: ["type": AnySendable("object"), "properties": AnySendable([String: Any]())]
+                    ))
+                }
+                continue
             }
-            return ProviderToolSchema(
+            result.append(ProviderToolSchema(
                 name: definition.name,
                 description: definition.description,
                 parameters: definition.parameters
-            )
+            ))
         }
 
         if let mcpManager, !readOnly {
@@ -296,6 +333,7 @@ struct ToolRegistry: Sendable {
                 result = .fail(result.output + "\n\n" + hint)
             }
             repeatGuard.record(name: allowed.name, arguments: allowed.arguments, output: result.output)
+            catalog.recordUse(allowed.name)
             return await interceptors.after(allowed, result: result, context: context)
         }
     }

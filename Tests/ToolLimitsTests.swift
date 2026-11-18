@@ -436,6 +436,23 @@ final class ToolLimitsTests: XCTestCase {
         XCTAssertLessThanOrEqual(sent, Tuning.schemaTokenBudget, "\(sent) токенов на \(ToolRegistry.definitions.count) инструментов")
     }
 
+    func testSchemasFollowTheUserMessage() async {
+        // R32.2: the message decides which deferred tools arrive with full parameters.
+        var registry = ToolRegistry(
+            workspace: URL(fileURLWithPath: NSTemporaryDirectory()),
+            memory: nil, embeddings: nil, secrets: nil, skills: nil, mcp: nil
+        )
+        registry.currentUserMessage = "поставь будильник на семь утра"
+        let schemas = await registry.schemas()
+
+        let alarm = schemas.first { $0.name == "schedule_add" }
+        XCTAssertNotNil(alarm, "инструмент напоминаний должен присутствовать")
+        let properties = alarm?.parameters["properties"]?.value as? [String: Any]
+        XCTAssertFalse(properties?.isEmpty ?? true, "у выбранного инструмента должна быть полная схема")
+        let cost = await registry.schemaTokenCost()
+        XCTAssertLessThanOrEqual(cost, Tuning.schemaTokenBudget)
+    }
+
     // MARK: - argument coercion
 
     func testStringNumbersAreAcceptedAsIntegers() async throws {
@@ -610,6 +627,35 @@ final class ToolLimitsTests: XCTestCase {
 
         XCTAssertFalse(result.isError, result.output)
         XCTAssertTrue(result.output.contains("hello from home"), result.output)
+    }
+
+    func testToolSelectionFitsTheBudgetAndPullsTheAlarm() throws {
+        // R32.2: "поставь будильник" must bring the scheduling tool in full, and the
+        // whole catalog must still fit the unchanged schema budget.
+        let selection = ToolSelector.select(
+            definitions: ToolRegistry.definitions, query: "поставь будильник на 7 утра"
+        )
+        XCTAssertTrue(selection.expanded.contains("schedule_add"), "\(selection.expanded)")
+        XCTAssertLessThanOrEqual(selection.tokens, Tuning.schemaTokenBudget)
+        XCTAssertFalse(selection.compact.isEmpty, "остальные инструменты должны быть видны")
+    }
+
+    func testToolSelectionKeepsCoreAlways() {
+        let selection = ToolSelector.select(definitions: ToolRegistry.definitions, query: "")
+        let coreNames = Set(
+            ToolRegistry.definitions
+                .filter { $0.exposure == .core || $0.exposure == .normal }
+                .map(\.name)
+        )
+        XCTAssertTrue(selection.expanded.isDisjoint(with: coreNames))
+        XCTAssertTrue(selection.dropped.isDisjoint(with: coreNames))
+    }
+
+    func testEmptyQueryExpandsNothingButKeepsTheCatalogVisible() {
+        let selection = ToolSelector.select(definitions: ToolRegistry.definitions, query: "")
+        XCTAssertTrue(selection.expanded.isEmpty)
+        XCTAssertFalse(selection.compact.isEmpty)
+        XCTAssertLessThanOrEqual(selection.tokens, Tuning.schemaTokenBudget)
     }
 
     func testSchemasStateTheirLimits() throws {
