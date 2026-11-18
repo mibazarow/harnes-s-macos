@@ -349,6 +349,13 @@ final class ChatStore {
             await calibration.record(
                 providerID: provider.id, model: model, measured: measured, estimated: estimated
             )
+            // R31.4: the estimate is what the window and the compaction trigger are
+            // built from, so a silent drift is a budget bug nobody sees. One line per
+            // request, with the twenty-request average next to it.
+            let drift = await calibration.drift(providerID: provider.id, model: model)
+            Self.logLatency(TokenCalibration.logLine(
+                measured: measured, estimated: estimated, drift: drift
+            ))
         }
 
         var corrected = false
