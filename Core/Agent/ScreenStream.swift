@@ -19,9 +19,6 @@ enum ScreenStream {
     /// changed" without listing individual pixels.
     static let gridWidth = 16
     static let gridHeight = 10
-    /// A block counts as changed when this share of its pixels differs.
-    static let blockThreshold = 0.02
-
     static func grayscale(_ image: CGImage) -> [UInt8]? {
         var bytes = [UInt8](repeating: 0, count: gridWidth * gridHeight)
         guard let context = bytes.withUnsafeMutableBytes({ buffer -> CGContext? in

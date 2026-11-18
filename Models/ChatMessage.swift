@@ -169,7 +169,6 @@ struct ToolExchange: Sendable, Equatable {
     let isTrivial: Bool
 
     static let historyOutputLimit = 4_000
-    static let historyArgumentLimit = 8_000
     /// A string value longer than this is a payload, not a parameter, and gets replaced.
     private static let argumentValueLimit = 2_000
 

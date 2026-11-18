@@ -185,8 +185,6 @@ enum FalseSuccessGuard {
     Последний инструмент вернул ошибку — действие могло не выполниться.     Проверь результат сам.
     """
 
-    static let unverifiedSuccessNote = noToolNote
-
     /// How much of the answer is inspected for a claim.
     private static let claimWindow = 400
     /// A success claim in a wall of text is not a success claim.
