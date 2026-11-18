@@ -398,6 +398,32 @@ extension ToolRegistry {
             ], required: ["query"])
         ),
         ToolDefinition(
+            name: "calendar",
+            exposure: .deferred,
+            description: "Calendar and reminders via EventKit: events, create/update/delete (delete needs confirm and only own events), calendars, free_busy, reminders. ISO-8601 dates only.",
+            parameters: schema([
+                "action": ["type": "string", "enum": [
+                    "events", "create_event", "update_event", "delete_event", "calendars",
+                    "free_busy", "reminders", "create_reminder", "complete_reminder"
+                ]],
+                "id": ["type": "string", "description": "Event or reminder identifier"],
+                "title": ["type": "string"],
+                "start": ["type": "string", "description": "ISO-8601, e.g. 2026-11-19T10:00:00+03:00"],
+                "end": ["type": "string", "description": "ISO-8601; default start + duration"],
+                "due": ["type": "string", "description": "Reminder due, ISO-8601"],
+                "from": ["type": "string", "description": "Range start, ISO-8601"],
+                "to": ["type": "string", "description": "Range end, ISO-8601"],
+                "duration": ["type": "integer", "description": "Minutes, default 60"],
+                "calendar": ["type": "string", "description": "Calendar title substring"],
+                "location": ["type": "string"], "notes": ["type": "string"],
+                "alarm_minutes": ["type": "integer", "description": "Alarm N minutes before"],
+                "recurrence": ["type": "string", "enum": ["daily", "weekly", "monthly"]],
+                "all_day": ["type": "boolean"],
+                "limit": ["type": "integer"],
+                "confirm": ["type": "boolean", "description": "Required for delete_event"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "settings",
             exposure: .deferred,
             description: "Shell and appearance: appearance, wallpaper, dock, menu_bar, hot_corners, focus, screensaver, accessibility; confirm.",

@@ -350,6 +350,7 @@ struct ToolRegistry: Sendable {
             case "display": return await displayTool(args)
             case "launchd": return await launchdTool(args)
             case "settings": return await settingsTool(args)
+            case "calendar": return await calendarTool(args)
             case "windows": return windowsTool(args)
             case "shortcut": return await shortcutTool(args)
             case "app_script": return await appScriptTool(args)

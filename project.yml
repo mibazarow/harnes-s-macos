@@ -81,6 +81,11 @@ targets:
         LSApplicationCategoryType: public.app-category.productivity
         NSHumanReadableCopyright: ""
         NSLocalNetworkUsageDescription: "HARNES-S подключается к локальным LLM-серверам и SSH-хостам."
+        NSCalendarsFullAccessUsageDescription: "HARNES-S читает и создаёт события в календарях по прямой просьбе."
+        NSCalendarsWriteOnlyAccessUsageDescription: "HARNES-S создаёт события в календаре по прямой просьбе."
+        NSRemindersFullAccessUsageDescription: "HARNES-S читает и создаёт напоминания по прямой просьбе."
+        NSContactsUsageDescription: "HARNES-S ищет контакты, чтобы найти телефон или почту по имени."
+        NSAppleEventsUsageDescription: "HARNES-S управляет приложениями через Apple Events по прямой просьбе."
         NSDocumentsFolderUsageDescription: "HARNES-S работает с файлами в выбранных рабочих папках."
         NSDesktopFolderUsageDescription: "HARNES-S работает с файлами в выбранных рабочих папках."
         NSDownloadsFolderUsageDescription: "HARNES-S работает с файлами в выбранных рабочих папках."

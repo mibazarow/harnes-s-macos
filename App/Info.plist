@@ -24,6 +24,14 @@
 	<string>public.app-category.productivity</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>27.0</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>HARNES-S управляет приложениями через Apple Events по прямой просьбе.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>HARNES-S читает и создаёт события в календарях по прямой просьбе.</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>HARNES-S создаёт события в календаре по прямой просьбе.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>HARNES-S ищет контакты, чтобы найти телефон или почту по имени.</string>
 	<key>NSDesktopFolderUsageDescription</key>
 	<string>HARNES-S работает с файлами в выбранных рабочих папках.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
@@ -34,5 +42,7 @@
 	<string></string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>HARNES-S подключается к локальным LLM-серверам и SSH-хостам.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>HARNES-S читает и создаёт напоминания по прямой просьбе.</string>
 </dict>
 </plist>
