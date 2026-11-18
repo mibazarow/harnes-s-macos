@@ -177,8 +177,13 @@ struct AgentLoop: Sendable {
                                 remaining: runOutputBudget - runOutputChars
                             )
                             runOutputChars += content.count
+                            // R30.1: the envelope goes on where the result enters the
+                            // history. Errors stay raw: an error text is useful as-is.
+                            let guarded = Self.guardedToolContent(
+                                content, tool: call.name, isError: result.isError
+                            )
                             messages.append(ProviderMessage(
-                                role: .tool, content: content, toolCallID: call.id
+                                role: .tool, content: guarded, toolCallID: call.id
                             ))
                         }
 
@@ -273,6 +278,13 @@ struct AgentLoop: Sendable {
     ]
 
     /// Results in call order; `nil` means the run was cancelled before that call.
+    /// R30.1: one place decides whether a result is foreign data. Kept as a function so
+    /// the "exactly one pair of tags" property is tested on the real code path.
+    static func guardedToolContent(_ content: String, tool: String, isError: Bool) -> String {
+        guard !isError, UntrustedContent.isUntrusted(tool: tool) else { return content }
+        return UntrustedContent.wrap(content, source: tool)
+    }
+
     static func runCalls(_ calls: [ToolCall], registry: ToolRegistry) async -> [ToolResult?] {
         var results = [ToolResult?](repeating: nil, count: calls.count)
         var index = 0
