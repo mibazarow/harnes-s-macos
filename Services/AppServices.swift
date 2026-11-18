@@ -27,11 +27,14 @@ struct AppServices: Sendable {
     /// R20.4: the project root, shared by every registry so `workspace set` applies to
     /// the tools of the same turn.
     let workspaceState = WorkspaceState(AppPaths.workspaceDirectory)
+    /// R30.5: mutating actions claim a row before they run.
+    let operations: OperationLedger
     /// Installs the embedding model into the data folder after a fresh install.
     let modelInstaller: EmbeddingModelInstaller?
 
     init(database: AppDatabase, modelInstaller: EmbeddingModelInstaller? = nil) {
         self.database = database
+        self.operations = OperationLedger(database: database)
         let providers = ProvidersService(database: database)
         self.providers = providers
         self.secrets = SecretsService(database: database)

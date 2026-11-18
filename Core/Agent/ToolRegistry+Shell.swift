@@ -18,12 +18,46 @@ extension ToolRegistry {
         // The detached task does not inherit cancellation, so the handler has to reach
         // the child through the shared box: otherwise Stop returns to the user while a
         // build keeps running until its own timeout.
-        var output = try await withTaskCancellationHandler {
-            try await Task.detached(priority: .userInitiated) {
-                try Self.runSync(command, cwd: workspace, timeout: timeout, cancellation: cancellation)
-            }.value
-        } onCancel: {
-            cancellation.cancel()
+        // R30.5: the claim goes in before the command is sent, so a lost answer can be
+        // refused later instead of being repeated.
+        let argsHash = OperationLedger.argsHash(command, String(timeout))
+        var claimID: Int64?
+        if let operations {
+            switch try await operations.claim(tool: "bash", argsHash: argsHash) {
+            case .refused(let reason):
+                return .fail(reason)
+            case .allowed(let id):
+                claimID = id
+            }
+        }
+
+        var output: String
+        do {
+            output = try await withTaskCancellationHandler {
+                try await Task.detached(priority: .userInitiated) {
+                    try Self.runSync(command, cwd: workspace, timeout: timeout, cancellation: cancellation)
+                }.value
+            } onCancel: {
+                cancellation.cancel()
+            }
+        } catch {
+            // A timeout or a stop means the command was already sent: its effect is
+            // unknown, not failed.
+            let nsError = error as NSError
+            let sent = error is CancellationError
+                || (nsError.domain == "Harness" && nsError.code == 1)
+            let outcome: OperationOutcome = sent ? .unknown : .failed
+            if let claimID { try? await operations?.finish(claimID, outcome: outcome) }
+            guard outcome == .unknown else { throw error }
+            // The caller still gets an error — the command did not finish — but the text
+            // now says the effect is unknown and repeating is forbidden.
+            throw NSError(domain: "Harness", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: error.localizedDescription + "\n" + (outcome.line ?? "")
+            ])
+        }
+        if let claimID {
+            let exitCode = Self.exitCode(of: output)
+            try? await operations?.finish(claimID, outcome: exitCode == 0 ? .done : .failed)
         }
 
         // macOS tools treat bytes as multibyte characters in a UTF-8 locale and bail out
@@ -137,6 +171,11 @@ extension ToolRegistry {
         let merged = [out, err].filter { !$0.isEmpty }.joined(separator: "\n--- stderr ---\n")
         let exitCode = (status & 0x7F) == 0 ? (status >> 8) & 0xFF : 128 + (status & 0x7F)
         return "exit \(exitCode)\n" + merged
+    }
+
+    static func exitCode(of output: String) -> Int {
+        guard output.hasPrefix("exit ") else { return 1 }
+        return Int(output.dropFirst(5).prefix { $0.isNumber }) ?? 1
     }
 
     private enum StopReason {

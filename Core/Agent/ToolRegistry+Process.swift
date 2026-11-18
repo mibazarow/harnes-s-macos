@@ -25,12 +25,31 @@ extension ToolRegistry {
                 return .fail("command обязателен для action=run")
             }
             let cwd = resolve(args["cwd"] as? String ?? ".")
+            // R30.5: the same guard as `bash` — a start whose answer was lost must not be
+            // repeated by a model that never saw the id.
+            let argsHash = OperationLedger.argsHash(command, cwd.path)
+            var claimID: Int64?
+            if let operations {
+                do {
+                    switch try await operations.claim(tool: "process_run", argsHash: argsHash) {
+                    case .refused(let reason):
+                        return .fail(reason)
+                    case .allowed(let id):
+                        claimID = id
+                    }
+                } catch {
+                    return .fail("Журнал операций недоступен: \(error.localizedDescription)")
+                }
+            }
             do {
                 let started = try await processes.run(command: command, cwd: cwd)
+                if let claimID { try? await operations?.finish(claimID, outcome: .done) }
                 return .ok("Запущено: id=\(started.id) pid=\(started.pid)\n"
                     + "process logs id=\(started.id) — вывод; process wait id=\(started.id) — дождаться.")
             } catch {
-                return .fail(error.localizedDescription)
+                if let claimID { try? await operations?.finish(claimID, outcome: .unknown) }
+                return .fail("Процесс не подтвердил запуск: \(error.localizedDescription)\n"
+                    + (OperationOutcome.unknown.line ?? ""))
             }
 
         case "list":

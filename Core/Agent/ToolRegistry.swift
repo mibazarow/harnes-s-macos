@@ -61,6 +61,8 @@ struct ToolRegistry: Sendable {
     var currentUserMessageID: Int64?
     /// R30.4: a subagent may read learned skills and report them, never write.
     var isSubagent: Bool = false
+    /// R30.5: the operations ledger, present in the app and absent in pure tests.
+    var operations: OperationLedger?
     let memory: MemoryService?
     let embeddings: EmbeddingsService?
     let secrets: SecretsService?
@@ -91,6 +93,7 @@ struct ToolRegistry: Sendable {
         currentUserMessage: String? = nil,
         currentUserMessageID: Int64? = nil,
         isSubagent: Bool = false,
+        operations: OperationLedger? = nil,
         memory: MemoryService?,
         embeddings: EmbeddingsService?,
         secrets: SecretsService?,
@@ -113,6 +116,7 @@ struct ToolRegistry: Sendable {
         self.currentUserMessage = currentUserMessage
         self.currentUserMessageID = currentUserMessageID
         self.isSubagent = isSubagent
+        self.operations = operations
         self.memory = memory
         self.embeddings = embeddings
         self.secrets = secrets

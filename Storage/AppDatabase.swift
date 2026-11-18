@@ -342,6 +342,22 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v14_operations") { db in
+            // R30.5: one row per mutating action, so a lost answer can never be repeated
+            // silently. Only `unknown` blocks the retry.
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS operations (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tool       TEXT NOT NULL,
+                    args_hash  TEXT NOT NULL,
+                    claimed_at TEXT NOT NULL,
+                    outcome    TEXT NOT NULL DEFAULT 'done'
+                );
+                CREATE INDEX IF NOT EXISTS operations_lookup
+                    ON operations (tool, args_hash, claimed_at);
+                """)
+        }
+
         return migrator
     }
 }
