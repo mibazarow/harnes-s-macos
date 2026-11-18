@@ -128,6 +128,8 @@ struct MemoryItem: Identifiable, Sendable, Equatable {
     var area: String = "fact"
     /// The verbatim fragment of the user's message that authorized this record.
     var quote: String?
+    /// R33.2: the record this one replaces. The old row stays, but out of the prompt.
+    var supersedesID: Int64?
     var score: Double?
 
     /// R30.8: `area/id`. The old slug was the first three words of the body, so every

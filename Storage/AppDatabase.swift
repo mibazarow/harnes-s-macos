@@ -437,6 +437,20 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v19_memory_supersedes") { db in
+            // R33.2: an outdated fact is replaced, not erased. The new row points at the
+            // one it supersedes; the old row stays readable by id and drops out of the
+            // prompt and of search.
+            let columns = try db.columns(in: "memory").map(\.name)
+            if !columns.contains("supersedes_id") {
+                try db.execute(sql: "ALTER TABLE memory ADD COLUMN supersedes_id INTEGER;")
+            }
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_memory_supersedes
+                    ON memory(supersedes_id);
+                """)
+        }
+
         return migrator
 
     }

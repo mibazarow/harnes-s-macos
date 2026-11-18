@@ -90,6 +90,9 @@ extension ToolRegistry {
                 + "или pinned: true, если пользователь прямо сказал «запомни».")
         }
 
+        let supersedesID = (args["supersedes_id"] as? Int64)
+            ?? (args["supersedes_id"] as? Int).map(Int64.init)
+            ?? (args["supersedes_id"] as? String).flatMap(Int64.init)
         let item = try await memory.add(
             text,
             kind: kind,
@@ -97,7 +100,8 @@ extension ToolRegistry {
             area: area,
             quote: quote,
             quoteMessageID: currentUserMessageID.map(String.init),
-            quoteVerified: true
+            quoteVerified: true,
+            supersedesID: supersedesID
         )
 
         if let embeddings {
@@ -110,7 +114,8 @@ extension ToolRegistry {
         }
 
         let mark = item.pinned ? " (закреплено)" : ""
-        return .ok("Запомнил #\(item.id)\(mark): \(item.content)")
+        let replaced = supersedesID.map { " Заменил #\($0), старая запись осталась по id." } ?? ""
+        return .ok("Запомнил #\(item.id)\(mark): \(item.content)\(replaced)")
     }
 
     func memoryForget(_ args: [String: Any]) async throws -> ToolResult {

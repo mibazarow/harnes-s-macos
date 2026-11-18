@@ -817,7 +817,8 @@ extension ToolRegistry {
                 "area": ["type": "string", "description": "about | preferences | people | routines | lessons | decision | fact"],
                 "quote": ["type": "string", "description": "Verbatim fragment of the user's message"],
                 "source_message_id": ["type": "string", "description": "Optional id of the user's message"],
-                "pinned": ["type": "boolean", "description": "true when the user asked to remember this explicitly"]
+                "pinned": ["type": "boolean", "description": "true when the user asked to remember this explicitly"],
+                "supersedes_id": ["type": "integer", "description": "Id of the outdated fact this one replaces; the old row stays readable by id"]
             ], required: ["text"])
         ),
         ToolDefinition(

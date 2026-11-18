@@ -21,7 +21,8 @@ actor MemoryService {
         area: String = "fact",
         quote: String? = nil,
         quoteMessageID: String? = nil,
-        quoteVerified: Bool = false
+        quoteVerified: Bool = false,
+        supersedesID: Int64? = nil
     ) throws -> MemoryItem {
         let content = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else {
@@ -31,7 +32,10 @@ actor MemoryService {
         // Exact content is the cheapest duplicate check; the fuzzy pass below still
         // catches paraphrases and is what the memory rules rely on.
         let hash = contentHash ?? Self.hash(content)
-        if let duplicate = try item(hash: hash) ?? nearDuplicate(of: content, scope: scope) {
+        // R33.2: a replacement is a new row by definition. Merging it into the record
+        // it supersedes would erase the change it exists to record.
+        if supersedesID == nil,
+           let duplicate = try item(hash: hash) ?? nearDuplicate(of: content, scope: scope) {
             let now = Timestamps.now()
             let mergedTags = tags.isEmpty ? duplicate.tags : Array(Set(duplicate.tags + tags)).sorted()
             let mergedPin = pinned || duplicate.pinned
@@ -73,11 +77,11 @@ actor MemoryService {
         let id: Int64 = try database.queue.write { db in
             try db.execute(sql: """
                 INSERT INTO memory (scope, content, kind, area, tags, source, pinned, content_hash,
-                    quote, quote_message_id, quote_verified, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    quote, quote_message_id, quote_verified, supersedes_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, arguments: [
                     scope, content, kind, area, tagsJSON, source, pinned ? 1 : 0, hash,
-                    quote, quoteMessageID, quoteVerified ? 1 : 0, now, now
+                    quote, quoteMessageID, quoteVerified ? 1 : 0, supersedesID, now, now
                 ])
             return db.lastInsertedRowID
         }
@@ -170,7 +174,7 @@ actor MemoryService {
     func list(limit: Int = 100) throws -> [MemoryItem] {
         try database.queue.read { db in
             try Row.fetchAll(db, sql: """
-                SELECT * FROM memory ORDER BY id DESC LIMIT ?
+                SELECT * FROM memory WHERE \(Self.activeClause) ORDER BY id DESC LIMIT ?
                 """, arguments: [limit])
             .map(Self.item(from:))
         }
@@ -183,6 +187,23 @@ actor MemoryService {
     func count() throws -> Int {
         try database.queue.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM memory") ?? 0
+        }
+    }
+
+    /// R33.2: a record replaced by a newer one stays on disk for the audit trail but is
+    /// no longer current. Everything that answers a query filters through this.
+    static let activeClause = """
+        id NOT IN (SELECT supersedes_id FROM memory WHERE supersedes_id IS NOT NULL)
+        """
+
+    /// Marks `newID` as the replacement of `oldID`. Both rows stay; only the old one
+    /// drops out of search and the prompt.
+    func supersede(old: Int64, with newID: Int64) throws {
+        try database.queue.write { db in
+            try db.execute(
+                sql: "UPDATE memory SET supersedes_id = ?, updated_at = ? WHERE id = ?",
+                arguments: [old, Timestamps.now(), newID]
+            )
         }
     }
 
@@ -203,10 +224,12 @@ actor MemoryService {
             // workspace chunks out of the prompt: they live in the same table.
             let lessons = try Row.fetchAll(db, sql: """
                 SELECT * FROM memory WHERE scope = 'user' AND area = 'lessons'
+                  AND \(Self.activeClause)
                 ORDER BY id DESC LIMIT 20
                 """).map(Self.item(from:)).reversed() as [MemoryItem]
             let others = try Row.fetchAll(db, sql: """
                 SELECT * FROM memory WHERE scope = 'user' AND area != 'lessons'
+                  AND \(Self.activeClause)
                 """).map(Self.item(from:))
 
             let priority = ["about", "preferences", "people", "routines", "decision", "fact"]
@@ -392,6 +415,9 @@ actor MemoryService {
                     FROM memory_fts
                     JOIN memory m ON m.id = memory_fts.rowid
                     WHERE memory_fts MATCH ?
+                      AND m.id NOT IN (
+                          SELECT supersedes_id FROM memory WHERE supersedes_id IS NOT NULL
+                      )
                     ORDER BY rank
                     LIMIT ?
                     """, arguments: [match, limit * 4])
@@ -429,7 +455,8 @@ actor MemoryService {
 
         let candidates = try database.queue.read { db in
             try Row.fetchAll(db, sql: """
-                SELECT * FROM memory WHERE scope = ? ORDER BY id DESC LIMIT 400
+                SELECT * FROM memory WHERE scope = ? AND \(Self.activeClause)
+                ORDER BY id DESC LIMIT 400
                 """, arguments: [scope])
             .map(Self.item(from:))
         }
@@ -509,7 +536,8 @@ actor MemoryService {
             hits: row["hits"] as Int? ?? 0,
             lastUsedAt: row["last_used_at"],
             area: row["area"] as String? ?? "fact",
-            quote: row["quote"] as String?
+            quote: row["quote"] as String?,
+            supersedesID: row["supersedes_id"] as Int64?
         )
     }
 }
