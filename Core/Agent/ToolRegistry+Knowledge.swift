@@ -139,7 +139,14 @@ extension ToolRegistry {
         guard let query = args["query"] as? String else { return .fail("query обязателен") }
 
         if let embeddings {
-            let hits = await HybridSearch(memory: memory, embeddings: embeddings).search(query)
+            let search = HybridSearch(
+                memory: memory,
+                embeddings: embeddings,
+                label: "memory_search",
+                log: { line in ChatStore.logLatency(line) }
+            )
+            let outcome = await search.searchDetailed(query)
+            let hits = outcome.hits
             guard !hits.isEmpty else { return .ok("Ничего не найдено.") }
             return .ok(hits.prefix(8).map { hit in
                 let source = hit.semanticScore != nil ? "semantic+fts" : "fts"

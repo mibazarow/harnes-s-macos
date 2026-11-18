@@ -128,7 +128,13 @@ extension ToolRegistry {
         let limit = max(1, min(Self.int(args, "limit") ?? 8, 30))
 
         if let embeddings {
-            let hits = await HybridSearch(memory: memory, embeddings: embeddings).search(query, limit: limit)
+            let search = HybridSearch(
+                memory: memory,
+                embeddings: embeddings,
+                label: "search_code",
+                log: { line in ChatStore.logLatency(line) }
+            )
+            let hits = await search.search(query, limit: limit)
             let codeHits = hits.filter { $0.item.kind == "code" }
             guard !codeHits.isEmpty else {
                 // No index yet: still answer, by scanning the working folder for the
