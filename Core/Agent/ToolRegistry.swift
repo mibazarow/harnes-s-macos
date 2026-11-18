@@ -218,7 +218,10 @@ struct ToolRegistry: Sendable {
             .split(separator: ".", maxSplits: 1, omittingEmptySubsequences: true)
             .first.map(String.init) ?? definition.description
         let short = first.count > 110 ? String(first.prefix(110)) + "…" : first
-        return short + " [schema: tool_load(\"\(definition.name)\")]"
+        // The name is already in the list above; the marker only has to say how to get
+        // the full schema. Spelling the tool name out here cost ~120 tokens across the
+        // catalog, which is the difference between fitting the budget and not.
+        return short + " [deferred: tool_load]"
     }
 
     func execute(_ call: ToolCall) async -> ToolResult {
@@ -290,7 +293,7 @@ struct ToolRegistry: Sendable {
             case "webfetch": return try await fetchURL(args)
             case "websearch": return try await webSearch(args)
             case "browser": return try await browser(args)
-            case "screenshot": return try screenshot(args)
+            case "screenshot": return try await screenshot(args)
             case "ocr": return try ocr(args)
             case "app_logs": return try await appLogs(args)
             case "doc_read": return try await docRead(args)
@@ -329,6 +332,7 @@ struct ToolRegistry: Sendable {
             case "spotlight": return await spotlightTool(args)
             case "workspace": return workspaceTool(args)
             case "power": return await powerTool(args)
+            case "display": return await displayTool(args)
             case "windows": return windowsTool(args)
             case "shortcut": return await shortcutTool(args)
             case "app_script": return await appScriptTool(args)

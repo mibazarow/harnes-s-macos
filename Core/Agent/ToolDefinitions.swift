@@ -190,7 +190,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "ui",
             exposure: .deferred,
-            description: "AX tree of an app, search by role/title/value, press or focus an element by path. Pixel fallback (find/click with image) is only for canvas, WebGL and games. Needs Accessibility; System Settings clicks need confirm.",
+            description: "AX tree, search, press or focus by path. Pixel fallback by image is for canvas and games only. Needs Accessibility; System Settings clicks need confirm.",
             parameters: schema([
                 "action": ["type": "string", "enum": ["tree", "find", "click", "set_value", "focus", "menu_list", "menu_click"]],
                 "app": ["type": "string", "description": "App name or bundle id; default frontmost"],
@@ -309,9 +309,29 @@ extension ToolRegistry {
             ], required: ["action"])
         ),
         ToolDefinition(
+            name: "display",
+            exposure: .deferred,
+            description: "Displays: list modes and layout, set_mode, arrangement, mirror, rotate, night_shift, restore_last. Changes need confirm.",
+            parameters: schema([
+                "action": ["type": "string", "enum": [
+                    "list", "set_mode", "arrangement", "mirror", "rotate", "night_shift", "restore_last"
+                ]],
+                "display": ["type": "integer", "description": "Display index from list"],
+                "width": ["type": "integer"], "height": ["type": "integer"],
+                "refresh": ["type": "number", "description": "Preferred refresh, default the highest"],
+                "x": ["type": "integer"], "y": ["type": "integer"],
+                "master": ["type": "integer", "description": "mirror: master display index"],
+                "degrees": ["type": "integer", "description": "rotate: 0 | 90 | 180 | 270"],
+                "value": ["type": ["boolean", "number", "string"],
+                          "description": "mirror on/off; night_shift on/off/0..100"],
+                "on": ["type": "boolean", "description": "night_shift: alias for value"],
+                "confirm": ["type": "boolean", "description": "Required for mutations"]
+            ], required: ["action"])
+        ),
+        ToolDefinition(
             name: "power",
             exposure: .deferred,
-            description: "Power, screen and sound: status, sleep, lock, display_off, caffeinate (seconds, off), low_power, brightness, volume, mute (input), media, audio devices, restart/shutdown (confirm, refuses with unsaved documents).",
+            description: "Power and sound: status, sleep, lock, caffeinate, brightness, volume, mute, media, audio, restart with confirm.",
             parameters: schema([
                 "action": ["type": "string", "enum": [
                     "status", "sleep", "lock", "display_off", "caffeinate", "low_power",
@@ -367,7 +387,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "workspace",
             exposure: .deferred,
-            description: "Show or switch the project root used by relative paths, git, search and the index. set needs an explicit path and confirm: true.",
+            description: "Project root for relative paths, git and search. set needs a path and confirm.",
             parameters: schema([
                 "action": ["type": "string", "enum": ["get", "set", "list"]],
                 "path": ["type": "string", "description": "set: absolute path or ~/..."],
@@ -519,7 +539,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "screenshot",
             exposure: .deferred,
-            description: "Capture the screen, a window, or a rectangle; returns the file path for image_read/ocr.",
+            description: "Capture the screen, a window (even if covered), or a rectangle; returns the file path for image_read/ocr.",
             parameters: schema([
                 "window_id": ["type": "integer"],
                 "window": ["type": "string", "description": "Window title substring; resolved to id"],

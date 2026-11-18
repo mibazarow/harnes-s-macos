@@ -100,6 +100,11 @@ final class AppModel {
         self.chat = ChatStore(services: services)
         self.providerDirectory = ProviderDirectory(service: services?.providers)
 
+        // R25.2: the layout at launch is the known-good state for `display restore_last`.
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+            DisplayLayoutStore.save(DisplayControl.layout())
+        }
+
         // R18.11: system-wide stop for a runaway GUI loop. If the combination is taken,
         // the app still stops from the Stop button; the hotkey is reported, not faked.
         let hotkeyInstalled = GlobalStopHotkey.shared.install {

@@ -161,7 +161,7 @@ extension ToolRegistry {
     }
     """
 
-    func screenshot(_ args: [String: Any]) throws -> ToolResult {
+    func screenshot(_ args: [String: Any]) async throws -> ToolResult {
         try AppPaths.ensureDirectory(AppPaths.artifactsDirectory)
         let path: URL
         if let saveTo = args["save_to"] as? String, !saveTo.isEmpty {
@@ -175,11 +175,26 @@ extension ToolRegistry {
                 .appendingPathComponent("screen-\(UUID().uuidString.prefix(8)).png")
         }
 
+        // R25.2: ScreenCaptureKit takes a window frame even when the window is covered
+        // or lives on another Space; `screencapture -l` does not. Fall back only if the
+        // capture itself fails, not because the API is newer.
+        let windowID: Int? = {
+            if let id = Self.int(args, "window_id") { return id }
+            if let name = args["window"] as? String, !name.isEmpty {
+                return Self.windowID(named: name)
+            }
+            return nil
+        }()
+        if let windowID, await WindowCapture.capture(windowID: CGWindowID(windowID), to: path) {
+            Self.resampleIfNeeded(path, scaleDown: Self.double(args, "scale_down"),
+                                  maxHeight: Self.int(args, "max_height"))
+            return .ok("Скриншот окна (ScreenCaptureKit): \(path.path)\n"
+                + "Размер: \(Self.humanSize(FileLines.fileSize(path))). "
+                + "Дальше: image_read(path:) для кропа/сжатия, ocr(path:) для текста.")
+        }
+
         var command = "screencapture -x"
-        if let windowID = Self.int(args, "window_id") {
-            command += " -o -l \(windowID)"
-        } else if let name = args["window"] as? String, !name.isEmpty,
-                  let windowID = Self.windowID(named: name) {
+        if let windowID {
             command += " -o -l \(windowID)"
         }
         if let clip = args["clip"] as? [String: Any],
