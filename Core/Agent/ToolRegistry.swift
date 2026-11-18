@@ -91,6 +91,8 @@ struct ToolRegistry: Sendable {
     /// I34: the same call returning the same result twice is a dead end; the third is
     /// refused before it runs. Shared by value copies of this registry.
     let repeatGuard: ToolRepeatGuard
+    /// R32.3: the stop token, shared with the turn. Long tools subscribe to it.
+    let cancel: AgentAbortSignal
 
     init(
         workspace: URL,
@@ -117,7 +119,8 @@ struct ToolRegistry: Sendable {
         interceptors: ToolInterceptorChain = ToolInterceptorChain(),
         catalog: ToolCatalogState = ToolCatalogState(),
         processes: BackgroundProcessService? = nil,
-        repeatGuard: ToolRepeatGuard = ToolRepeatGuard()
+        repeatGuard: ToolRepeatGuard = ToolRepeatGuard(),
+        cancel: AgentAbortSignal = .shared
     ) {
         self.workspaceState = workspaceState ?? WorkspaceState(workspace)
         self.currentUserMessage = currentUserMessage
@@ -143,6 +146,7 @@ struct ToolRegistry: Sendable {
         self.interceptors = interceptors
         self.catalog = catalog
         self.repeatGuard = repeatGuard
+        self.cancel = cancel
     }
 
     static let mutatingTools: Set<String> = [
@@ -264,7 +268,12 @@ struct ToolRegistry: Sendable {
     }
 
     func execute(_ call: ToolCall) async -> ToolResult {
-        let context = ToolCallContext(workspace: workspace, readOnly: readOnly)
+        let context = ToolCallContext(workspace: workspace, readOnly: readOnly, cancel: cancel)
+        // R32.3: the token is checked before every call, not only GUI ones. A stop must
+        // not be followed by "well, the next tool still ran".
+        if let reason = cancel.current {
+            return .fail("аварийный стоп: \(reason). Ход остановлен, действие не выполнено.")
+        }
         switch await interceptors.before(call, context: context) {
         case .denied(let result):
             return result

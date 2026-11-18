@@ -15,7 +15,12 @@ enum FileWatcher {
     /// Collects events for `duration` and returns them. Runs the stream on the calling
     /// thread's run loop: the whole point is to block until something happens or the
     /// window closes, and a background loop would need its own coordination for nothing.
-    static func collect(paths: [String], duration: TimeInterval, since: FSEventStreamEventId) -> [Event] {
+    static func collect(
+        paths: [String],
+        duration: TimeInterval,
+        since: FSEventStreamEventId,
+        shouldStop: @Sendable () -> Bool = { false }
+    ) -> [Event] {
         guard !paths.isEmpty else { return [] }
 
         let box = EventBox()
@@ -58,7 +63,13 @@ enum FileWatcher {
         FSEventStreamScheduleWithRunLoop(stream, CFRunLoopGetCurrent(), CFRunLoopMode.defaultMode.rawValue)
         guard FSEventStreamStart(stream) else { return [] }
 
-        CFRunLoopRunInMode(.defaultMode, duration, false)
+        // R32.3: a five-minute watch must not outlive a stop. The run loop is entered in
+        // short slices so the token is read while waiting, not after the window closes.
+        let deadline = Date().addingTimeInterval(duration)
+        while Date() < deadline {
+            if shouldStop() { break }
+            CFRunLoopRunInMode(.defaultMode, min(0.2, deadline.timeIntervalSinceNow), false)
+        }
         return box.snapshot()
     }
 
@@ -117,11 +128,18 @@ extension ToolRegistry {
         let duration = Double(min(max(Self.int(args, "duration_ms") ?? 5_000, 500), 120_000)) / 1_000
         let limit = min(max(Self.int(args, "limit") ?? 30, 1), 500)
         let started = Date()
+        let signal = cancel
         let events = FileWatcher.dedupe(
             FileWatcher.collect(
-                paths: paths, duration: duration, since: FSEventStreamEventId(kFSEventStreamEventIdSinceNow)
+                paths: paths,
+                duration: duration,
+                since: FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+                shouldStop: { signal.current != nil }
             )
         )
+        if signal.current != nil {
+            return .fail("Наблюдение прервано стопом.")
+        }
 
         guard !events.isEmpty else {
             return .ok("За \(Int(duration)) с в \(paths.joined(separator: ", ")) ничего не изменилось.")

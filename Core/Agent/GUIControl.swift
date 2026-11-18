@@ -176,20 +176,60 @@ final class AgentAbortSignal: @unchecked Sendable {
 
     private let lock = NSLock()
     private var reason: String?
+    /// R32.3: a long call cannot be asked between steps, so it subscribes instead. The
+    /// stop hotkey sets the flag without cancelling the turn task; this is how a running
+    /// `bash` or `process wait` learns about it.
+    private var handlers: [UUID: @Sendable () -> Void] = [:]
 
     func abort(_ reason: String) {
-        lock.lock(); defer { lock.unlock() }
-        if self.reason == nil { self.reason = reason }
+        lock.lock()
+        // Only the transition into "stopped" wakes subscribers. A second stop while the
+        // turn is already unwinding must not cancel the child a second time.
+        let first = self.reason == nil
+        if first { self.reason = reason }
+        let callbacks = first ? Array(handlers.values) : []
+        if first { handlers.removeAll() }
+        lock.unlock()
+        // Outside the lock: a handler may take its own lock.
+        for callback in callbacks { callback() }
     }
 
     func clear() {
         lock.lock(); defer { lock.unlock() }
         reason = nil
+        handlers.removeAll()
     }
 
     var current: String? {
         lock.lock(); defer { lock.unlock() }
         return reason
+    }
+
+    /// Registers a one-shot reaction to the next abort. Returns a token for removal.
+    @discardableResult
+    func onAbort(_ handler: @escaping @Sendable () -> Void) -> UUID {
+        let token = UUID()
+        lock.lock()
+        let alreadyAborted = reason != nil
+        if !alreadyAborted { handlers[token] = handler }
+        lock.unlock()
+        if alreadyAborted { handler() }
+        return token
+    }
+
+    func removeHandler(_ token: UUID) {
+        lock.lock(); defer { lock.unlock() }
+        handlers[token] = nil
+    }
+
+    /// Sleeps in small slices so a caller stops promptly when the signal fires or the
+    /// task is cancelled, without each tool inventing its own poll interval.
+    func sleep(seconds: TimeInterval) async throws {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if Task.isCancelled || current != nil { throw CancellationError() }
+            try await Task.sleep(for: .milliseconds(100))
+        }
     }
 }
 

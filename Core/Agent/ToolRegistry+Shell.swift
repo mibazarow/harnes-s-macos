@@ -14,6 +14,10 @@ extension ToolRegistry {
         let timeout = TimeInterval(min(max(Self.int(args, "timeout_ms") ?? 60_000, 1_000), 600_000)) / 1_000
         let cancellation = ProcessCancellation()
         let workspace = self.workspace
+        // R32.3: the hotkey sets the stop token without cancelling this task, so the
+        // child process has to be reached through the same box as Stop.
+        let abortToken = cancel.onAbort { cancellation.cancel() }
+        defer { cancel.removeHandler(abortToken) }
 
         // The detached task does not inherit cancellation, so the handler has to reach
         // the child through the shared box: otherwise Stop returns to the user while a

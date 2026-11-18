@@ -128,7 +128,12 @@ actor BackgroundProcessService {
     }
 
     /// Waits for the process, then returns its exit code and the log tail.
-    func wait(id: String, timeout: TimeInterval, tailLines: Int = 20) async throws -> String {
+    func wait(
+        id: String,
+        timeout: TimeInterval,
+        tailLines: Int = 20,
+        cancel: AgentAbortSignal? = nil
+    ) async throws -> String {
         ensureLoaded()
         guard let entry = entries[id] else {
             throw NSError(domain: "Harness", code: 1, userInfo: [
@@ -137,6 +142,9 @@ actor BackgroundProcessService {
         }
         let deadline = Date().addingTimeInterval(timeout)
         while entries[id]?.exitCode == nil, Date() < deadline {
+            // R32.3: `try?` used to swallow cancellation, so a stop waited out the whole
+            // timeout. A stop is a stop: leave the loop and let the caller report it.
+            if Task.isCancelled || cancel?.current != nil { throw CancellationError() }
             try? await Task.sleep(for: .milliseconds(100))
             if !isAlive(entry.pid), entries[id]?.exitCode == nil {
                 entries[id]?.exitCode = -1

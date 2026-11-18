@@ -81,7 +81,10 @@ extension ToolRegistry {
             guard let id = args["id"] as? String else { return .fail("id обязателен") }
             let timeout = Double(min(max(Self.int(args, "timeout_ms") ?? 30_000, 1_000), 600_000)) / 1_000
             do {
-                return .ok(try await processes.wait(id: id, timeout: timeout))
+                return .ok(try await processes.wait(id: id, timeout: timeout, cancel: cancel))
+            } catch is CancellationError {
+                return .fail("Ожидание \(id) прервано стопом. Процесс продолжает работать; "
+                    + "его состояние — process action=info.")
             } catch { return .fail(error.localizedDescription) }
 
         default:

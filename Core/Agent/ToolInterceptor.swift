@@ -4,6 +4,16 @@ import Foundation
 struct ToolCallContext: Sendable {
     let workspace: URL
     let readOnly: Bool
+    /// R32.3: the stop token. Long calls subscribe to it; every call is checked against
+    /// it before it starts, so a stop from the hotkey, the Stop button or the link
+    /// channel reaches tools that have no UI of their own.
+    let cancel: AgentAbortSignal
+
+    init(workspace: URL, readOnly: Bool, cancel: AgentAbortSignal = .shared) {
+        self.workspace = workspace
+        self.readOnly = readOnly
+        self.cancel = cancel
+    }
 }
 
 /// What an interceptor decided about a call.

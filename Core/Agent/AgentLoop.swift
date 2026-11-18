@@ -78,7 +78,7 @@ struct AgentLoop: Sendable {
                     var sawTodo = false
                     var callsSinceTodoUpdate = 0
                     while true {
-                        if Task.isCancelled { break }
+                        if Task.isCancelled || AgentAbortSignal.shared.current != nil { break }
 
                         continuation.yield(.stepStarted(step))
 
@@ -97,7 +97,7 @@ struct AgentLoop: Sendable {
                         )
 
                         for try await event in stream {
-                            if Task.isCancelled { break }
+                            if Task.isCancelled || AgentAbortSignal.shared.current != nil { break }
                             switch event {
                             case .delta(let text):
                                 streamedText += text
@@ -120,7 +120,7 @@ struct AgentLoop: Sendable {
                             }
                         }
 
-                        if Task.isCancelled { break }
+                        if Task.isCancelled || AgentAbortSignal.shared.current != nil { break }
 
                         // A truncated answer is not a finished answer. Continuing with
                         // a new step here is exactly how "it starts over from the top"
@@ -291,7 +291,7 @@ struct AgentLoop: Sendable {
         var results = [ToolResult?](repeating: nil, count: calls.count)
         var index = 0
         while index < calls.count {
-            if Task.isCancelled { break }
+            if Task.isCancelled || AgentAbortSignal.shared.current != nil { break }
             if parallelSafeTools.contains(calls[index].name) {
                 var end = index
                 while end < calls.count, parallelSafeTools.contains(calls[end].name) { end += 1 }
