@@ -226,6 +226,13 @@ extension ChatStore {
         guard !contextMessages.isEmpty else { return false }
         let beforeTokens = promptMessages.reduce(0) { $0 + $1.tokens }
 
+        // R31.3: the fold is about to drop these messages. Pull durable facts out first,
+        // in one bounded request; a failure here must not stop the compaction that keeps
+        // the turn alive, so it is swallowed and only logged.
+        await extractFactsBeforeFolding(
+            contextMessages, provider: provider, model: model, services: services
+        )
+
         do {
             var summary = try await services.compaction.summarize(
                 messages: contextMessages,
@@ -275,6 +282,48 @@ extension ChatStore {
             compactionCooldownUntil = Date().addingTimeInterval(seconds)
             Self.logLatency("compaction failed (\(compactionFailures)x): \(error.localizedDescription)")
             return false
+        }
+    }
+
+    /// Best-effort fact extraction from the messages about to be folded (R31.3).
+    /// Only user text is read, every fact must carry a verified quote, and duplicates
+    /// merge into the existing record instead of piling up.
+    private func extractFactsBeforeFolding(
+        _ contextMessages: [ContextMessage],
+        provider: ProviderModel,
+        model: String,
+        services: AppServices
+    ) async {
+        let sources = FactExtraction.userText(from: contextMessages)
+        guard !sources.isEmpty else { return }
+
+        do {
+            let candidates = try await FactExtractor().extract(
+                messages: contextMessages, provider: provider, model: model
+            )
+            guard !candidates.isEmpty else {
+                Self.logLatency("facts_extracted candidates=0")
+                return
+            }
+            var saved = 0
+            for candidate in candidates {
+                do {
+                    _ = try await services.memory.add(
+                        candidate.content,
+                        kind: FactExtraction.kind(for: candidate.area),
+                        source: "compaction",
+                        area: candidate.area,
+                        quote: candidate.quote,
+                        quoteVerified: true
+                    )
+                    saved += 1
+                } catch {
+                    continue
+                }
+            }
+            Self.logLatency("facts_extracted candidates=\(candidates.count) saved=\(saved)")
+        } catch {
+            Self.logLatency("facts_extracted failed: \(error.localizedDescription)")
         }
     }
 
