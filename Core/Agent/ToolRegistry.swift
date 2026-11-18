@@ -280,6 +280,11 @@ struct ToolRegistry: Sendable {
                     tool: allowed.name, output: result.output, state: EnvironmentCheck.state()
                ) {
                 result = .fail(human)
+            } else if result.isError,
+                      let hint = GrantHint.line(for: result.output) {
+                // R32.1: a grant refusal names the panel. Nothing is granted here; the
+                // line only tells the person where the checkbox is.
+                result = .fail(result.output + "\n\n" + hint)
             }
             repeatGuard.record(name: allowed.name, arguments: allowed.arguments, output: result.output)
             return await interceptors.after(allowed, result: result, context: context)
