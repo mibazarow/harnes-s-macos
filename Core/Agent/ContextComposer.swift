@@ -97,6 +97,10 @@ struct WindowBudget: Sendable, Equatable {
     let usable: Int
     /// Point where automatic compaction starts.
     let thresholdTokens: Int
+    /// Point compaction aims for. Keeping the trigger and the target apart is the
+    /// difference between one fold and a fold on every following turn: landing exactly
+    /// on the threshold means the next request is over it again.
+    let targetTokens: Int
 }
 
 /// The few numbers the composer needs, without the plan's message arrays. A view that
@@ -151,6 +155,11 @@ struct ContextComposer: Sendable {
 
     /// Answer space is 15% of the window, at least 16k, but never more than half:
     /// below half the model would have less room to read than to speak.
+    ///
+    /// M32: the trigger and the target are two numbers. Compaction fires at
+    /// `thresholdPercent` and lands at `thresholdPercent - 20`, so a fold buys twenty
+    /// points of headroom instead of leaving the history on the line where the next
+    /// turn folds it again.
     func budget(for contextWindow: Int, thresholdPercent: Double) -> WindowBudget {
         let window = max(contextWindow, 1_000)
         let threshold = min(max(thresholdPercent, 10), 100)
@@ -160,11 +169,18 @@ struct ContextComposer: Sendable {
         let floor = max(usable / 2, 16_000)
         let ceiling = Int(Double(usable) * 0.85)
         let thresholdTokens = min(max(raw, min(floor, ceiling)), ceiling)
+
+        let targetPercent = max(threshold - 20, 10)
+        let rawTarget = Int(Double(usable) * targetPercent / 100)
+        let targetFloor = min(max(usable / 3, 8_000), thresholdTokens)
+        let targetTokens = min(max(rawTarget, targetFloor), thresholdTokens)
+
         return WindowBudget(
             window: window,
             outputReserve: outputReserve,
             usable: usable,
-            thresholdTokens: thresholdTokens
+            thresholdTokens: thresholdTokens,
+            targetTokens: targetTokens
         )
     }
 
@@ -181,10 +197,16 @@ struct ContextComposer: Sendable {
         let budgetInfo = budget(for: contextWindow, thresholdPercent: thresholdPercent)
         let window = budgetInfo.window
         let threshold = min(max(thresholdPercent, 10), 100)
-        let budget = budgetInfo.thresholdTokens
 
         // Tool schemas are sent with every request and are not part of the history.
         let fixed = systemTokens + summaryTokens + toolTokens
+        // M32: when everything fits under the trigger, nothing is folded. Once the
+        // trigger is crossed, the tail is fitted to the target, not to the trigger —
+        // otherwise the next turn is over the line again by construction.
+        let allTokens = messages.reduce(0) { $0 + scaled($1.tokens, by: estimateScale) }
+        let cap = fixed + allTokens <= budgetInfo.thresholdTokens
+            ? budgetInfo.thresholdTokens
+            : budgetInfo.targetTokens
         // The first messages carry the task statement. Losing them means the next agent
         // reads a summary of a summary and no longer knows what was asked.
         let protectedCount = min(protectedPrefixMessages, messages.count)
@@ -193,10 +215,10 @@ struct ContextComposer: Sendable {
         let rest = Array(messages.dropFirst(protectedCount))
 
         let oneTail = rest.last.map { scaled($0.tokens, by: estimateScale) } ?? 0
-        if fixed + protectedTokens + oneTail > budget {
+        if fixed + protectedTokens + oneTail > cap {
             // Even the protected prefix does not fit with the newest message. Keeping
             // the newest is the only way to answer, so the old behaviour wins here.
-            let kept = fitSuffix(messages, budget: max(budget - fixed, 0))
+            let kept = fitSuffix(messages, budget: max(cap - fixed, 0))
             return ContextPlan(
                 included: kept,
                 compacted: Array(messages.dropLast(kept.count)),
@@ -211,7 +233,7 @@ struct ContextComposer: Sendable {
 
         let minimumTail = Array(rest.suffix(minimumTailMessages))
         let minimumTailTokens = minimumTail.reduce(0) { $0 + scaled($1.tokens, by: estimateScale) }
-        guard fixed + protectedTokens + minimumTailTokens > budget else {
+        guard fixed + protectedTokens + minimumTailTokens > cap else {
             var used = fixed + protectedTokens
             var index = rest.count - 1
             var kept: [ContextMessage] = []
@@ -219,7 +241,7 @@ struct ContextComposer: Sendable {
             while index >= 0 {
                 let message = rest[index]
                 let cost = scaled(message.tokens, by: estimateScale)
-                if used + cost > budget { break }
+                if used + cost > cap { break }
                 used += cost
                 kept.insert(message, at: 0)
                 index -= 1
@@ -251,7 +273,7 @@ struct ContextComposer: Sendable {
         }
 
         // Not even the protected prefix plus the minimum tail fits.
-        let kept = fitSuffix(rest, budget: max(budget - fixed - protectedTokens, 0))
+        let kept = fitSuffix(rest, budget: max(cap - fixed - protectedTokens, 0))
         return ContextPlan(
             included: protectedMessages + kept,
             compacted: Array(rest.dropLast(kept.count)),

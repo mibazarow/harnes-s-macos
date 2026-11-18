@@ -55,6 +55,46 @@ final class CompactionPolicyTests: XCTestCase {
         XCTAssertLessThan(pessimistic.included.count, normal.included.count + 1)
     }
 
+    // MARK: - Hysteresis (M32)
+
+    func testCompactionLandsAtTargetNotAtTrigger() {
+        let composer = ContextComposer()
+        let budget = composer.budget(for: 100_000, thresholdPercent: 80)
+        XCTAssertEqual(budget.thresholdTokens, 67_200)
+        XCTAssertEqual(budget.targetTokens, 50_400)
+        XCTAssertLessThan(budget.targetTokens, budget.thresholdTokens)
+
+        // 81% of the usable budget: over the trigger, so one fold to the target.
+        let over = (0..<68).map { index in
+            ContextMessage(id: index, role: "user", text: "x", tokens: 1_000)
+        }
+        let plan = composer.plan(
+            systemPrompt: "", messages: over, contextWindow: 100_000, thresholdPercent: 80
+        )
+        XCTAssertTrue(plan.didCompact)
+        XCTAssertLessThanOrEqual(plan.usedTokens, budget.targetTokens)
+
+        // The fold must buy headroom: the next message does not cross the trigger again.
+        let next = plan.included + [ContextMessage(id: 99, role: "user", text: "x", tokens: 1_000)]
+        let second = composer.plan(
+            systemPrompt: "", messages: next, contextWindow: 100_000, thresholdPercent: 80
+        )
+        XCTAssertFalse(second.didCompact, "второй ход после свёртки не должен сжимать снова")
+    }
+
+    func testHistoryUnderTheTriggerIsNotFolded() {
+        let composer = ContextComposer()
+        // 79% of the usable budget: below the trigger.
+        let under = (0..<66).map { index in
+            ContextMessage(id: index, role: "user", text: "x", tokens: 1_000)
+        }
+        let plan = composer.plan(
+            systemPrompt: "", messages: under, contextWindow: 100_000, thresholdPercent: 80
+        )
+        XCTAssertFalse(plan.didCompact)
+        XCTAssertEqual(plan.included.count, under.count)
+    }
+
     // MARK: - Calibration (R9 / R11.2)
 
     func testCalibrationClampsAndPersists() async throws {
