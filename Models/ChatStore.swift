@@ -411,7 +411,10 @@ final class ChatStore {
                             promptTokens: 0, completionTokens: 0, costUSD: 0,
                             becauseKind: trustSession.decision(tool: name)?.basis.rawValue
                                 ?? (autopilot ? "autopilot" : "message"),
-                            becauseQuote: trustSession.decision(tool: name)?.quote ?? text
+                            // Autopilot records an empty quote: there was no question to
+                            // the checker, so the turn's message is the honest citation.
+                            becauseQuote: trustSession.decision(tool: name)
+                                .flatMap { $0.quote.isEmpty ? nil : $0.quote } ?? text
                         ))
                     case .usage(let promptTokens, let completionTokens, let cacheHit, let cacheMiss):
                         let ratio = promptTokens > 0 ? cacheHit * 100 / promptTokens : 0
