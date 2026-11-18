@@ -67,6 +67,10 @@ final class ChatStore {
     var revealID: UUID?
     /// Serialized tool catalog price for the current run, counted against the window.
     var schemaTokens: Int = 0
+    /// M39: fingerprint of the system prompt plus the tool catalog for the request in
+    /// flight. Logged next to `prompt_tokens` so a cold prefix is visible as a change,
+    /// not guessed from a low cache ratio.
+    var prefixHash: String = "-"
     /// Session-scoped catalog expansions; shared by the main loop and subagents.
     let toolCatalog = ToolCatalogState()
     /// Background children survive turns; the registry is rebuilt per turn, this is not.
@@ -313,8 +317,14 @@ final class ChatStore {
         )
         let prepMs = Self.millis(since: prepStart)
         let promptChars = history.reduce(0) { $0 + $1.content.count }
+        // The system prompt is final only after `buildHistory` has had its chance to
+        // compact and rebuild it; hashing earlier would describe a request that was
+        // never sent.
+        let schemas = await registry.schemas()
+        prefixHash = PromptPrefix.hash(system: history.first?.content ?? "", tools: schemas)
         Self.logLatency(
-            "prep_ms=\(prepMs) prompt_chars=\(promptChars) messages=\(history.count) model=\(model)"
+            "prep_ms=\(prepMs) prompt_chars=\(promptChars) messages=\(history.count) "
+            + "model=\(model) prefix_hash=\(prefixHash)"
         )
         let calibration = self.calibration
         var loop = AgentLoop(
@@ -421,7 +431,7 @@ final class ChatStore {
                         Self.logLatency(
                             "cache_hit=\(cacheHit) cache_miss=\(cacheMiss) "
                             + "prompt_tokens=\(promptTokens) completion_tokens=\(completionTokens) "
-                            + "cache_ratio=\(ratio)%"
+                            + "cache_ratio=\(ratio)% prefix_hash=\(prefixHash)"
                         )
                         estimateScale = await calibration.scale(providerID: provider.id, model: model)
                         do {
