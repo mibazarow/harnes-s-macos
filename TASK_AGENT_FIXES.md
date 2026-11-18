@@ -46,6 +46,7 @@
 | R20.1 | `cf2350f` | `windows list/apps` с id и координатами в точках и пикселях |
 | R20.2 | `ee271dc` | `git`: структурный status, fetch/pull/push(confirm)/branch/switch/merge/show/blame/conflicts |
 | R20.3 | `31cf9e8` | `app_script` (AppleScript/JXA) |
+| R25.11 | `355bcdc` | `system info/cpu/disk/permissions/tcc_panels`; инвентарь девяти грантов с путями панелей; `process` отложен ради бюджета |
 | R25.10 | `57b00dc` | `settings appearance/wallpaper/dock/menu_bar/hot_corners/focus/screensaver/accessibility`; запись с `confirm` и чтением назад |
 | R25.9 | `f77f469` | `network wifi/discover/vpn/proxy`; SSID с `needs_location`, Bonjour с портами, пароль не пишется |
 | R25.7 | `61230a7` | `screenshot stream`: кадры по окну, дифф по сетке 16×10, только изменённые блоки, последний изменённый кадр |
@@ -68,7 +69,6 @@
 
 | # | Пункт | Где смотреть | Что именно |
 | --- | --- | --- | --- |
-| 11 | R25.11 | раздел ниже | инвентарь грантов в `system` |
 | 12 | R26.1–R26.4 | раздел ниже | EventKit/Contacts/share/чтение уведомлений; нужны Info.plist |
 | 13 | R27.1–R27.2 | раздел ниже | глобальная клавиша, панель с выделением, наблюдение за вводом |
 | 14 | R30.1–R30.7 | раздел ниже | недоверенный контент, память с цитатой, уроки, self-skills, `unknown`, журнал, trust check |
@@ -502,7 +502,7 @@ DR провалится и гранты снова отвалятся. Вари�
 
 ## R25 — остальные аспекты машины: питание, дисплеи, звук, сеть, тома, поиск, оболочка, состояние
 
-**Статус: R25.1–R25.10, R25.12 закрыты; R25.11 открыт.** R18 даёт руки внутри приложений, R19 — экономику вызовов,
+**Статус: R25 закрыт полностью.** R18 даёт руки внутри приложений, R19 — экономику вызовов,
 R20 — рабочий цикл, R25 закрывает то, чем человек управляет **системно**: питание,
 яркость, громкость и устройства звука, режимы дисплеев и ночной режим, виртуальные рабочие
 столы, тома и DMG с печатью, сеть и Wi-Fi, Spotlight, автозапуск и Time Machine, внешний
@@ -765,6 +765,13 @@ RSSI; `discover` находит `_ssh._tcp` LLMSERVER; `vpn restart` возвр�
 из этого не должно оставаться включённым после хода «на память».
 
 ### R25.11 — `system`: состояние машины и инвентарь грантов
+
+**Закрыто (`355bcdc`)**: `system` — `info` (модель, чип, ядра, RAM, macOS+build,
+uptime, host, user, сессия и блокировка экрана), `cpu` (load + топ по CPU), `disk` (тома,
+размеры logs/trash/versions, топ-5 папок), `action=permissions` (Accessibility, Screen
+Recording, FDA пробой, Calendars/Reminders, Contacts, Location, Bluetooth, Automation через
+`AEDeterminePermissionToAutomateTarget` без диалога), `action=tcc_panels` (открыть панель).
+Тесты `GrantInventoryTests`. Гранты не выдаются кодом.
 
 `action: info | battery | thermal | cpu | memory | disk | permissions | tcc_panels`
 
