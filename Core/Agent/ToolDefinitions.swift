@@ -354,16 +354,23 @@ extension ToolRegistry {
         ToolDefinition(
             name: "network",
             exposure: .deferred,
-            description: "Network in one call: listening ports with owners, interfaces and gateway, DNS resolution, ping, HTTP status without the body. Read-only.",
+            description: "Network in one call: ports, interfaces, DNS, ping, HTTP status, Wi-Fi, Bonjour discovery, VPN, proxy.",
             parameters: schema([
-                "action": ["type": "string", "enum": ["ports", "interfaces", "dns", "ping", "http"]],
+                "action": ["type": "string", "enum": ["ports", "interfaces", "dns", "ping", "http", "wifi", "discover", "vpn", "proxy"]],
                 "port": ["type": "integer", "description": "ports: filter by port number"],
                 "filter": ["type": "string", "description": "ports: process or address substring"],
                 "host": ["type": "string", "description": "dns and ping target"],
                 "url": ["type": "string", "description": "http target"],
                 "method": ["type": "string", "description": "http method, default GET"],
                 "count": ["type": "integer", "description": "ping packets, default 3"],
-                "timeout_ms": ["type": "integer", "description": "ping timeout, default 5000"]
+                "timeout_ms": ["type": "integer", "description": "ping timeout, default 5000"],
+                "ssid": ["type": "string", "description": "wifi: join this network (needs confirm and password)"],
+                "password": ["type": "string", "description": "wifi: never logged"],
+                "scan": ["type": "boolean", "description": "wifi: list visible networks"],
+                "value": ["type": ["boolean", "string"], "description": "wifi radio on/off; vpn restart; proxy on/off"],
+                "types": ["type": "array", "items": ["type": "string"], "description": "discover: services, default ssh/http/smb/ipp"],
+                "service": ["type": "string", "description": "proxy: network service, default Wi-Fi"],
+                "confirm": ["type": "boolean", "description": "wifi join, vpn restart, proxy set"]
             ], required: ["action"])
         ),
         ToolDefinition(

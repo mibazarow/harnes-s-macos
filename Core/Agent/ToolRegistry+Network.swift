@@ -212,8 +212,109 @@ extension ToolRegistry {
             }
             return await Self.httpStatus(url, method: (args["method"] as? String)?.uppercased() ?? "GET")
 
+        case "wifi":
+            if let on = Self.bool(args, "value"), args["ssid"] == nil {
+                guard WiFiControl.setPower(on) else {
+                    return .fail("Wi-Fi радио не переключается (нет интерфейса или гранта).")
+                }
+                return .ok("Wi-Fi радио: \(on ? "включено" : "выключено").")
+            }
+            if let ssid = args["ssid"] as? String, !ssid.isEmpty {
+                guard Self.bool(args, "confirm") ?? false else {
+                    return .fail("wifi join требует confirm: true: это меняет сеть. "
+                        + "Пароль не пишется в журнал.")
+                }
+                let password = args["password"] as? String ?? ""
+                return WiFiControl.join(ssid: ssid, password: password)
+                    ? .ok("Подключение к «\(ssid)» отправлено.")
+                    : .fail("Не удалось подключиться к «\(ssid)»: сеть не видна или пароль неверен.")
+            }
+            if Self.bool(args, "scan") ?? false {
+                guard let visible = WiFiControl.scan() else {
+                    return .fail("Сканирование не удалось: нет интерфейса или гранта Location.")
+                }
+                let lines = visible.prefix(30).map { network in
+                    "\(network.ssid) rssi=\(network.rssi) ch=\(network.channel ?? "?")"
+                        + (network.secured ? " secured" : " open")
+                }
+                return .ok(lines.isEmpty ? "Сетей не видно." : lines.joined(separator: "\n"))
+            }
+            guard let status = WiFiControl.status() else {
+                return .fail("Wi-Fi интерфейса нет.")
+            }
+            var lines = [
+                "power: \(status.power ? "on" : "off")",
+                "ssid: \(status.ssid ?? WiFiControl.fallbackSSID() ?? "unknown")",
+                "bssid: \(status.bssid ?? "unknown")",
+                "rssi: \(status.rssi.map(String.init) ?? "?")",
+                "channel: \(status.channel ?? "?")",
+                "tx: \(status.transmitRate.map { String(format: "%.0f", $0) } ?? "?") Mbps"
+            ]
+            if status.needsLocation {
+                lines.append("needs_location: true — SSID/BSSID скрыты без гранта Location; "
+                    + "имя сети взято через networksetup, остальное недоступно.")
+            }
+            return .ok(lines.joined(separator: "\n"))
+
+        case "discover":
+            let raw = (args["types"] as? [String]) ?? (args["types"] as? String)?
+                .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+                ?? BonjourDiscovery.defaultTypes
+            let types = raw.map { $0.hasPrefix("_") ? $0 : "_\($0)" }
+            let timeout = Double(Self.int(args, "timeout_ms") ?? 3_000) / 1_000
+            let rows = await Task.detached(priority: .userInitiated) {
+                BonjourDiscovery.discover(types: types, timeout: timeout)
+            }.value
+            return .ok(rows.isEmpty
+                ? "Устройств по \(types.joined(separator: ", ")) не найдено."
+                : "\(rows.count) устройств:\n" + rows.joined(separator: "\n"))
+
+        case "vpn":
+            let tunnels = await Self.vpnTunnels()
+            if (args["value"] as? String)?.lowercased() == "restart" {
+                guard Self.bool(args, "confirm") ?? false else {
+                    return .fail("vpn restart требует confirm: true: VPN оборвётся на время.")
+                }
+                return await Self.restartVPNCore()
+            }
+            var lines: [String] = []
+            let utun = NetworkReport.interfaces()
+                .filter { $0.name.hasPrefix("utun") && NetworkReport.isUp($0.flags) }
+                .map { "\($0.name) \($0.family) \($0.address)" }
+            lines.append(utun.isEmpty ? "utun: нет активных туннелей" : "utun:\n" + utun.joined(separator: "\n"))
+            lines.append(tunnels.isEmpty
+                ? "scutil: туннелей не настроено"
+                : "scutil:\n" + tunnels.map {
+                    "\($0.status) \($0.name) id=\($0.id)" + ($0.kind.map { " \($0)" } ?? "")
+                }.joined(separator: "\n"))
+            return .ok(lines.joined(separator: "\n"))
+
+        case "proxy":
+            let service = (args["service"] as? String) ?? "Wi-Fi"
+            if let on = Self.bool(args, "value") {
+                guard Self.bool(args, "confirm") ?? false else {
+                    return .fail("proxy set требует confirm: true.")
+                }
+                guard let host = args["host"] as? String, let port = Self.int(args, "port") else {
+                    return .fail("proxy: host и port обязательны.")
+                }
+                let state = on ? "on" : "off"
+                let command = "networksetup -setwebproxy \(Self.shellQuote(service)) "
+                    + "\(Self.shellQuote(host)) \(port) \(state)"
+                return await Self.runNetworkSetup(command, success: "Прокси \(service): \(state) \(host):\(port).")
+            }
+            let command = "networksetup -getwebproxy \(Self.shellQuote(service))"
+            guard let output = try? Self.runSync(command, cwd: URL(fileURLWithPath: NSTemporaryDirectory()), timeout: 10) else {
+                return .fail("networksetup не ответил.")
+            }
+            let (status, body) = Self.splitExit(output)
+            guard status == 0, let settings = ProxySettings.parse(body) else {
+                return .fail("Прокси не прочитан: " + String(body.prefix(300)))
+            }
+            return .ok(settings.summary)
+
         default:
-            return .fail("action: ports | interfaces | dns | ping | http")
+            return .fail("action: ports | interfaces | dns | ping | http | wifi | discover | vpn | proxy")
         }
     }
 
@@ -257,5 +358,59 @@ extension ToolRegistry {
         let trimmed = ToolRegistry.splitExit(output).body
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+extension ToolRegistry {
+    static func vpnTunnels() async -> [VPNReport.Tunnel] {
+        guard let output = try? runSync(
+            "scutil --nc list", cwd: URL(fileURLWithPath: NSTemporaryDirectory()), timeout: 10
+        ) else { return [] }
+        let (status, body) = splitExit(output)
+        return status == 0 ? VPNReport.parse(body) : []
+    }
+
+    /// Restart only the FlClashX core, and only when it is actually running. A missing
+    /// core is reported, not started "just in case".
+    static func restartVPNCore() async -> ToolResult {
+        guard let before = try? runSync(
+            "pgrep -f -i flclash", cwd: URL(fileURLWithPath: NSTemporaryDirectory()), timeout: 10
+        ) else {
+            return .fail("pgrep не выполнился.")
+        }
+        let pids = before.split(separator: "\n")
+            .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        guard !pids.isEmpty else {
+            return .fail("Ядро FlClashX не запущено — перезапускать нечего.")
+        }
+        _ = try? runSync(
+            "pkill -f -i flclash", cwd: URL(fileURLWithPath: NSTemporaryDirectory()), timeout: 10
+        )
+        try? await Task.sleep(for: .seconds(1))
+        _ = try? runSync(
+            "open -a FlClashX", cwd: URL(fileURLWithPath: NSTemporaryDirectory()), timeout: 15
+        )
+        try? await Task.sleep(for: .seconds(1))
+        let after = (try? runSync(
+            "pgrep -f -i flclash", cwd: URL(fileURLWithPath: NSTemporaryDirectory()), timeout: 10
+        )) ?? ""
+        let newPids = after.split(separator: "\n")
+            .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        guard !newPids.isEmpty else {
+            return .fail("Старые pid \(pids) остановлены, но новое ядро не поднялось "
+                + "(ядро под root — нужен ручной запуск).")
+        }
+        return .ok("FlClashX перезапущен: было \(pids), стало \(newPids).")
+    }
+
+    static func runNetworkSetup(_ command: String, success: String) async -> ToolResult {
+        guard let output = try? runSync(
+            command, cwd: URL(fileURLWithPath: NSTemporaryDirectory()), timeout: 20
+        ) else { return .fail("networksetup не выполнился.") }
+        let (status, body) = splitExit(output)
+        let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        return status == 0
+            ? .ok(success + (text.isEmpty ? "" : "\n" + text))
+            : .fail("exit \(status): " + String(text.prefix(400)))
     }
 }
