@@ -276,47 +276,13 @@ final class ChatStore {
             .filter { $0.area == "preferences" || $0.area == "lessons" }
             .map(\.content)
 
-        let registry = ToolRegistry(
-            workspace: AppPaths.workspaceDirectory,
-            workspaceState: services.workspaceState,
-            currentUserMessage: text,
-            currentUserMessageID: nil,
-            operations: services.operations,
-            actions: services.actions,
-            memory: services.memory,
-            embeddings: services.embeddings,
-            secrets: services.secrets,
-            skills: services.skills,
-            mcp: services.mcp,
-            mcpManager: services.mcpManager,
-            indexer: services.indexer,
-            scheduler: services.scheduler,
-            fileSafety: services.fileSafety,
-            todos: services.todos,
-            readOnly: planMode,
-            subagent: { [weak self] prompt, readOnly in
-                await self?.runSubagent(
-                    prompt: prompt, readOnly: readOnly, provider: provider,
-                    model: model, services: services, trustCandidates: trustCandidates
-                ) ?? SubagentOutcome(text: "", error: "сессия закрыта")
-            },
-            ledger: services.fileLedger,
-            skillScope: services.skillScope,
-            interceptors: ToolInterceptorChain(
-                [ArgumentRulesInterceptor(), BrowserGuardInterceptor(), SystemUIGuardInterceptor(),
-                 GUIControlGuardInterceptor(session: guiSession),
-                 TrustCheckInterceptor(
-                    session: trustSession,
-                    candidates: trustCandidates,
-                    instructions: trustInstructions,
-                    autopilot: autopilot,
-                    asker: TrustModelAsker(provider: provider, model: model)
-                 ),
-                 RateLimitInterceptor(), UIActionJournalInterceptor()],
-                log: { line in ChatStore.logLatency(line) }
-            ),
-            catalog: toolCatalog,
-            processes: backgroundProcesses
+        let registry = makeRegistry(
+            text: text,
+            provider: provider,
+            model: model,
+            services: services,
+            trustCandidates: trustCandidates,
+            trustInstructions: trustInstructions
         )
 
         schemaTokens = await registry.schemaTokenCost()
@@ -1121,6 +1087,61 @@ final class ChatStore {
         cachedSystemPrompt = system
         recordContextUsage(plan)
         return (system, plan.included, pruning.replacements)
+    }
+
+    /// The tool registry for one turn: same wiring every time, kept out of the turn
+    /// loop so a reader can see what the model may touch without reading 45 lines of
+    /// constructor arguments.
+    private func makeRegistry(
+        text: String,
+        provider: ProviderModel,
+        model: String,
+        services: AppServices,
+        trustCandidates: [TrustCandidate],
+        trustInstructions: [String]
+    ) -> ToolRegistry {
+        ToolRegistry(
+            workspace: AppPaths.workspaceDirectory,
+            workspaceState: services.workspaceState,
+            currentUserMessage: text,
+            currentUserMessageID: nil,
+            operations: services.operations,
+            actions: services.actions,
+            memory: services.memory,
+            embeddings: services.embeddings,
+            secrets: services.secrets,
+            skills: services.skills,
+            mcp: services.mcp,
+            mcpManager: services.mcpManager,
+            indexer: services.indexer,
+            scheduler: services.scheduler,
+            fileSafety: services.fileSafety,
+            todos: services.todos,
+            readOnly: planMode,
+            subagent: { [weak self] prompt, readOnly in
+                await self?.runSubagent(
+                    prompt: prompt, readOnly: readOnly, provider: provider,
+                    model: model, services: services, trustCandidates: trustCandidates
+                ) ?? SubagentOutcome(text: "", error: "сессия закрыта")
+            },
+            ledger: services.fileLedger,
+            skillScope: services.skillScope,
+            interceptors: ToolInterceptorChain(
+                [ArgumentRulesInterceptor(), BrowserGuardInterceptor(), SystemUIGuardInterceptor(),
+                 GUIControlGuardInterceptor(session: guiSession),
+                 TrustCheckInterceptor(
+                    session: trustSession,
+                    candidates: trustCandidates,
+                    instructions: trustInstructions,
+                    autopilot: autopilot,
+                    asker: TrustModelAsker(provider: provider, model: model)
+                 ),
+                 RateLimitInterceptor(), UIActionJournalInterceptor()],
+                log: { line in ChatStore.logLatency(line) }
+            ),
+            catalog: toolCatalog,
+            processes: backgroundProcesses
+        )
     }
 
     private static func millis(since start: ContinuousClock.Instant) -> Int {
