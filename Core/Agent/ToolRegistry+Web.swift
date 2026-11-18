@@ -73,6 +73,8 @@ extension ToolRegistry {
         return .ok(results.isEmpty ? "Ничего не найдено." : results.joined(separator: "\n"))
     }
 
+    /// R16.6: a persistent browser with a real profile. The tool only ensures the process
+    /// is up and hands the CDP endpoint to the script; the script never closes it.
     func browser(_ args: [String: Any]) async throws -> ToolResult {
         guard let action = args["action"] as? String else { return .fail("action обязателен") }
 
@@ -80,17 +82,32 @@ extension ToolRegistry {
         try AppPaths.ensureDirectory(tools)
         try AppPaths.ensureDirectory(AppPaths.artifactsDirectory)
 
-        let scriptURL = tools.appendingPathComponent("browser.mjs")
-        try Self.playwrightScript.write(to: scriptURL, atomically: true, encoding: .utf8)
-
         if !FileManager.default.fileExists(atPath: tools.appendingPathComponent("node_modules/playwright").path) {
-            return .fail("Playwright не установлен. Один раз выполни: cd ~/HARNES_S_DATA/tools && npm i playwright@1.63.0 && npx playwright install chromium")
+            return .fail("Playwright не установлен. Один раз выполни: cd ~/HARNESS_S_DATA/tools && npm i playwright@1.63.0")
         }
 
-        var payload: [String: Any] = ["action": action]
-        for key in ["url", "selector", "value", "path"] {
+        let endpoint: URL
+        switch await BrowserSession.shared.ensureRunning() {
+        case .failed(let reason):
+            return .fail(reason)
+        case .ready(let url):
+            endpoint = url
+        }
+
+        let scriptURL = tools.appendingPathComponent("browser.mjs")
+        try Self.browserScript.write(to: scriptURL, atomically: true, encoding: .utf8)
+
+        var payload: [String: Any] = [
+            "action": action,
+            "endpoint": endpoint.absoluteString,
+            "statePath": BrowserSession.shared.stateFile.path
+        ]
+        for key in ["url", "selector", "value", "path", "expression", "mode"] {
             if let value = args[key] as? String { payload[key] = value }
         }
+        if let index = Self.int(args, "index") { payload["index"] = index }
+        if let timeout = Self.int(args, "timeout_ms") { payload["timeout_ms"] = timeout }
+        if let reload = Self.bool(args, "reload") { payload["reload"] = reload }
         if let raw = payload["path"] as? String {
             payload["path"] = resolve(raw).path
         }
@@ -104,60 +121,251 @@ extension ToolRegistry {
         let output = try await Task.detached(priority: .userInitiated) {
             try Self.runSync(command, cwd: tools, timeout: 180)
         }.value
-        return .ok(String(output.prefix(40_000)))
+        let (status, body) = Self.splitExit(output)
+        let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard status == 0 else {
+            return .fail(text.isEmpty ? "browser: exit \(status)" : String(text.prefix(4_000)))
+        }
+        return .ok(String(text.prefix(40_000)))
     }
 
-    private static let playwrightScript = """
+    /// Internal for the test that guards the "never close the live browser" rule.
+    static let browserScript = """
     import { chromium } from 'playwright';
-    import { resolve } from 'node:path';
+    import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+    import { dirname, resolve } from 'node:path';
 
     const args = JSON.parse(process.argv[2] || '{}');
-    if (args.action !== 'goto' && !args.url) {
-      console.error('Нужен параметр url: без него открывается пустая страница about:blank.');
-      process.exit(2);
+    const endpoint = args.endpoint || 'http://127.0.0.1:9222';
+    const statePath = args.statePath || '';
+    const lines = [];
+
+    function say(text) { lines.push(String(text)); }
+    function finish(code) {
+      const text = lines.join('\\n');
+      process.stdout.write(text.endsWith('\\n') || text === '' ? text : text + '\\n', () => process.exit(code));
     }
-    const browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    function die(message) {
+      process.stderr.write(String(message) + '\\n', () => process.exit(2));
+    }
+
+    function readState() {
+      if (!statePath) return {};
+      try { return JSON.parse(readFileSync(statePath, 'utf8')); } catch { return {}; }
+    }
+    function writeState(value) {
+      if (!statePath) return;
+      try { mkdirSync(dirname(statePath), { recursive: true }); writeFileSync(statePath, JSON.stringify(value)); } catch {}
+    }
+
+    let state = readState();
+
+    let browser;
     try {
-      if (args.url) {
-        await page.goto(args.url, { waitUntil: 'load', timeout: 45000 });
-        await page.waitForTimeout(500);
+      browser = await chromium.connectOverCDP(endpoint);
+    } catch (error) {
+      die(`Нет соединения с постоянным браузером на ${endpoint}: ${error.message}`);
+    }
+
+    const context = browser.contexts()[0] || await browser.newContext();
+
+    async function pages() {
+      return context.pages().filter((page) => !page.isClosed());
+    }
+
+    async function currentPage() {
+      const all = await pages();
+      if (all.length === 0) return context.newPage();
+      const index = Number.isInteger(state.index) ? state.index : all.length - 1;
+      return all[Math.min(Math.max(index, 0), all.length - 1)];
+    }
+
+    async function describeTabs() {
+      const all = await pages();
+      const index = Number.isInteger(state.index) ? state.index : all.length - 1;
+      say(`session: port=${new URL(endpoint).port} tabs=${all.length} current=${index}`);
+      for (let i = 0; i < all.length; i += 1) {
+        const page = all[i];
+        let title = '';
+        try { title = await page.title(); } catch {}
+        say(`${i} ${i === index ? '*' : ' '} ${page.url()} ${title}`);
       }
+    }
+
+    async function saveState(path) {
+      const page = await currentPage();
+      const cookies = await context.cookies();
+      const storage = await page.evaluate(() => {
+        const dump = (source) => {
+          const out = {};
+          for (let i = 0; i < source.length; i += 1) {
+            const key = source.key(i);
+            out[key] = source.getItem(key);
+          }
+          return out;
+        };
+        return { localStorage: dump(window.localStorage), sessionStorage: dump(window.sessionStorage) };
+      });
+      mkdirSync(dirname(resolve(path)), { recursive: true });
+      writeFileSync(path, JSON.stringify({ url: page.url(), cookies, storage }, null, 2));
+      say(`state saved: ${resolve(path)} cookies=${cookies.length} keys=${Object.keys(storage.localStorage).length}`);
+    }
+
+    async function loadState(path) {
+      const raw = JSON.parse(readFileSync(path, 'utf8'));
+      if (Array.isArray(raw.cookies) && raw.cookies.length) await context.addCookies(raw.cookies);
+      const page = await currentPage();
+      if (raw.url) await page.goto(raw.url, { waitUntil: 'load', timeout: 45000 });
+      if (raw.storage && raw.storage.localStorage) {
+        await page.evaluate((data) => {
+          for (const [key, value] of Object.entries(data)) window.localStorage.setItem(key, value);
+        }, raw.storage.localStorage);
+      }
+      say(`state loaded: ${resolve(path)} cookies=${(raw.cookies || []).length}`);
+    }
+
+    async function collectNetwork(page, reload, waitMs) {
+      const entries = new Map();
+      page.on('request', (request) => {
+        if (!entries.has(request)) {
+          entries.set(request, { method: request.method(), url: request.url(), status: null, type: null });
+        }
+      });
+      page.on('response', (response) => {
+        const entry = entries.get(response.request());
+        if (entry) {
+          entry.status = response.status();
+          entry.type = response.headers()['content-type'] || null;
+        }
+      });
+      if (reload) {
+        await page.reload({ waitUntil: 'load', timeout: 30000 }).catch(() => {});
+      }
+      await page.waitForTimeout(waitMs);
+      const list = [...entries.values()];
+      say(`requests: ${list.length}${reload ? ' (после reload)' : ' (только с момента подключения; reload=true — с начала загрузки)'}`);
+      for (const item of list.slice(0, 200)) {
+        say(`${item.status ?? '-'} ${item.method} ${item.url}${item.type ? ' ' + item.type : ''}`);
+      }
+      return list;
+    }
+
+    try {
       switch (args.action) {
         case 'goto':
-          console.log('title:', await page.title());
-          console.log('url:', page.url());
-          break;
-        case 'text':
-          console.log((await page.innerText('body')).slice(0, 20000));
-          break;
-        case 'html':
-          console.log((await page.content()).slice(0, 20000));
-          break;
-        case 'click':
-          await page.click(args.selector, { timeout: 20000 });
-          console.log('clicked', args.selector);
-          break;
-        case 'fill':
-          await page.fill(args.selector, args.value || '', { timeout: 20000 });
-          console.log('filled', args.selector);
-          break;
-        case 'screenshot': {
-          const path = args.path || 'shot.png';
-          await page.screenshot({ path, fullPage: true });
-          console.log('Скриншот: ' + resolve(path));
+        case 'open': {
+          if (!args.url) die('url обязателен: about:blank открывается только явным url.');
+          const page = await currentPage();
+          await page.goto(args.url, { waitUntil: 'load', timeout: 45000 });
+          await page.waitForTimeout(300);
+          say(`title: ${await page.title()}`);
+          say(`url: ${page.url()}`);
+          if (args.action === 'open') {
+            say((await page.innerText('body')).slice(0, 20000));
+          }
           break;
         }
-        case 'open':
-          console.log('title:', await page.title());
-          console.log('url:', page.url());
-          console.log((await page.innerText('body')).slice(0, 20000));
+        case 'text': {
+          const page = await currentPage();
+          say((await page.innerText('body')).slice(0, 20000));
           break;
+        }
+        case 'html': {
+          const page = await currentPage();
+          say((await page.content()).slice(0, 20000));
+          break;
+        }
+        case 'click': {
+          if (!args.selector) die('selector обязателен.');
+          const page = await currentPage();
+          await page.click(args.selector, { timeout: 20000 });
+          say(`clicked ${args.selector}`);
+          break;
+        }
+        case 'fill': {
+          if (!args.selector) die('selector обязателен.');
+          const page = await currentPage();
+          await page.fill(args.selector, args.value || '', { timeout: 20000 });
+          say(`filled ${args.selector}`);
+          break;
+        }
+        case 'screenshot': {
+          const page = await currentPage();
+          const path = args.path || 'shot.png';
+          await page.screenshot({ path, fullPage: true });
+          say(`Скриншот: ${resolve(path)}`);
+          break;
+        }
+        case 'list':
+        case 'tabs': {
+          await describeTabs();
+          break;
+        }
+        case 'switch': {
+          const all = await pages();
+          if (!Number.isInteger(args.index) || args.index < 0 || args.index >= all.length) {
+            die(`index вне диапазона: вкладок ${all.length}.`);
+          }
+          state = { ...state, index: args.index };
+          writeState(state);
+          const page = all[args.index];
+          say(`title: ${await page.title()}`);
+          say(`url: ${page.url()}`);
+          break;
+        }
+        case 'back': {
+          const page = await currentPage();
+          await page.goBack({ waitUntil: 'load', timeout: 30000 });
+          say(`url: ${page.url()}`);
+          break;
+        }
+        case 'forward': {
+          const page = await currentPage();
+          await page.goForward({ waitUntil: 'load', timeout: 30000 });
+          say(`url: ${page.url()}`);
+          break;
+        }
+        case 'reload': {
+          const page = await currentPage();
+          await page.reload({ waitUntil: 'load', timeout: 30000 });
+          say(`url: ${page.url()}`);
+          break;
+        }
+        case 'wait': {
+          if (!args.selector) die('selector обязателен.');
+          const page = await currentPage();
+          const timeout = Number.isInteger(args.timeout_ms) ? args.timeout_ms : 20000;
+          await page.waitForSelector(args.selector, { timeout });
+          say(`visible: ${args.selector}`);
+          break;
+        }
+        case 'eval': {
+          if (!args.expression) die('expression обязателен.');
+          const page = await currentPage();
+          const value = await page.evaluate(args.expression);
+          say(JSON.stringify(value).slice(0, 20000));
+          break;
+        }
+        case 'network': {
+          const page = await currentPage();
+          const waitMs = Number.isInteger(args.timeout_ms) ? args.timeout_ms : 2000;
+          await collectNetwork(page, args.reload === true, waitMs);
+          break;
+        }
+        case 'state': {
+          const mode = args.mode || args.value || 'save';
+          const path = args.path;
+          if (!path) die('path обязателен для state.');
+          if (mode === 'load') await loadState(path);
+          else await saveState(path);
+          break;
+        }
         default:
-          console.log('unknown action');
+          die(`unknown action: ${args.action}`);
       }
-    } finally {
-      await browser.close();
+      finish(0);
+    } catch (error) {
+      die(error && error.message ? error.message : String(error));
     }
     """
 

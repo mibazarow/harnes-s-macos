@@ -53,7 +53,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "edit_file",
             exposure: .core,
-            description: "Edit by line range (start/end), regex (pattern) or exact text (old_text). Ambiguous matches are refused. Returns a diff of what changed.",
+            description: "Edit by line range, regex or exact text; ambiguous matches are refused. Returns a diff.",
             parameters: schema([
                 "path": ["type": "string"],
                 "start": ["type": "integer", "description": "First line to replace, 1-based"],
@@ -192,7 +192,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "ui",
             exposure: .deferred,
-            description: "AX tree, search, press or focus by path. Pixel fallback by image is for canvas and games only. Needs Accessibility; System Settings clicks need confirm.",
+            description: "AX tree, search, press or focus by path; pixel fallback by image for canvas and games. Needs Accessibility; System Settings clicks need confirm.",
             parameters: schema([
                 "action": ["type": "string", "enum": ["tree", "find", "click", "set_value", "focus", "menu_list", "menu_click"]],
                 "app": ["type": "string", "description": "App name or bundle id; default frontmost"],
@@ -445,7 +445,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "share",
             exposure: .deferred,
-            description: "Mail and AirDrop: compose opens a ready letter, send needs confirm and reports Mail's error, airdrop opens the picker, services lists names.",
+            description: "Mail and AirDrop: compose opens a letter, send needs confirm, airdrop opens the picker, services lists names.",
             parameters: schema([
                 "action": ["type": "string", "enum": ["compose", "send", "airdrop", "services"]],
                 "to": ["type": "array", "items": ["type": "string"], "description": "Recipients"],
@@ -553,7 +553,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "todowrite",
             exposure: .core,
-            description: "Publish, update or complete the visible plan. Full replace with items; point update with update; quick tick with complete. Indices are 1-based.",
+            description: "Publish, update or complete the visible plan: items replaces, update patches, complete ticks. 1-based.",
             parameters: schema([
                 "items": [
                     "type": "array",
@@ -624,7 +624,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "fs_grep",
             exposure: .core,
-            description: "Search with ripgrep. mode=matches shows lines with context, count totals per file, outline returns only headings and declarations (a cheap map of the code).",
+            description: "Search with ripgrep: matches with context, count per file, outline of headings and declarations.",
             parameters: schema([
                 "pattern": ["type": "string"],
                 "path": ["type": "string", "description": "Directory or file, default '.'"],
@@ -646,7 +646,7 @@ extension ToolRegistry {
         ToolDefinition(
             name: "bash",
             exposure: .core,
-            description: "Run a shell command in the workspace. Output is cut to 2000 characters (full: true → 8000) and the reply says how much was left; narrow the command instead.",
+            description: "Run a shell command in the workspace. Output is cut to 2000 characters (full: true → 8000) and says how much was left; narrow the command.",
             parameters: schema([
                 "command": ["type": "string"],
                 "timeout_ms": ["type": "integer", "description": "Default 60000"],
@@ -673,13 +673,22 @@ extension ToolRegistry {
         ToolDefinition(
             name: "browser",
             exposure: .deferred,
-            description: "FALLBACK ONLY. Use MCP scrapling tools first; call this when scrapling failed or is unavailable. Headless Chromium via Playwright. Every action needs url. Actions: goto, open, text, html, click, fill, screenshot.",
+            description: "Persistent Chromium with a saved profile: tabs and logins live between calls. For logged-in sites, clicks, forms and network inspection.",
             parameters: schema([
-                "action": ["type": "string", "enum": ["goto", "open", "text", "html", "click", "fill", "screenshot"]],
-                "url": ["type": "string"],
-                "selector": ["type": "string"],
-                "value": ["type": "string"],
-                "path": ["type": "string", "description": "Screenshot output path"]
+                "action": ["type": "string", "enum": [
+                    "goto", "open", "text", "html", "click", "fill", "screenshot",
+                    "list", "tabs", "switch", "back", "forward", "reload", "wait",
+                    "eval", "network", "state"
+                ]],
+                "url": ["type": "string", "description": "goto/open"],
+                "selector": ["type": "string", "description": "click, fill, wait"],
+                "value": ["type": "string", "description": "fill text"],
+                "path": ["type": "string", "description": "screenshot/state file"],
+                "index": ["type": "integer", "description": "switch: tab index"],
+                "expression": ["type": "string", "description": "eval: JS"],
+                "timeout_ms": ["type": "integer"],
+                "reload": ["type": "boolean", "description": "network: reload first"],
+                "mode": ["type": "string", "enum": ["save", "load"], "description": "state"]
             ], required: ["action"])
         ),
         ToolDefinition(

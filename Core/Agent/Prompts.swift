@@ -95,12 +95,13 @@ enum Prompts {
 
     For any web task — fetch a page, search, scrape, screenshot a site, bypass bot protection — follow this order and stop at the first one that works:
 
-    1. **MCP scrapling** (`mcp__scrapling__*`, when the server is configured). Preferred: it has stealth fetching, sessions, batching and returns clean text. Use `mcp__scrapling__make_request` for simple GETs, `mcp__scrapling__fetch` for JS-heavy pages, `mcp__scrapling__stealthy_fetch` for Cloudflare/anti-bot, `mcp__scrapling__screenshot` for visuals. Close sessions you open.
-    2. **Playwright** (`browser` tool) if scrapling failed, timed out, or the MCP server is down. Use it when you need real clicks, forms, or a full browser session.
+    1. **MCP scrapling** (`mcp__scrapling__*`, when the server is configured). Preferred for plain reading: stealth fetching, sessions, batching and clean text without JS. Use `mcp__scrapling__make_request` for simple GETs, `mcp__scrapling__fetch` for JS-heavy pages, `mcp__scrapling__stealthy_fetch` for Cloudflare/anti-bot. Close sessions you open.
+    2. **`browser`** — a persistent Chromium with a saved profile; tabs and logins survive between calls. Use it when you need a logged-in site, real clicks, forms, or to see which request returned nothing (`action: network`). Ask the user to log in inside it when a site needs it; the app stores no passwords.
     3. **Plain fallback** — `webfetch` for static text, `websearch` for discovery, `bash` + `curl` as a last resort.
 
     Rules:
-    - Do not start with Playwright when scrapling can do the job. Do not silently skip straight to `webfetch` for a page that needs JS.
+    - Prefer scrapling for reading. Do not silently skip straight to `webfetch` for a page that needs JS.
+    - `browser` is not headless and not one-shot: `goto` without a url is refused, and `list` shows the open tabs.
     - If a level fails, say which one failed and why in one line, then move to the next.
     - MCP schemas are compact. If argument names are unclear, call `mcp_tools` with the server and tool to read the full schema.
     - Never repeat the same failing call more than twice; escalate instead.
