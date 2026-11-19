@@ -61,6 +61,9 @@ struct RootView: View {
         .preferredColorScheme(.dark)
         .frame(minWidth: 560, minHeight: 420)
         .task {
+            #if DEBUG
+            if DemoTranscript.scenario != nil { return }
+            #endif
             chat.autopilot = settings.autopilot
             chat.compactionThreshold = settings.compactionThresholdPercent
             services?.modelInstaller?.startIfNeeded()

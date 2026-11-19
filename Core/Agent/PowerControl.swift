@@ -271,25 +271,35 @@ enum MediaRemote {
 /// Caffeinate assertions are held in memory: the assertion dies with the process, and an
 /// assertion that outlives the turn would keep the Mac awake forever.
 enum PowerAssertions {
-    private final class Store: @unchecked Sendable {
+    final class Store: @unchecked Sendable {
         private let lock = NSLock()
-        private var ids: [IOPMAssertionID] = []
+        private var ids: [UUID: IOPMAssertionID] = [:]
+        private let releaseAssertion: @Sendable (IOPMAssertionID) -> Void
 
-        func add(_ id: IOPMAssertionID) { lock.lock(); ids.append(id); lock.unlock() }
+        init(releaseAssertion: @escaping @Sendable (IOPMAssertionID) -> Void = { _ = IOPMAssertionRelease($0) }) {
+            self.releaseAssertion = releaseAssertion
+        }
 
-        func release(_ id: IOPMAssertionID) {
+        func add(_ id: IOPMAssertionID) -> UUID {
+            lock.lock(); defer { lock.unlock() }
+            let token = UUID()
+            ids[token] = id
+            return token
+        }
+
+        func release(_ token: UUID) {
             lock.lock()
-            ids.removeAll { $0 == id }
-            lock.unlock()
-            IOPMAssertionRelease(id)
+            defer { lock.unlock() }
+            guard let id = ids.removeValue(forKey: token) else { return }
+            releaseAssertion(id)
         }
 
         func releaseAll() -> Int {
             lock.lock()
-            let all = ids
+            defer { lock.unlock() }
+            let all = Array(ids.values)
             ids.removeAll()
-            lock.unlock()
-            for id in all { IOPMAssertionRelease(id) }
+            for id in all { releaseAssertion(id) }
             return all.count
         }
 
@@ -311,10 +321,10 @@ enum PowerAssertions {
             &id
         )
         guard status == kIOReturnSuccess else { return false }
-        store.add(id)
+        let token = store.add(id)
         let bounded = min(max(seconds, 1), 3_600)
         DispatchQueue.global().asyncAfter(deadline: .now() + .seconds(bounded)) {
-            store.release(id)
+            store.release(token)
         }
         return true
     }

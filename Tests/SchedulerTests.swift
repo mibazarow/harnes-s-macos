@@ -2,6 +2,18 @@ import XCTest
 @testable import Harness
 
 final class SchedulerTests: XCTestCase {
+    func testTickWithoutConsumerKeepsDueTask() async throws {
+        let database = try AppDatabase(inMemory: true)
+        let scheduler = SchedulerService(database: database)
+        _ = try scheduler.add(title: "pending", prompt: "deliver", intervalMinutes: 0,
+                              firesAt: Date().addingTimeInterval(60))
+        try await database.queue.write { db in
+            try db.execute(sql: "UPDATE schedules SET next_run_at = '2000-01-01T00:00:00Z'")
+        }
+        scheduler.tick()
+        XCTAssertEqual(try scheduler.due().count, 1)
+    }
+
     func testAddListRemove() async throws {
         let database = try AppDatabase()
         let scheduler = SchedulerService(database: database)

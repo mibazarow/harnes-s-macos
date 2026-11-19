@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import Harness
 
 /// Grouping of tool-only steps for the transcript.
@@ -7,6 +8,42 @@ import XCTest
 /// sequential `bash` calls rendered as ten bubbles with one trace each and read as ten
 /// unrelated answers. Storage and the replay sent to the model must stay untouched.
 final class TranscriptGroupingTests: XCTestCase {
+    @MainActor
+    func testStreamingMarkdownUpdatesBeforeStreamEnds() async throws {
+        let resize = LiveResizeState()
+        let host = NSHostingView(rootView: MarkdownView(
+            text: "Start", palette: .current, fontSize: 14, isStreaming: true
+        ).environment(resize))
+        host.frame = NSRect(x: 0, y: 0, width: 400, height: 800)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.contentView = host
+        defer { window.contentView = nil }
+        try await Task.sleep(for: .milliseconds(100))
+        let initialHeight = host.fittingSize.height
+        for index in 1...20 {
+            host.rootView = MarkdownView(
+                text: (0...index).map { "Paragraph \($0)" }.joined(separator: "\n\n"),
+                palette: .current, fontSize: 14, isStreaming: true
+            ).environment(resize)
+            try await Task.sleep(for: .milliseconds(30))
+            host.layoutSubtreeIfNeeded()
+        }
+        XCTAssertGreaterThan(host.fittingSize.height, initialHeight + 40,
+                             "Continuous chunks must not postpone parsing until the stream stops")
+    }
+
+    func testLongTranscriptGroupingPerformance() {
+        let history = (0..<1_000).map { index in
+            ChatMessage(role: index.isMultiple(of: 5) ? .user : .assistant,
+                        text: String(repeating: "Transcript sample. ", count: 40))
+        }
+        measure {
+            let grouped = ChatMessage.groupedForDisplay(history)
+            XCTAssertEqual(grouped.count, history.count)
+        }
+    }
+
     func testToolCompletionInvalidatesTranscriptWithoutChangingCounts() {
         let running = ChatMessage(role: .assistant, text: "", tools: [
             ToolTrace(name: "bash", summary: "running", isRunning: true)

@@ -100,7 +100,8 @@ struct MessageRow: View, Equatable {
                         text: message.text,
                         palette: palette,
                         fontSize: fontSize,
-                        animate: animateReveal
+                        animate: animateReveal,
+                        isStreaming: message.state == .streaming
                     )
                 } else if message.state == .streaming,
                           message.tools.isEmpty,
@@ -280,10 +281,8 @@ struct ToolTraceList: View {
                 }
                 .font(AppFont.mono(max(fontSize - 3, 9)))
 
-                if let path = trace.imagePath, let image = NSImage(contentsOfFile: path) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
+                if let path = trace.imagePath {
+                    LocalChatImage(path: path)
                         .frame(maxWidth: 420, maxHeight: 260, alignment: .leading)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                         .overlay(
@@ -312,6 +311,37 @@ struct ToolTraceList: View {
         case "memory_add", "memory_search": return "brain"
         case "secret_get", "secret_save", "secret_search": return "key"
         default: return "wrench"
+        }
+    }
+}
+
+/// File reads belong to the view lifetime, not each streaming/layout update.
+struct LocalChatImage: View {
+    let path: String
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image).resizable().scaledToFit()
+            } else {
+                Image(systemName: "photo")
+                    .accessibilityLabel("Изображение недоступно или загружается")
+            }
+        }
+        .task(id: path) {
+            image = nil
+            let filePath = path
+            let loader = Task.detached(priority: .utility) {
+                try? Data(contentsOf: URL(fileURLWithPath: filePath))
+            }
+            let data = await withTaskCancellationHandler {
+                await loader.value
+            } onCancel: {
+                loader.cancel()
+            }
+            guard !Task.isCancelled else { return }
+            image = data.flatMap(NSImage.init(data:))
         }
     }
 }
@@ -390,12 +420,13 @@ struct AnswerText: View {
     let palette: Palette
     let fontSize: CGFloat
     var animate: Bool = false
+    var isStreaming: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
 
     var body: some View {
-        MarkdownView(text: text, palette: palette, fontSize: fontSize)
+        MarkdownView(text: text, palette: palette, fontSize: fontSize, isStreaming: isStreaming)
             .opacity(appeared || !animate || reduceMotion ? 1 : 0.85)
             .onAppear {
                 withAnimation(reduceMotion || !animate ? nil : .easeOut(duration: 0.16)) {

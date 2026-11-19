@@ -30,17 +30,30 @@ final class MemoryFactWriterTests: XCTestCase {
         XCTAssertEqual(count, 1)
     }
 
-    func testRestatedFactReplacesTheOldRecord() async throws {
+    func testDifferentServersMustNotSupersedeEachOther() async throws {
+        let old = try await memory.add("Сервер alpha работает на Ubuntu 24.04", area: "fact")
+        let outcome = await MemoryFactWriter().write(
+            [candidate("Сервер beta работает на Ubuntu 24.04", quote: "beta на Ubuntu 24.04")],
+            memory: memory, embeddings: nil
+        )
+        XCTAssertEqual(outcome.replaced, 0)
+        let hits = try await memory.search("сервер ubuntu")
+        XCTAssertTrue(hits.contains { $0.id == old.id })
+        XCTAssertTrue(hits.contains { $0.content.contains("beta") })
+    }
+
+    func testChangedFactPreservesOldRecordWithoutExplicitIdentity() async throws {
         let old = try await memory.add("Сервер работает на Ubuntu 22.04", area: "fact")
         let outcome = await MemoryFactWriter().write(
             [candidate("Сервер работает на Ubuntu 24.04", quote: "сервер на 24.04")],
             memory: memory, embeddings: nil
         )
-        XCTAssertEqual(outcome.replaced, 1)
+        XCTAssertEqual(outcome.replaced, 0)
+        XCTAssertEqual(outcome.added, 1)
 
         let hits = try await memory.search("сервер ubuntu")
         XCTAssertTrue(hits.contains { $0.content.contains("24.04") })
-        XCTAssertFalse(hits.contains { $0.id == old.id }, "старая запись выпадает из выдачи")
+        XCTAssertTrue(hits.contains { $0.id == old.id }, "похожесть не доказывает замену факта")
 
         let history = try await memory.item(id: old.id)
         XCTAssertEqual(history?.content, "Сервер работает на Ubuntu 22.04", "история остаётся")

@@ -40,6 +40,31 @@ final class SummaryBoundaryIDTests: XCTestCase {
         }
     }
 
+    func testCompactionWriteFailureKeepsConversationAcrossReload() async throws {
+        let database = try AppDatabase(inMemory: true)
+        let services = try await services(database)
+        let chat = ChatStore(services: services)
+        chat.messages = [
+            ChatMessage(role: .user, text: "keep original request"),
+            ChatMessage(role: .assistant, text: "keep original answer")
+        ]
+        try await persist(chat.messages, services: services)
+        try await database.queue.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER reject_summary BEFORE INSERT ON chat_state
+                BEGIN SELECT RAISE(ABORT, 'checkpoint unavailable'); END
+                """)
+        }
+        let result = await chat.compactNow()
+        XCTAssertFalse(result.contains("История сжата"), result)
+        let checkpoint = try await services.compaction.loadCheckpoint(database: database)
+        XCTAssertNil(checkpoint)
+        let restored = ChatStore(services: services)
+        await restored.loadHistory()
+        XCTAssertTrue(restored.messages.contains { $0.text == "keep original request" })
+        XCTAssertTrue(restored.messages.contains { $0.text == "keep original answer" })
+    }
+
     func testBoundaryIsAnIDInsideTheHistory() async throws {
         let database = try AppDatabase(inMemory: true)
         let services = try await services(database)

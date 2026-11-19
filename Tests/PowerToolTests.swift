@@ -4,6 +4,22 @@ import XCTest
 /// R25.1: the guards and conversions are pure; the hardware calls are exercised only
 /// where they need no grant.
 final class PowerToolTests: XCTestCase {
+    func testReleasedAssertionIsNotReleasedAgainByTimer() {
+        let released = expectation(description: "Assertion released once")
+        released.assertForOverFulfill = true
+        let store = PowerAssertions.Store { id in
+            XCTAssertEqual(id, 42)
+            released.fulfill()
+        }
+        let token = store.add(42)
+        XCTAssertEqual(store.releaseAll(), 1)
+        let replacement = store.add(42)
+        store.release(token)
+        XCTAssertEqual(store.count, 1, "An old timer must not release a reused IOKit ID")
+        XCTAssertNotEqual(token, replacement)
+        wait(for: [released], timeout: 1)
+    }
+
     private func registry(readOnly: Bool = false) -> ToolRegistry {
         ToolRegistry(
             workspace: URL(fileURLWithPath: NSTemporaryDirectory()),

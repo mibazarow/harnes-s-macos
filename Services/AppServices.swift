@@ -65,6 +65,11 @@ struct AppServices: Sendable {
     @MainActor
     static func live() -> AppServices? {
         do {
+            #if DEBUG
+            if DemoTranscript.scenario != nil {
+                return AppServices(database: try AppDatabase(inMemory: true))
+            }
+            #endif
             // The test bundle launches this app as its host, so without this guard a
             // plain `xcodebuild test` would migrate and write to the user's real
             // database.
@@ -134,6 +139,10 @@ final class AppModel {
         self.chat = ChatStore(services: services)
         self.providerDirectory = ProviderDirectory(service: services?.providers)
 
+        #if DEBUG
+        if DemoTranscript.scenario != nil { return }
+        #endif
+
         // R30.6: retention at launch — old rows go to a CSV, then out of the database.
         if let services {
             Task.detached(priority: .utility) {
@@ -166,7 +175,7 @@ final class AppModel {
         NotificationCenter.default.addObserver(
             forName: .harnessAbortRequested, object: nil, queue: .main
         ) { [chat] _ in
-            chat.stop()
+            MainActor.assumeIsolated { chat.stop() }
         }
 
         // R27.1: the assistant chord opens a panel with the selected text of the app the

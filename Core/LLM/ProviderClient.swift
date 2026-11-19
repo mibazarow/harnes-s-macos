@@ -239,16 +239,16 @@ struct ProviderClient: Sendable {
                         if payload == "[DONE]" { break }
 
                         guard let data = payload.data(using: .utf8),
-                              let chunk = try? JSONDecoder().decode(ProviderChunk.self, from: data),
-                              let choice = chunk.choices?.first else {
+                              let chunk = try? JSONDecoder().decode(ProviderChunk.self, from: data) else {
                             continue
                         }
 
-                        if let reason = choice.finishReason, !reason.isEmpty {
-                            finishReason = reason
-                        }
                         if let reported = chunk.usage {
                             usage = reported
+                        }
+                        guard let choice = chunk.choices?.first else { continue }
+                        if let reason = choice.finishReason, !reason.isEmpty {
+                            finishReason = reason
                         }
 
                         if let delta = choice.delta {

@@ -67,22 +67,41 @@ actor MCPSession {
     private var buffer = Data()
     private var initialized = false
     private var stdoutTask: Task<Void, Never>?
+    private var startupTask: Task<Void, Error>?
+    private var generation = UUID()
     private var cachedTools: [MCPToolDescriptor] = []
     private let logURL: URL
 
-    init(config: MCPServerConfig) {
+    init(config: MCPServerConfig, logURL: URL? = nil) {
         self.config = config
-        self.logURL = AppPaths.logsDirectory.appendingPathComponent("mcp-\(config.name).log")
+        self.logURL = logURL ?? AppPaths.logsDirectory.appendingPathComponent("mcp-\(config.name).log")
     }
 
     var tools: [MCPToolDescriptor] { cachedTools }
     var isRunning: Bool { process?.isRunning == true }
 
     func ensureStarted() async throws {
+        try Task.checkCancellation()
+        if let startupTask {
+            try await withTaskCancellationHandler { try await startupTask.value }
+                onCancel: { startupTask.cancel() }
+            try Task.checkCancellation()
+            return
+        }
         if process?.isRunning == true, initialized { return }
-        try start()
-        try await initialize()
-        cachedTools = try await listTools()
+        let task = Task {
+            try start()
+            try await initialize()
+            cachedTools = try await listTools()
+        }
+        startupTask = task
+        defer { startupTask = nil }
+        do {
+            try await withTaskCancellationHandler { try await task.value }
+                onCancel: { task.cancel() }
+        }
+        catch { shutdown(); throw error }
+        try Task.checkCancellation()
     }
 
     private func start() throws {
@@ -114,7 +133,7 @@ actor MCPSession {
         process.standardOutput = outPipe
         process.standardError = errPipe
 
-        try? AppPaths.ensureDirectory(AppPaths.logsDirectory)
+        try? AppPaths.ensureDirectory(logURL.deletingLastPathComponent())
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         let logHandle = try? FileHandle(forWritingTo: logURL)
         logHandle?.seekToEndOfFile()
@@ -130,6 +149,8 @@ actor MCPSession {
         self.process = process
         self.stdin = inPipe.fileHandleForWriting
         self.buffer = Data()
+        let generation = UUID()
+        self.generation = generation
 
         let outHandle = outPipe.fileHandleForReading
         // The read loop must NOT run on the actor: `availableData` blocks, and
@@ -139,12 +160,19 @@ actor MCPSession {
             while !Task.isCancelled {
                 let data = outHandle.availableData
                 if data.isEmpty { break }
-                await self?.consume(data)
+                await self?.consume(data, generation: generation)
             }
+            await self?.didReachEOF(generation: generation)
         }
     }
 
-    private func consume(_ data: Data) {
+    private func didReachEOF(generation: UUID) {
+        guard self.generation == generation else { return }
+        shutdown()
+    }
+
+    private func consume(_ data: Data, generation: UUID) {
+        guard self.generation == generation else { return }
         buffer.append(data)
         while let newline = buffer.firstIndex(of: 0x0A) {
             let lineData = buffer[..<newline]
@@ -174,6 +202,7 @@ actor MCPSession {
     }
 
     private func request(_ method: String, paramsJSON: String) async throws -> [String: Any] {
+        try Task.checkCancellation()
         guard let stdin else { throw MCPError.notInitialized(config.name) }
         let id = nextID
         nextID += 1
@@ -186,14 +215,27 @@ actor MCPSession {
         var data = try JSONSerialization.data(withJSONObject: payload)
         data.append(0x0A)
 
-        let json: String = try await withCheckedThrowingContinuation { continuation in
-            pending[id] = continuation
-            stdin.write(data)
-
-            Task { [weak self] in
-                try? await Task.sleep(for: .seconds(60))
-                await self?.timeout(id)
+        let timeoutTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(60)) }
+            catch { return }
+            await self?.timeout(id)
+        }
+        defer { timeoutTask.cancel() }
+        let json: String = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                pending[id] = continuation
+                do { try stdin.write(contentsOf: data) }
+                catch {
+                    pending.removeValue(forKey: id)?.resume(throwing: error)
+                    return
+                }
             }
+        } onCancel: {
+            Task { await self.cancelRequest(id) }
         }
 
         guard let resultData = json.data(using: .utf8),
@@ -208,18 +250,22 @@ actor MCPSession {
         continuation.resume(throwing: MCPError.rpc("таймаут 60 с"))
     }
 
-    private func notify(_ method: String) {
+    private func cancelRequest(_ id: Int) {
+        pending.removeValue(forKey: id)?.resume(throwing: CancellationError())
+    }
+
+    private func notify(_ method: String) throws {
         guard let stdin else { return }
         let payload: [String: Any] = ["jsonrpc": "2.0", "method": method]
         guard var data = try? JSONSerialization.data(withJSONObject: payload) else { return }
         data.append(0x0A)
-        stdin.write(data)
+        try stdin.write(contentsOf: data)
     }
 
     private func initialize() async throws {
         let params = #"{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"clientInfo":{"name":"HARNES-S","version":"1.0.0"}}"#
         _ = try await request("initialize", paramsJSON: params)
-        notify("notifications/initialized")
+        try notify("notifications/initialized")
         initialized = true
     }
 
@@ -279,6 +325,8 @@ actor MCPSession {
     }
 
     func shutdown() {
+        generation = UUID()
+        startupTask?.cancel()
         stdoutTask?.cancel()
         stdoutTask = nil
         process?.terminate()
@@ -296,6 +344,7 @@ actor MCPSession {
 /// Owns one session per configured server and merges their tools.
 actor MCPManager {
     private var sessions: [String: MCPSession] = [:]
+    private var sessionConfigs: [String: MCPServerConfig] = [:]
     private let configService: MCPService
 
     init(configService: MCPService) {
@@ -309,6 +358,7 @@ actor MCPManager {
             await session.shutdown()
         }
         sessions.removeAll()
+        sessionConfigs.removeAll()
         cachedDescriptors = nil
         cachedRevision = -1
     }
@@ -330,7 +380,6 @@ actor MCPManager {
     /// tool list never changes mid-session — a changing tool list invalidates the whole
     /// provider prompt cache. Startup warms this, so in practice it does not block.
     func toolsForRequest() async -> [MCPToolDescriptor] {
-        if let cachedDescriptors { return cachedDescriptors }
         return await tools()
     }
 
@@ -341,9 +390,7 @@ actor MCPManager {
         if let cachedDescriptors, revision == cachedRevision { return cachedDescriptors }
         let descriptors = await fetchTools()
         cachedRevision = revision
-        if !descriptors.isEmpty {
-            cachedDescriptors = descriptors
-        }
+        cachedDescriptors = descriptors.isEmpty ? nil : descriptors
         return descriptors
     }
 
@@ -370,6 +417,15 @@ actor MCPManager {
         guard let servers = try? await configService.list() else { return [] }
         var result: [MCPToolDescriptor] = []
 
+        for name in Array(sessions.keys) {
+            guard servers.contains(where: { $0.name == name && $0.enabled && $0 == sessionConfigs[name] }) else {
+                let removed = sessions.removeValue(forKey: name)
+                sessionConfigs.removeValue(forKey: name)
+                await removed?.shutdown()
+                continue
+            }
+        }
+
         for server in servers where server.enabled {
             let session = session(for: server)
             do {
@@ -383,6 +439,15 @@ actor MCPManager {
     }
 
     func call(server: String, tool: String, argumentsJSON: String) async throws -> String {
+        let configs = try await configService.list()
+        guard let config = configs.first(where: { $0.name == server && $0.enabled }),
+              config == sessionConfigs[server] else {
+            let removed = sessions.removeValue(forKey: server)
+            sessionConfigs.removeValue(forKey: server)
+            cachedDescriptors = nil
+            await removed?.shutdown()
+            throw MCPError.serverNotFound(server)
+        }
         guard let session = sessions[server] else {
             throw MCPError.serverNotFound(server)
         }
@@ -393,6 +458,7 @@ actor MCPManager {
         if let existing = sessions[config.name] { return existing }
         let created = MCPSession(config: config)
         sessions[config.name] = created
+        sessionConfigs[config.name] = config
         return created
     }
 }

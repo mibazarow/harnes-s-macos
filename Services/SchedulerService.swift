@@ -140,10 +140,10 @@ final class SchedulerService: @unchecked Sendable {
         timer = nil
     }
 
-    private func tick() {
-        guard let tasks = try? due(), !tasks.isEmpty else { return }
+    func tick() {
+        guard let onFire, let tasks = try? due(), !tasks.isEmpty else { return }
         for task in tasks {
-            onFire?(task)
+            onFire(task)
             try? markRun(task, result: "запущено")
         }
     }

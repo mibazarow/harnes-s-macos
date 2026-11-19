@@ -249,6 +249,29 @@ final class ProviderRetryTests: XCTestCase {
         XCTAssertEqual(server.bodies.count, 3)
     }
 
+    func testUsageOnlyChunkIsReported() async throws {
+        let server = try StubSSEServer(responses: [[
+            #"{"choices":[{"delta":{"content":"ok"}}]}"#,
+            #"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            #"{"choices":[],"usage":{"prompt_tokens":1234,"completion_tokens":56}}"#
+        ]])
+        try server.start()
+        defer { server.stop() }
+        var prompt: Int?
+        var completion: Int?
+        for try await event in ProviderClient().stream(
+            provider: provider(server.baseURL), model: "m",
+            messages: [ProviderMessage(role: .user, content: "hi")]
+        ) {
+            if case .usage(let input, let output, _, _) = event {
+                prompt = input
+                completion = output
+            }
+        }
+        XCTAssertEqual(prompt, 1234)
+        XCTAssertEqual(completion, 56)
+    }
+
     func testDoesNotRetryClientErrors() async throws {
         let server = try StubSSEServer(responses: [[#"{"error":"bad"}"#]], statusCodes: [400])
         try server.start()

@@ -1,15 +1,9 @@
 import Foundation
 
-/// R35.1: a fact extracted from a folded conversation replaces an older record of the
-/// same fact instead of piling up next to it.
-///
-/// `#104` and `#107` described the same server in different words and both were read by
-/// id. Here a new fact that closely matches an existing one in the same area is written
-/// through `supersedes_id`, so the old row stays readable but drops out of search and
-/// the prompt. An exact restatement is skipped outright.
+/// Extraction has no stable subject identity: similarity alone must not hide old facts.
+/// Explicit superseding remains available through the memory tools.
 struct MemoryFactWriter: Sendable {
-    /// Higher than the "is this the same fact?" question in `memory_add` (0.35): a
-    /// compaction pass has no user to ask, so it only replaces on a close match.
+    /// Candidate lookup for detecting exact restatements, not authorizing replacement.
     var replaceThreshold: Double = 0.5
 
     struct Outcome: Sendable {
@@ -47,11 +41,10 @@ struct MemoryFactWriter: Sendable {
                     source: "compaction",
                     area: candidate.area,
                     quote: candidate.quote,
-                    quoteVerified: true,
-                    supersedesID: existing.first?.id
+                    quoteVerified: true
                 )
                 await MemoryIndexer.index(id: item.id, content: item.content, sink: embeddings)
-                if existing.isEmpty { outcome.added += 1 } else { outcome.replaced += 1 }
+                outcome.added += 1
             } catch {
                 outcome.skipped += 1
             }

@@ -20,6 +20,7 @@ struct MarkdownView: View {
     /// other half of the live-resize cost: at 40–60 chunks per second the parser ran
     /// tens of times a second for no visible benefit.
     @State private var parseTask: Task<Void, Never>?
+    @State private var pendingText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -37,29 +38,35 @@ struct MarkdownView: View {
         .onChange(of: isStreaming) { _, streaming in
             if !streaming { scheduleParse(text) }
         }
-        .onDisappear { parseTask?.cancel() }
+        .onAppear { scheduleParse(text) }
+        .onDisappear {
+            parseTask?.cancel()
+            parseTask = nil
+        }
     }
 }
 
 extension MarkdownView {
     private func scheduleParse(_ value: String) {
+        pendingText = value
         guard parsedText != value else { return }
-        guard isStreaming else {
+        guard isStreaming, parsedText != nil else {
             parseTask?.cancel()
             parseTask = nil
             parsedText = value
             blocks = Self.parse(value)
             return
         }
-        parseTask?.cancel()
+        guard parseTask == nil else { return }
         parseTask = Task {
             // Kept in step with the paint interval, so formatting does not lag the
             // words it formats.
             try? await Task.sleep(for: .seconds(Tuning.markdownParseInterval))
             guard !Task.isCancelled else { return }
-            guard parsedText != value else { return }
-            parsedText = value
-            blocks = Self.parse(value)
+            let latest = pendingText
+            parsedText = latest
+            blocks = Self.parse(latest)
+            parseTask = nil
         }
     }
 
@@ -342,12 +349,8 @@ struct MarkdownBlockView: View {
                         imagePlaceholder(image)
                     }
                 }
-            } else if let local = NSImage(contentsOfFile: source) {
-                Image(nsImage: local)
-                    .resizable()
-                    .scaledToFit()
             } else {
-                imagePlaceholder(image)
+                LocalChatImage(path: source)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
