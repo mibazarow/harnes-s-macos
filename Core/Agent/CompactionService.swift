@@ -109,6 +109,19 @@ actor CompactionService {
         }
     }
 
+    /// B3: an assistant turn with no text carries nothing to summarize.
+    ///
+    /// More than half of the stored assistant rows are empty — a tool-call bubble keeps
+    /// its exchanges but no prose. They must stay in the database (the prompt replays
+    /// their tool calls) and must not reach the summarizer, where they cost tokens and
+    /// blur the summary.
+    static func summarizable(_ messages: [ContextMessage]) -> [ContextMessage] {
+        messages.filter { message in
+            if message.role == "assistant" { return !message.text.isEmpty }
+            return true
+        }
+    }
+
     /// Groups messages so one summarization request stays well inside the window.
     /// A long history folded in one prompt would not fit the model it is being sent to.
     static func batches(_ messages: [ContextMessage], budget: Int = 24_000) -> [[ContextMessage]] {

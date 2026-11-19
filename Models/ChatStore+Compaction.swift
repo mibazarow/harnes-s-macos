@@ -196,7 +196,9 @@ extension ChatStore {
             summary: TokenEstimator.tokens(in: checkpointSummary),
             history: all.reduce(0) { $0 + $1.tokens },
             images: upcomingImages,
-            messages: all.count,
+            // B3: empty assistant rows are stored but carry no text; counting them made
+            // `messages=` look twice as large as the conversation really is.
+            messages: all.filter { !$0.text.isEmpty }.count,
             memory: promptMemoryCount,
             memoryTokens: promptMemoryTokens,
             phase: "pre_prune"
@@ -238,7 +240,7 @@ extension ChatStore {
 
         do {
             var summary = try await services.compaction.summarize(
-                messages: contextMessages,
+                messages: CompactionService.summarizable(contextMessages),
                 provider: provider,
                 model: model,
                 previousSummary: checkpointSummary.isEmpty ? nil : checkpointSummary
@@ -578,7 +580,7 @@ extension ChatStore {
             summary: TokenEstimator.tokens(in: checkpointSummary),
             history: prepared.included.reduce(0) { $0 + $1.tokens },
             images: images.reduce(0) { $0 + ImageCost.tokens(in: $1) },
-            messages: history.count,
+            messages: prepared.included.filter { !$0.text.isEmpty }.count,
             memory: promptMemoryCount,
             memoryTokens: promptMemoryTokens
         )
