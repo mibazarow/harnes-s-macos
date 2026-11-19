@@ -29,6 +29,11 @@ actor MemoryService {
         guard !content.isEmpty else {
             throw ConfigurationError.invalidArguments("Текст памяти не может быть пустым.")
         }
+        // B11: chatter and retellings are rejected here, before a row exists. This is
+        // cheaper than cleaning memory afterwards and keeps the budget for real facts.
+        if let rejection = MemoryQuality.rejection(for: content, source: source) {
+            throw ConfigurationError.invalidArguments(rejection)
+        }
 
         // Exact content is the cheapest duplicate check; the fuzzy pass below still
         // catches paraphrases and is what the memory rules rely on.
