@@ -896,11 +896,15 @@ final class ChatStore {
             var grouped: [String: [MemoryItem]] = [:]
             for item in memories { grouped[item.area, default: []].append(item) }
             let order = ["lessons", "about", "preferences", "people", "routines", "decision", "fact"]
+            // R34.1: a fresh or corrected record says so; the order does not move, so
+            // the prefix stays byte-stable.
+            let freshness = MemoryFreshness.labels(memories)
             let lines = order.compactMap { area -> String? in
                 guard let items = grouped[area], !items.isEmpty else { return nil }
                 let body = items.map { item in
                     let mark = item.pinned ? "📌 " : ""
-                    return "- \(mark)\(item.promptText)"
+                    let label = freshness[item.id].map { $0 + " " } ?? ""
+                    return "- \(mark)\(label)\(item.promptText)"
                 }.joined(separator: "\n")
                 return "## \(area)\n\(body)"
             }.joined(separator: "\n")
