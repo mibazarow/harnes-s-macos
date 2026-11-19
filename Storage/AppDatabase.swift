@@ -532,6 +532,21 @@ final class AppDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("v24_action_kind") { db in
+            // B10: model calls were stored in `actions` under `tool = 'model'`, so every
+            // "which tools do I use" query had the model at the top. The kind says what a
+            // row is; the tool name stays whatever it is.
+            let columns = try db.columns(in: "actions").map(\.name)
+            if !columns.contains("kind") {
+                try db.execute(sql: """
+                    ALTER TABLE actions ADD COLUMN kind TEXT NOT NULL DEFAULT 'tool';
+                    """)
+            }
+            try db.execute(sql: """
+                UPDATE actions SET kind = 'model' WHERE tool = 'model' AND kind = 'tool';
+                """)
+        }
+
         return migrator
 
     }

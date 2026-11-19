@@ -461,7 +461,9 @@ final class ChatStore {
                                 completionTokens: completionTokens,
                                 costUSD: cost ?? 0,
                                 becauseKind: autopilot ? "autopilot" : "message",
-                                becauseQuote: text
+                                becauseQuote: text,
+                                // B10: this row is a model call, not a tool call.
+                                kind: "model"
                             ))
                         }
                     case .truncated(let reason):

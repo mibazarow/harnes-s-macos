@@ -22,6 +22,8 @@ actor ActionJournal {
         let becauseQuote: String
         /// B8: the tool's own error text. Empty for a successful call.
         let error: String
+        /// B10: "tool" or "model". A model call is not a tool.
+        let kind: String
     }
 
     struct Draft: Sendable {
@@ -39,6 +41,8 @@ actor ActionJournal {
         let becauseQuote: String
         /// B8: why the call failed, in the tool's own words.
         var error: String? = nil
+        /// B10: "tool" by default; the model call passes "model".
+        var kind: String = "tool"
     }
 
     static let retentionDays = 30
@@ -70,14 +74,14 @@ actor ActionJournal {
             try db.execute(sql: """
                 INSERT INTO actions (session_id, message_id, step, at, tool, args_summary,
                     outcome, model, prompt_tokens, completion_tokens, cost_usd,
-                    because_kind, because_quote, error)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    because_kind, because_quote, error, kind)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, arguments: [
                     draft.sessionID, draft.messageID, draft.step, now.ISO8601Format(),
                     draft.tool, Self.summary(draft.args), draft.outcome, draft.model,
                     draft.promptTokens, draft.completionTokens, draft.costUSD,
                     draft.becauseKind, String(draft.becauseQuote.prefix(300)),
-                    draft.error.map { String($0.prefix(500)) }
+                    draft.error.map { String($0.prefix(500)) }, draft.kind
                 ])
             return db.lastInsertedRowID
         }
@@ -101,6 +105,19 @@ actor ActionJournal {
     func count() throws -> Int {
         try database.queue.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM actions") ?? 0
+        }
+    }
+
+    /// B10: tool usage without the model calls mixed in. `tool = 'model'` used to be the
+    /// top "tool" in every count.
+    func toolUsage(since: Date) throws -> [(tool: String, count: Int)] {
+        try database.queue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT tool, COUNT(*) AS c FROM actions
+                WHERE kind = 'tool' AND at >= ?
+                GROUP BY tool ORDER BY c DESC
+                """, arguments: [since.ISO8601Format()])
+            .map { (tool: $0["tool"] as String, count: $0["c"] as Int) }
         }
     }
 
@@ -177,7 +194,8 @@ actor ActionJournal {
             argsSummary: row["args_summary"], outcome: row["outcome"], model: row["model"],
             promptTokens: row["prompt_tokens"], completionTokens: row["completion_tokens"],
             costUSD: row["cost_usd"], becauseKind: row["because_kind"],
-            becauseQuote: row["because_quote"], error: row["error"] as String? ?? ""
+            becauseQuote: row["because_quote"], error: row["error"] as String? ?? "",
+            kind: row["kind"] as String? ?? "tool"
         )
     }
 }

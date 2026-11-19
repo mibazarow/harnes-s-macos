@@ -42,6 +42,44 @@ final class ActionErrorTests: XCTestCase {
     }
 }
 
+/// B10: a model call is not a tool call.
+final class ActionKindTests: XCTestCase {
+    private func draft(_ tool: String, kind: String) -> ActionJournal.Draft {
+        ActionJournal.Draft(
+            sessionID: "s", messageID: "m", step: 1, tool: tool, args: "{}",
+            outcome: "done", model: "model", promptTokens: 0, completionTokens: 0,
+            costUSD: 0, becauseKind: "message", becauseQuote: "", kind: kind
+        )
+    }
+
+    func testToolUsageExcludesModelCalls() async throws {
+        let database = try AppDatabase(inMemory: true)
+        let journal = ActionJournal(database: database)
+        _ = try await journal.record(draft("model", kind: "model"))
+        _ = try await journal.record(draft("model", kind: "model"))
+        _ = try await journal.record(draft("bash", kind: "tool"))
+        _ = try await journal.record(draft("bash", kind: "tool"))
+        _ = try await journal.record(draft("fs_read", kind: "tool"))
+
+        let usage = try await journal.toolUsage(since: Date().addingTimeInterval(-3_600))
+        XCTAssertEqual(usage.map(\.tool), ["bash", "fs_read"])
+        XCTAssertEqual(usage.first?.count, 2)
+        XCTAssertFalse(usage.contains { $0.tool == "model" })
+    }
+
+    func testDefaultKindIsTool() async throws {
+        let database = try AppDatabase(inMemory: true)
+        let journal = ActionJournal(database: database)
+        _ = try await journal.record(ActionJournal.Draft(
+            sessionID: "s", messageID: "m", step: 1, tool: "bash", args: "{}",
+            outcome: "done", model: "m", promptTokens: 0, completionTokens: 0,
+            costUSD: 0, becauseKind: "message", becauseQuote: ""
+        ))
+        let rows = try await journal.list(limit: 1)
+        XCTAssertEqual(rows.first?.kind, "tool")
+    }
+}
+
 /// B8: the retry path of `memory_add`.
 @MainActor
 final class MemoryAddRetryTests: XCTestCase {
