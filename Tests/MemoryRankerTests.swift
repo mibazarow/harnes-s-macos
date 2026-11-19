@@ -1,24 +1,52 @@
 import XCTest
 @testable import Harness
 
-/// P34: relevance is the main signal; recency and access only break ties, with a cap
-/// that keeps frequency from beating a better match.
+/// B12: relevance first, then decay, frequency and importance as multipliers.
 final class MemoryRankerTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
-    func testRecencyHalvesAtTheHalfLife() {
+    func testRecencyFollowsTheDailyDecay() {
         XCTAssertEqual(MemoryRanker.recency(lastUsed: now, now: now), 1, accuracy: 0.0001)
-        let half = now.addingTimeInterval(-MemoryRanker.recencyHalfLifeDays * 86_400)
-        XCTAssertEqual(MemoryRanker.recency(lastUsed: half, now: now), 0.5, accuracy: 0.001)
-        let year = now.addingTimeInterval(-365 * 86_400)
-        XCTAssertLessThan(MemoryRanker.recency(lastUsed: year, now: now), 0.001)
+        let month = now.addingTimeInterval(-30 * 86_400)
+        XCTAssertEqual(
+            MemoryRanker.recency(lastUsed: month, now: now),
+            pow(0.985, 30), accuracy: 0.0001
+        )
+        // Half the weight after about 46 days, not after 30.
+        XCTAssertGreaterThan(MemoryRanker.recency(lastUsed: month, now: now), 0.5)
+        let halfLife = now.addingTimeInterval(-46 * 86_400)
+        XCTAssertEqual(MemoryRanker.recency(lastUsed: halfLife, now: now), 0.5, accuracy: 0.02)
         XCTAssertEqual(MemoryRanker.recency(lastUsed: nil, now: now), 0)
     }
 
-    func testAccessIsLogarithmicAndCapped() {
-        XCTAssertGreaterThan(MemoryRanker.access(hits: 10), MemoryRanker.access(hits: 1))
+    func testQuestionAboutThePastHasNoDecay() {
+        XCTAssertTrue(MemoryRanker.isPastQuestion("когда мы выкладывали релиз?"))
+        XCTAssertTrue(MemoryRanker.isPastQuestion("помнишь, что было раньше"))
+        XCTAssertFalse(MemoryRanker.isPastQuestion("собери релиз"))
+
+        let year = now.addingTimeInterval(-365 * 86_400)
         XCTAssertEqual(
-            MemoryRanker.access(hits: 1_000_000), MemoryRanker.accessBonusMax, accuracy: 0.0001
+            MemoryRanker.recency(lastUsed: year, now: now, isPastQuestion: true), 1
+        )
+        let stale = MemoryRanker.score(
+            relevance: 0.5, hits: 0, lastUsed: year, now: now, isPastQuestion: true
+        )
+        let stalePenalised = MemoryRanker.score(
+            relevance: 0.5, hits: 0, lastUsed: year, now: now
+        )
+        XCTAssertGreaterThan(stale, stalePenalised)
+    }
+
+    func testFrequencyIsLinearAndCapped() {
+        XCTAssertEqual(MemoryRanker.frequency(hits: 0), 1)
+        XCTAssertEqual(MemoryRanker.frequency(hits: 3), 1.3, accuracy: 0.0001)
+        XCTAssertEqual(MemoryRanker.frequency(hits: 10_000), MemoryRanker.frequencyCap)
+    }
+
+    func testWorthlessRecordScoresLower() {
+        XCTAssertLessThan(
+            MemoryRanker.score(relevance: 0.5, hits: 0, lastUsed: now, now: now, importance: 0),
+            MemoryRanker.score(relevance: 0.5, hits: 0, lastUsed: now, now: now, importance: 1)
         )
     }
 
@@ -30,7 +58,9 @@ final class MemoryRankerTests: XCTestCase {
     }
 
     func testFrequencyCannotBeatAnExactMatch() {
-        let exact = MemoryRanker.score(relevance: 0.9, hits: 0, lastUsed: nil, now: now)
+        // A record with no date at all scores zero: in real data `createdAt` always
+        // exists, so the comparison uses a dated record.
+        let exact = MemoryRanker.score(relevance: 0.9, hits: 0, lastUsed: now, now: now)
         let frequent = MemoryRanker.score(relevance: 0.1, hits: 10_000, lastUsed: now, now: now)
         XCTAssertGreaterThan(exact, frequent)
     }
@@ -40,7 +70,7 @@ final class MemoryRankerTests: XCTestCase {
         let memory = MemoryService(database: database)
 
         let used = try await memory.add("Сервер альфа")
-        let _ = try await memory.add("Сервер бета")
+        _ = try await memory.add("Сервер бета")
         for _ in 0..<10 { try await memory.touch(ids: [used.id]) }
 
         let hits = try await memory.search("сервер")

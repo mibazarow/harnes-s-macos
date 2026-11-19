@@ -649,7 +649,7 @@ actor MemoryService {
         let match = tokens.map { "\"\($0)\"*" }.joined(separator: " OR ")
 
         do {
-            return try database.queue.read { db in
+            let found: [MemoryItem] = try database.queue.read { db in
                 // Read more than asked: the priors can move a record a few positions,
                 // and cutting to `limit` before ranking would hide the candidates the
                 // priors exist to promote (P34).
@@ -667,6 +667,8 @@ actor MemoryService {
 
                 let now = Date()
                 let formatter = ISO8601DateFormatter()
+                // B12: a question about the past does not punish old records.
+                let past = MemoryRanker.isPastQuestion(query)
                 let ranked = rows.map { row -> MemoryItem in
                     var item = Self.item(from: row)
                     let lastUsed = (item.lastUsedAt ?? item.createdAt)
@@ -675,7 +677,9 @@ actor MemoryService {
                         relevance: MemoryRanker.relevance(bm25: row["rank"]),
                         hits: item.hits,
                         lastUsed: lastUsed,
-                        now: now
+                        now: now,
+                        importance: item.importance,
+                        isPastQuestion: past
                     )
                     return item
                 }
@@ -684,8 +688,30 @@ actor MemoryService {
                     .prefix(limit)
                     .map { $0 }
             }
+            // B12: an empty result is a dead end for the agent. When nothing matched,
+            // the last two days are what it most likely wanted anyway.
+            if found.isEmpty {
+                return try recent(sinceHours: 48, limit: limit)
+            }
+            return found
         } catch {
             return try list(limit: limit)
+        }
+    }
+
+    /// B12: the fallback list. Active records written or used in the last `hours`,
+    /// newest first; empty when the window has nothing.
+    func recent(sinceHours hours: Int, limit: Int = 10) throws -> [MemoryItem] {
+        let cutoff = ISO8601DateFormatter().string(
+            from: Date().addingTimeInterval(-Double(hours) * 3_600)
+        )
+        return try database.queue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT * FROM memory
+                WHERE scope = 'user' AND importance > 0 AND \(Self.activeClause)
+                  AND COALESCE(last_used_at, created_at) >= ?
+                ORDER BY id DESC LIMIT ?
+                """, arguments: [cutoff, limit]).map(Self.item(from:))
         }
     }
 
