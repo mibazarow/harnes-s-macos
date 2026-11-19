@@ -182,7 +182,16 @@ Swift 6 и SwiftUI, без Electron в рантайме. В простое — �
 
 Последняя версия — [1.0.2](https://github.com/mibazarow/harnes-s-macos/releases/latest): `HARNES-S-1.0.2-macOS.dmg`.
 
-Открыть образ, перетащить `Harness.app` в `Applications`. Подпись — Developer ID, но нотаризации Apple нет, поэтому первый запуск: правый клик по приложению → **Открыть** → **Открыть** ещё раз. Альтернатива в Терминале:
+Открыть образ, перетащить `Harness.app` в `Applications`. Сборка подписана **Developer ID** и нотаризована Apple, если в релизе пристёгнут тикет нотаризации. Проверить это на скачанном файле можно так:
+
+```bash
+xcrun stapler validate HARNES-S-1.0.2-macOS.dmg
+spctl -a -vvv -t install /Applications/Harness.app
+```
+
+Если `stapler` отвечает «The validate action worked!», а `spctl` — `accepted` и `source=Notarized Developer ID`, приложение запускается двойным кликом без предупреждений.
+
+Если же в конкретном релизе нотаризации нет (это видно по `source=Unnotarized Developer ID`), первый запуск: правый клик по приложению → **Открыть** → **Открыть** ещё раз. Альтернатива в Терминале:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Harness.app
