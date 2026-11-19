@@ -197,6 +197,8 @@ extension ChatStore {
             history: all.reduce(0) { $0 + $1.tokens },
             images: upcomingImages,
             messages: all.count,
+            memory: promptMemoryCount,
+            memoryTokens: promptMemoryTokens,
             phase: "pre_prune"
         )
     }
@@ -225,6 +227,7 @@ extension ChatStore {
     ) async -> Bool {
         guard !contextMessages.isEmpty else { return false }
         let beforeTokens = promptMessages.reduce(0) { $0 + $1.tokens }
+        let summaryBefore = TokenEstimator.tokens(in: checkpointSummary)
 
         // R31.3: the fold is about to drop these messages. Pull durable facts out first,
         // in one bounded request; a failure here must not stop the compaction that keeps
@@ -273,6 +276,13 @@ extension ChatStore {
             recordCompactionEffectiveness(
                 before: beforeTokens, services: services
             )
+            // B2: without this line a successful fold is invisible in the log, and the
+            // next session cannot tell it apart from a fold that never ran.
+            Self.logLatency(CompactionLog.ok(
+                messages: contextMessages.count,
+                summaryBefore: summaryBefore,
+                summaryAfter: TokenEstimator.tokens(in: summary)
+            ))
             return true
         } catch {
             compactionFailures += 1
@@ -280,7 +290,9 @@ extension ChatStore {
             // tenth is just burning tokens against a broken provider.
             let seconds: TimeInterval = compactionFailures >= 3 ? 600 : 120
             compactionCooldownUntil = Date().addingTimeInterval(seconds)
-            Self.logLatency("compaction failed (\(compactionFailures)x): \(error.localizedDescription)")
+            Self.logLatency(CompactionLog.failure(
+                attempts: compactionFailures, reason: error.localizedDescription
+            ))
             return false
         }
     }
@@ -340,11 +352,18 @@ extension ChatStore {
 
         // Preflight already handled the case where the request would not fit; a retry
         // here would be the same request again.
-        if compactionCoolingDown { return }
+        if compactionCoolingDown {
+            // B4: the silent exit left no trace at all, so a skipped fold looked like a
+            // fold that never happened.
+            Self.logLatency(CompactionLog.cooldown(failures: compactionFailures))
+            return
+        }
 
         var guardState = Self.loadCompactionGuard(services: services)
         if let blocked = guardState.blockedUntil, blocked > Date() {
-            Self.logLatency("compaction blocked by strikes until \(blocked.ISO8601Format())")
+            Self.logLatency(CompactionLog.blocked(
+                until: blocked, strikes: guardState.strikes
+            ))
             return
         }
         if guardState.blockedUntil != nil {
@@ -549,7 +568,9 @@ extension ChatStore {
             summary: TokenEstimator.tokens(in: checkpointSummary),
             history: prepared.included.reduce(0) { $0 + $1.tokens },
             images: images.reduce(0) { $0 + ImageCost.tokens(in: $1) },
-            messages: history.count
+            messages: history.count,
+            memory: promptMemoryCount,
+            memoryTokens: promptMemoryTokens
         )
         Self.logLatency(breakdown.line)
         return history
