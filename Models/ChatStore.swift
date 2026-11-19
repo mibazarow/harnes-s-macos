@@ -276,13 +276,22 @@ final class ChatStore {
             .filter { $0.area == "preferences" || $0.area == "lessons" }
             .map(\.content)
 
+        // R32.3: one counter per turn. The line is written on every exit path, so a
+        // turn that never asked the memory is visible too.
+        let memoryUsage = MemoryUsageCounter()
+        defer {
+            let counts = memoryUsage.snapshot
+            Self.logLatency(MemoryUsageCounter.logLine(calls: counts.calls, hits: counts.hits))
+        }
+
         let registry = makeRegistry(
             text: text,
             provider: provider,
             model: model,
             services: services,
             trustCandidates: trustCandidates,
-            trustInstructions: trustInstructions
+            trustInstructions: trustInstructions,
+            memoryUsage: memoryUsage
         )
 
         schemaTokens = await registry.schemaTokenCost()
@@ -1098,7 +1107,8 @@ final class ChatStore {
         model: String,
         services: AppServices,
         trustCandidates: [TrustCandidate],
-        trustInstructions: [String]
+        trustInstructions: [String],
+        memoryUsage: MemoryUsageCounter
     ) -> ToolRegistry {
         ToolRegistry(
             workspace: AppPaths.workspaceDirectory,
@@ -1140,7 +1150,8 @@ final class ChatStore {
                 log: { line in ChatStore.logLatency(line) }
             ),
             catalog: toolCatalog,
-            processes: backgroundProcesses
+            processes: backgroundProcesses,
+            memoryUsage: memoryUsage
         )
     }
 

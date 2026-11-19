@@ -109,6 +109,8 @@ struct ToolRegistry: Sendable {
     let repeatGuard: ToolRepeatGuard
     /// R32.3: the stop token, shared with the turn. Long tools subscribe to it.
     let cancel: AgentAbortSignal
+    /// R32.3: per-turn count of memory lookups, logged once at the end of the turn.
+    let memoryUsage: MemoryUsageCounter?
 
     init(
         workspace: URL,
@@ -136,7 +138,8 @@ struct ToolRegistry: Sendable {
         catalog: ToolCatalogState = ToolCatalogState(),
         processes: BackgroundProcessService? = nil,
         repeatGuard: ToolRepeatGuard = ToolRepeatGuard(),
-        cancel: AgentAbortSignal = .shared
+        cancel: AgentAbortSignal = .shared,
+        memoryUsage: MemoryUsageCounter? = nil
     ) {
         self.workspaceState = workspaceState ?? WorkspaceState(workspace)
         self.currentUserMessage = currentUserMessage
@@ -163,6 +166,7 @@ struct ToolRegistry: Sendable {
         self.catalog = catalog
         self.repeatGuard = repeatGuard
         self.cancel = cancel
+        self.memoryUsage = memoryUsage
     }
 
     static let mutatingTools: Set<String> = [

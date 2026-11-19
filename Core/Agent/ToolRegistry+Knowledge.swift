@@ -142,13 +142,17 @@ extension ToolRegistry {
         // records and recent decisions, ten lines at most. It is the cheap way to look
         // up when there is nothing specific to search for.
         if query.isEmpty {
+            memoryUsage?.recordCall()
             let overview = try await memory.overview()
+            memoryUsage?.recordHits(overview.count)
             guard !overview.isEmpty else { return .ok("Память пуста.") }
             return .ok(overview.map { item in
                 let mark = item.pinned ? "📌 " : ""
                 return "#\(item.id) \(mark)[\(item.kind)] \(item.content)"
             }.joined(separator: "\n"))
         }
+
+        memoryUsage?.recordCall()
 
         if let embeddings {
             let search = HybridSearch(
@@ -159,6 +163,7 @@ extension ToolRegistry {
             )
             let outcome = await search.searchDetailed(query)
             let hits = outcome.hits
+            memoryUsage?.recordHits(hits.count)
             guard !hits.isEmpty else { return .ok("Ничего не найдено.") }
             return .ok(hits.prefix(8).map { hit in
                 let source = hit.semanticScore != nil ? "semantic+fts" : "fts"
@@ -167,6 +172,7 @@ extension ToolRegistry {
         }
 
         let hits = try await memory.search(query)
+        memoryUsage?.recordHits(hits.count)
         guard !hits.isEmpty else { return .ok("Ничего не найдено.") }
         return .ok(hits.prefix(8).map { "#\($0.id) [\($0.kind)] \($0.content)" }.joined(separator: "\n"))
     }
