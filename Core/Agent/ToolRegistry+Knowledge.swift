@@ -155,9 +155,12 @@ extension ToolRegistry {
         guard let memory else { return .fail("Память недоступна") }
         let items = try await memory.list(limit: 60)
         guard !items.isEmpty else { return .ok("Память пуста.") }
+        // R33.3: show contradictions, do not resolve them.
+        let marks = MemoryContradiction.marks(items)
         return .ok(items.map { item in
             let mark = item.pinned ? "📌 " : ""
-            return "#\(item.id) \(mark)[\(item.kind)] \(item.content)"
+            let conflict = MemoryContradiction.suffix(item.id, marks: marks)
+            return "#\(item.id) \(mark)[\(item.kind)] \(item.content)\(conflict)"
         }.joined(separator: "\n"))
     }
 
