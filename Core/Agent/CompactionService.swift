@@ -11,10 +11,10 @@ actor CompactionService {
         var summary: String
         var coveredMessageCount: Int
         var createdAt: String
-        /// M33: the high-water mark of messages already folded into `summary`. New
-        /// compactions take only what is after it and append; the old text is never
-        /// re-summarized. Optional so checkpoints written before the column existed
-        /// still decode.
+        /// B1: the stored id of the last message folded into `summary`, not a count.
+        /// The count lives in `coveredMessageCount`; mixing the two is what let the
+        /// boundary run past the end of the history after a restart. Optional so
+        /// checkpoints written before the column existed still decode.
         var summarizedUpTo: Int?
 
         enum CodingKeys: String, CodingKey {
@@ -24,7 +24,10 @@ actor CompactionService {
             case summarizedUpTo = "summarized_up_to"
         }
 
-        var boundary: Int { summarizedUpTo ?? coveredMessageCount }
+        /// B1: only a legacy checkpoint (no id) falls back to the count. New code always
+        /// writes the id.
+        var boundaryID: Int? { summarizedUpTo }
+        var isLegacy: Bool { summarizedUpTo == nil }
     }
 
     private static let key = "compaction.checkpoint"
@@ -59,14 +62,50 @@ actor CompactionService {
         }
     }
 
-    func saveSummarizedUpTo(_ count: Int, database: AppDatabase) throws {
+    /// B1: `boundary` is a stored message id, never a count.
+    func saveSummarizedUpTo(_ boundary: Int, database: AppDatabase) throws {
         try database.queue.write { db in
             try db.execute(sql: """
                 INSERT INTO chat_state (id, summarized_up_to, updated_at) VALUES (1, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     summarized_up_to = excluded.summarized_up_to,
                     updated_at = excluded.updated_at
+                """, arguments: [boundary, Timestamps.now()])
+        }
+    }
+
+    func loadCoveredCount(database: AppDatabase) throws -> Int {
+        try database.queue.read { db in
+            try Int.fetchOne(
+                db, sql: "SELECT covered_message_count FROM chat_state WHERE id = 1"
+            ) ?? 0
+        }
+    }
+
+    func saveCoveredCount(_ count: Int, database: AppDatabase) throws {
+        try database.queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO chat_state (id, covered_message_count, updated_at) VALUES (1, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    covered_message_count = excluded.covered_message_count,
+                    updated_at = excluded.updated_at
                 """, arguments: [count, Timestamps.now()])
+        }
+    }
+
+    /// B1: the stored id of the `covered`-th message in insertion order — the same
+    /// boundary the old count described, expressed as an id. Clamped to the newest id,
+    /// so it can never point past the end of the history.
+    func boundaryID(forCovered covered: Int, database: AppDatabase) throws -> Int {
+        guard covered > 0 else { return 0 }
+        return try database.queue.read { db in
+            if let id = try Int.fetchOne(
+                db, sql: "SELECT id FROM messages ORDER BY id ASC LIMIT 1 OFFSET ?",
+                arguments: [covered - 1]
+            ) {
+                return id
+            }
+            return try Int.fetchOne(db, sql: "SELECT MAX(id) FROM messages") ?? 0
         }
     }
 

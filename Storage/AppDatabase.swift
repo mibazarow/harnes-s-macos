@@ -483,6 +483,46 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v22_summary_boundary_id") { db in
+            // B1: `summarized_up_to` held a message *count* while everything reading it
+            // treated it as a message *id*. The two drifted apart on restart, and the
+            // boundary ran past the end of the history. The count moves to its own
+            // column; the id is rebuilt from the count once, then maintained as an id.
+            let columns = try db.columns(in: "chat_state").map(\.name)
+            if !columns.contains("covered_message_count") {
+                try db.execute(sql: """
+                    ALTER TABLE chat_state
+                    ADD COLUMN covered_message_count INTEGER NOT NULL DEFAULT 0;
+                    """)
+            }
+
+            let legacy = try Int.fetchOne(
+                db, sql: "SELECT summarized_up_to FROM chat_state WHERE id = 1"
+            ) ?? 0
+            let covered = try Int.fetchOne(
+                db, sql: "SELECT covered_message_count FROM chat_state WHERE id = 1"
+            ) ?? 0
+            guard legacy > 0, covered == 0 else { return }
+
+            try db.execute(
+                sql: "UPDATE chat_state SET covered_message_count = ? WHERE id = 1",
+                arguments: [legacy]
+            )
+            let boundary: Int
+            if let id = try Int.fetchOne(
+                db, sql: "SELECT id FROM messages ORDER BY id ASC LIMIT 1 OFFSET ?",
+                arguments: [max(legacy - 1, 0)]
+            ) {
+                boundary = id
+            } else {
+                boundary = try Int.fetchOne(db, sql: "SELECT MAX(id) FROM messages") ?? 0
+            }
+            try db.execute(
+                sql: "UPDATE chat_state SET summarized_up_to = ? WHERE id = 1",
+                arguments: [boundary]
+            )
+        }
+
         return migrator
 
     }

@@ -48,7 +48,11 @@ final class SummaryBoundaryTests: XCTestCase {
         let checkpoint = try JSONDecoder().decode(
             CompactionService.Checkpoint.self, from: Data(raw.utf8)
         )
-        XCTAssertEqual(checkpoint.boundary, 5)
+        // B1: a legacy document has no id, so it is marked legacy and the count stays
+        // where it belongs.
+        XCTAssertTrue(checkpoint.isLegacy)
+        XCTAssertNil(checkpoint.boundaryID)
+        XCTAssertEqual(checkpoint.coveredMessageCount, 5)
     }
 
     func testTwoCompactionsKeepTheFirstText() async throws {

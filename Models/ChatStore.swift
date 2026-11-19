@@ -1425,12 +1425,20 @@ final class ChatStore {
 
         // Restore the compaction checkpoint, otherwise a saved summary would be
         // silently dropped on restart.
+        var boundaryID: Int = 0
         if let checkpoint = try? await services.compaction.loadCheckpoint(database: services.database) {
             checkpointSummary = checkpoint.summary
-            let storedBoundary = (try? await services.compaction.loadSummarizedUpTo(
+            // B1: the count and the id are separate fields. The id comes from
+            // `chat_state`, which older builds rewrote as a whole; fall back to the
+            // checkpoint document only when the table has nothing.
+            let storedID = (try? await services.compaction.loadSummarizedUpTo(
                 database: services.database
             )) ?? 0
-            checkpointCovered = max(storedBoundary, checkpoint.boundary)
+            let storedCount = (try? await services.compaction.loadCoveredCount(
+                database: services.database
+            )) ?? 0
+            boundaryID = storedID > 0 ? storedID : (checkpoint.boundaryID ?? 0)
+            checkpointCovered = max(storedCount, checkpoint.coveredMessageCount)
         }
 
         let stored: [StoredMessage]
@@ -1449,14 +1457,14 @@ final class ChatStore {
         oldestStoredID = stored.first?.id
         hasMoreHistory = (try? await services.history.hasOlder(than: stored[0].id)) ?? false
 
-        // Rebuild the compaction boundary from stored counts. The checkpoint holds how
-        // many messages are already summarized; everything older than the uncovered
-        // tail is one of them, so it must not be sent again on top of the summary.
-        if checkpointCovered > 0 {
-            let total = (try? await services.history.count()) ?? restored.count
-            let coveredInView = Self.coveredInView(total: total, covered: checkpointCovered, inView: restored.count)
-            if coveredInView > 0 {
-                compactedThroughID = restored[coveredInView - 1].id
+        // B1: the boundary is an id, so the view is scanned for the last stored message
+        // at or before it. A boundary older than the loaded page covers nothing here,
+        // which is correct: those messages are simply not in this window.
+        if boundaryID > 0 {
+            let persisted = stored.filter { $0.role != ChatMessage.Role.system.rawValue }
+            if let index = persisted.lastIndex(where: { $0.id <= Int64(boundaryID) }),
+               index < restored.count {
+                compactedThroughID = restored[index].id
             }
         }
     }
@@ -1480,14 +1488,6 @@ final class ChatStore {
         } catch {
             hasMoreHistory = false
         }
-    }
-
-    /// How many of the restored messages are already inside the checkpoint.
-    /// `uncovered` messages at the end of storage are the ones the checkpoint does not
-    /// cover; everything before them is summarized.
-    nonisolated static func coveredInView(total: Int, covered: Int, inView: Int) -> Int {
-        let uncovered = max(total - covered, 0)
-        return min(max(inView - uncovered, 0), inView)
     }
 
     private static func restore(_ stored: [StoredMessage]) -> [ChatMessage] {
