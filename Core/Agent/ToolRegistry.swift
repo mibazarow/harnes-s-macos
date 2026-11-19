@@ -414,6 +414,7 @@ struct ToolRegistry: Sendable {
             case "memory_search": return try await memorySearch(args)
             case "memory_forget": return try await memoryForget(args)
             case "memory_list": return try await memoryList(args)
+            case "memory_stats": return try await memoryStats(args)
             case "secret_save": return try await secretSave(args)
             case "secret_get": return try await secretGet(args)
             case "secret_search": return try await secretSearch(args)

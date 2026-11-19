@@ -837,6 +837,12 @@ extension ToolRegistry {
             parameters: schema([:], required: [])
         ),
         ToolDefinition(
+            name: "memory_stats",
+            exposure: .deferred,
+            description: "Memory health in one call: counts by area, pinned, unverified, contradictions, never read, due for GC.",
+            parameters: schema([:], required: [])
+        ),
+        ToolDefinition(
             name: "memory_search",
             exposure: .core,
             description: "Search saved memory. Without query: pinned records and recent decisions, ten lines.",

@@ -133,6 +133,8 @@ struct MemoryItem: Identifiable, Sendable, Equatable {
     /// R33.3: 0 means "worthless, collect when untouched"; 1 is the default for every
     /// record and keeps it forever. 2–3 are reserved for a future manual ranking.
     var importance: Int = 1
+    /// Last write of any kind, as stored. `createdAt` never moves; this does.
+    var updatedAt: String = ""
     var score: Double?
 
     /// R30.8: `area/id`. The old slug was the first three words of the body, so every

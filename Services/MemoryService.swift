@@ -474,6 +474,42 @@ actor MemoryService {
             .map(String.init)
     }
 
+    /// R34.2: the numbers behind `memory_stats`. Counted from the active records only:
+    /// a superseded row is history, not memory.
+    func stats(now: Date = Date()) throws -> MemoryStats {
+        let items = try database.queue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT * FROM memory WHERE scope = 'user' AND \(Self.activeClause)
+                """).map(Self.item(from:))
+        }
+        let gcCutoff = ISO8601DateFormatter().string(
+            from: now.addingTimeInterval(-150 * 86_400)
+        )
+        var byArea: [String: Int] = [:]
+        var pinned = 0
+        var unverified = 0
+        var neverUsed = 0
+        var gcSoon = 0
+        for item in items {
+            byArea[item.area, default: 0] += 1
+            if item.pinned { pinned += 1 }
+            if item.importance == 0 { unverified += 1 }
+            if item.hits == 0 { neverUsed += 1 }
+            let stamp = item.lastUsedAt ?? item.updatedAt
+            if item.importance == 0, !item.pinned, item.hits == 0, stamp < gcCutoff {
+                gcSoon += 1
+            }
+        }
+        return MemoryStats(
+            byArea: byArea,
+            pinned: pinned,
+            unverified: unverified,
+            contradictions: MemoryContradiction.marks(items).count,
+            gcSoon: gcSoon,
+            neverUsed: neverUsed
+        )
+    }
+
     /// R33.3: the only automatic deletion. A record is collected when it is worthless by
     /// its own marker (`importance = 0`), never used, not pinned and untouched for half a
     /// year. Everything else — including every record saved before the column existed,
@@ -720,7 +756,23 @@ actor MemoryService {
             area: row["area"] as String? ?? "fact",
             quote: row["quote"] as String?,
             supersedesID: row["supersedes_id"] as Int64?,
-            importance: row["importance"] as Int? ?? 1
+            importance: row["importance"] as Int? ?? 1,
+            updatedAt: row["updated_at"] as String? ?? ""
         )
     }
+}
+/// R34.2: one call that answers "is memory a tool or a dump".
+struct MemoryStats: Equatable, Sendable {
+    var byArea: [String: Int]
+    var pinned: Int
+    /// Saved as a result claim without a proving command (R33.1).
+    var unverified: Int
+    /// Records that contradict another record in the same area (R33.3).
+    var contradictions: Int
+    /// Will be collected by GC within 30 days if nothing touches them.
+    var gcSoon: Int
+    /// Never read since it was written.
+    var neverUsed: Int
+
+    var total: Int { byArea.values.reduce(0, +) }
 }

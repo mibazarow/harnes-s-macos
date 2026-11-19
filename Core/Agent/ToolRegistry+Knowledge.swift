@@ -223,6 +223,26 @@ extension ToolRegistry {
         }
     }
 
+    /// R34.2: one read-only call that says whether memory is a tool or a dump.
+    func memoryStats(_ args: [String: Any]) async throws -> ToolResult {
+        guard let memory else { return .fail("Память недоступна") }
+        let stats = try await memory.stats()
+        guard stats.total > 0 else { return .ok("Память пуста.") }
+
+        let areas = stats.byArea.sorted { $0.key < $1.key }
+            .map { "\($0.key): \($0.value)" }
+            .joined(separator: ", ")
+        return .ok("""
+        Всего: \(stats.total)
+        По area: \(areas)
+        Закреплено: \(stats.pinned)
+        Не проверено (R33.1): \(stats.unverified)
+        Противоречий (R33.3): \(stats.contradictions)
+        Ни разу не читано: \(stats.neverUsed)
+        Уйдёт под GC в ближайшие 30 дней: \(stats.gcSoon)
+        """)
+    }
+
 // MARK: - Secrets
     func secretSave(_ args: [String: Any]) async throws -> ToolResult {
         guard let secrets else { return .fail("Секреты недоступны") }
