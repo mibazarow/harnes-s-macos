@@ -13,6 +13,11 @@ struct PromptBreakdown: Sendable, Equatable {
     var history: Int
     var images: Int
     var messages: Int
+    /// B9: the memory block is inside `system`, so without these two numbers there is no
+    /// way to tell how many records actually reached the prompt or whether the budget
+    /// dropped half of them.
+    var memory: Int = 0
+    var memoryTokens: Int = 0
     /// `pre_prune` marks the line logged before tool output is stubbed. Without two
     /// lines per request the log cannot tell the pruner's own delta from the estimator's
     /// error, which is exactly the confusion R15.8 had to untangle.
@@ -22,7 +27,8 @@ struct PromptBreakdown: Sendable, Equatable {
 
     var line: String {
         let base = "prompt_breakdown system=\(system) tools=\(tools) summary=\(summary) "
-            + "history=\(history) images=\(images) total_est=\(total) messages=\(messages)"
+            + "history=\(history) images=\(images) total_est=\(total) messages=\(messages) "
+            + "memory=\(memory) memory_tok=\(memoryTokens)"
         return phase.map { base + " phase=\($0)" } ?? base
     }
 }

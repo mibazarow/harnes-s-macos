@@ -738,6 +738,11 @@ final class ChatStore {
 
     /// R34.1: records that did not fit the memory budget this turn.
     var promptMemoryOmitted = 0
+    /// B9: how many records and tokens the memory block actually put into the prompt.
+    /// Set where the block is assembled, so the number describes the request that was
+    /// sent, not the records that existed.
+    var promptMemoryCount = 0
+    var promptMemoryTokens = 0
     /// R30.8: the prompt block, read once per turn.
     ///
     /// The block deliberately ignores the current question. Ordering it by relevance to
@@ -889,6 +894,8 @@ final class ChatStore {
         } else {
             memories = []
         }
+        promptMemoryCount = memories.count
+        promptMemoryTokens = memories.reduce(0) { $0 + TokenEstimator.tokens(in: $1.promptText) }
         if let services, !memories.isEmpty {
             // R30.2/R30.3: grouped by area, one line per record. Lessons are corrections
             // and are always here; they outrank facts. R30.8: the body is 600 characters
