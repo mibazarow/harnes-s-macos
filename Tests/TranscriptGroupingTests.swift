@@ -136,6 +136,24 @@ final class TranscriptGroupingTests: XCTestCase {
         XCTAssertEqual(ChatMessage.trimToDisplayLimit(history, limit: 200), 1)
     }
 
+    func testPruneNoticeIsRecognisedAndStaysOutOfTheTranscript() {
+        let notice = CompactionLog.pruneNotice(results: 4, savedTokens: 5_000)
+
+        XCTAssertTrue(ChatMessage(role: .system, text: notice).isPruneNotice)
+        XCTAssertFalse(ChatMessage(role: .assistant, text: notice).isPruneNotice,
+                       "only system rows are notes")
+
+        let history = [
+            ChatMessage(role: .user, text: "сделай"),
+            ChatMessage(role: .assistant, text: "готово"),
+            ChatMessage(role: .system, text: notice)
+        ]
+        let shown = ChatMessage.groupedForDisplay(history).filter { !$0.isPruneNotice }
+
+        XCTAssertEqual(shown.count, 2, "the note is stored but not shown")
+        XCTAssertEqual(history.count, 3, "storage keeps it for the log and the history")
+    }
+
     func testAssistantWithoutToolsIsNotGrouped() {
         let history = [
             ChatMessage(role: .assistant, text: "просто текст"),

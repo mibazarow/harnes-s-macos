@@ -311,6 +311,18 @@ extension ChatMessage {
             && state != .queued
     }
 
+    /// A system row the user never sees: the note the store leaves after it pruned
+    /// finished tool output at a task boundary.
+    ///
+    /// It is still a `.system` message in storage, so the reason for a shrunken request
+    /// stays recoverable. What changed is the display: the note showed up after almost
+    /// every task, always said the same thing, and carried nothing but the word count of
+    /// a housekeeping step. Pruning itself still happens — only the line is filtered out.
+    var isPruneNotice: Bool {
+        role == .system
+            && text.hasPrefix("Результаты инструментов убраны из запроса:")
+    }
+
     /// Collapses runs of tool-only steps into one message for display.
     ///
     /// Every model step gets its own message, so ten sequential `bash` calls arrived as

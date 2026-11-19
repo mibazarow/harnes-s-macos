@@ -177,7 +177,7 @@ struct TranscriptView: View {
         if let signature = displayedCacheSignature, signature == displaySignature {
             return displayedCache
         }
-        return ChatMessage.groupedForDisplay(chat.messages)
+        return ChatMessage.groupedForDisplay(chat.messages).filter { !$0.isPruneNotice }
     }
 
     /// Everything that changes the grouping: how many messages there are and how the
@@ -193,7 +193,7 @@ struct TranscriptView: View {
     }
 
     private func refreshDisplay() {
-        displayedCache = ChatMessage.groupedForDisplay(chat.messages)
+        displayedCache = ChatMessage.groupedForDisplay(chat.messages).filter { !$0.isPruneNotice }
         displayedCacheSignature = displaySignature
     }
 
