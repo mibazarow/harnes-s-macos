@@ -103,8 +103,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: app.project-s.swift
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_NAME: Harness
-        MARKETING_VERSION: "1.0.1"
-        CURRENT_PROJECT_VERSION: "102"
+        MARKETING_VERSION: "1.0.2"
+        CURRENT_PROJECT_VERSION: "103"
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
         COMBINE_HIDPI_IMAGES: YES
         GENERATE_INFOPLIST_FILE: NO
