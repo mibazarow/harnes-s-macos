@@ -933,6 +933,21 @@ extension ToolRegistry {
         )
     ]
 
+
+    /// Fails the first schema literal with a duplicated key instead of trapping inside
+    /// `Dictionary.init(dictionaryLiteral:)`, where the crash log only shows Swift runtime
+    /// internals and names no tool. Run in tests; the check is linear and costs nothing.
+    static func duplicateSchemaKeys() -> [String] {
+        definitions.compactMap { definition in
+            var seen = Set<String>()
+            var duplicated: [String] = []
+            for key in definition.parameters.keys.sorted() where !seen.insert(key).inserted {
+                duplicated.append(key)
+            }
+            return duplicated.isEmpty ? nil : "\(definition.name): \(duplicated.joined(separator: ", "))"
+        }
+    }
+
     private static func schema(_ properties: [String: [String: Any]], required: [String]) -> [String: AnySendable] {
         [
             "type": AnySendable("object"),

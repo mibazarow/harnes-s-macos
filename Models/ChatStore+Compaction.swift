@@ -114,13 +114,18 @@ extension ChatStore {
             guard let provider = try? await self.activeProvider(services),
                   let model = provider.defaultModel ?? provider.models.first, !model.isEmpty else { return }
 
-            let start = self.messages.firstIndex(where: { $0.id == task.first?.id }) ?? 0
+            // The snapshot is taken when the boundary is recorded; by the time the task
+            // runs, the history may have been cleared, restored or replaced. A stale
+            // `start` then walks past the end of `messages` and traps in `compact`.
+            guard let first = task.first?.id,
+                  let start = self.messages.firstIndex(where: { $0.id == first }) else { return }
             let coveredIndex = self.compactedThroughID.flatMap { id in
                 self.messages.firstIndex(where: { $0.id == id })
             }
 
             var items: [ContextMessage] = []
             for (offset, message) in task.enumerated() {
+                guard start + offset < self.messages.count else { break }
                 let index = start + offset
                 if let coveredIndex, index <= coveredIndex { continue }
                 guard message.state == .complete, message.role != .system,
@@ -253,23 +258,25 @@ extension ChatStore {
             if !retained.isEmpty, !summary.contains("Условия, поставленные пользователем") {
                 summary += "\n\n## Условия, поставленные пользователем по ходу работы\n" + retained
             }
-            checkpointSummary = summary
-            checkpointCovered += contextMessages.count
-            if let lastCompacted = contextMessages.last {
-                compactedThroughID = messages[lastCompacted.id].id
+            // Every mutation below is written to the database before the in-memory state
+            // is touched: a throw between the two used to leave the counts ahead of what
+            // was actually folded, and the boundary drifted forward on every retry.
+            let coveredAfter = checkpointCovered + contextMessages.count
+            let lastCompacted = contextMessages.last.flatMap { item in
+                item.id >= 0 && item.id < messages.count ? messages[item.id].id : nil
             }
 
             // B1: the pointer is a message id, the count is a count. Writing the count
             // into the id field is what let the boundary drift past the end of the
             // history once the app restarted and rebuilt it from the wrong coordinate.
             let boundary = (try? await services.compaction.boundaryID(
-                forCovered: checkpointCovered, database: services.database
+                forCovered: coveredAfter, database: services.database
             )) ?? 0
 
             try? await services.compaction.saveCheckpoint(
                 CompactionService.Checkpoint(
                     summary: summary,
-                    coveredMessageCount: checkpointCovered,
+                    coveredMessageCount: coveredAfter,
                     createdAt: Timestamps.now(),
                     summarizedUpTo: boundary
                 ),
@@ -281,8 +288,13 @@ extension ChatStore {
                 boundary, database: services.database
             )
             try? await services.compaction.saveCoveredCount(
-                checkpointCovered, database: services.database
+                coveredAfter, database: services.database
             )
+
+            checkpointSummary = summary
+            checkpointCovered = coveredAfter
+            if let lastCompacted { compactedThroughID = lastCompacted }
+
             compactionFailures = 0
             compactionCooldownUntil = nil
             recordCompactionEffectiveness(
