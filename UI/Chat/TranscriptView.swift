@@ -6,6 +6,7 @@ struct TranscriptView: View {
     let showTimestamps: Bool
 
     @Environment(ChatStore.self) private var chat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var atBottom = true
     @State private var nearBottom = true
@@ -19,7 +20,6 @@ struct TranscriptView: View {
     /// copied that often on the main thread. Now it is rebuilt only when the transcript
     /// actually changed, keyed by `displaySignature`.
     @State private var displayedCache: [ChatMessage] = []
-    @State private var displayedCacheSignature: Int?
 
     private let bottomID = "transcript-bottom"
 
@@ -118,7 +118,7 @@ struct TranscriptView: View {
                 if !atBottom && !follow {
                     ScrollToBottomButton(palette: palette) {
                         follow = true
-                        withAnimation(.easeOut(duration: 0.2)) {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                             proxy.scrollTo(bottomID, anchor: .bottom)
                         }
                     }
@@ -162,7 +162,7 @@ struct TranscriptView: View {
         let now = Date()
         guard now.timeIntervalSince(lastAutoScroll) >= 0.04 else { return }
         lastAutoScroll = now
-        if animated {
+        if animated && !reduceMotion {
             withAnimation(.easeOut(duration: 0.16)) {
                 proxy.scrollTo(bottomID, anchor: .bottom)
             }
@@ -174,27 +174,16 @@ struct TranscriptView: View {
     /// Messages as the transcript shows them: runs of tool-only steps collapsed into
     /// one bubble. Storage and the model's replay keep every step separate.
     private var displayed: [ChatMessage] {
-        if let signature = displayedCacheSignature, signature == displaySignature {
-            return displayedCache
-        }
-        return ChatMessage.groupedForDisplay(chat.messages).filter { !$0.isPruneNotice }
+        displayedCache
     }
 
-    /// Everything that changes the grouping: how many messages there are and how the
-    /// newest one changed. Cheap to compute, unlike the grouping itself.
-    private var displaySignature: Int {
-        guard let last = chat.messages.last else { return chat.messages.count }
-        return chat.messages.count
-            &+ last.text.count
-            &+ (last.reasoning?.count ?? 0)
-            &+ last.tools.count
-            &+ last.exchanges.count
-            &+ last.attachments.count
+    /// Compare values, not text lengths: tool completion and same-length edits matter.
+    private var displaySignature: [ChatMessage] {
+        chat.messages
     }
 
     private func refreshDisplay() {
         displayedCache = ChatMessage.groupedForDisplay(chat.messages).filter { !$0.isPruneNotice }
-        displayedCacheSignature = displaySignature
     }
 
     /// Anything that changes the height of the newest message.

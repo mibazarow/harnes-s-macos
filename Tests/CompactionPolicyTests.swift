@@ -6,6 +6,31 @@ import XCTest
 final class CompactionPolicyTests: XCTestCase {
     // MARK: - Budget arithmetic (R12.1 / R12.2)
 
+    func testAlignmentNeverDropsOrDuplicatesMessages() {
+        let composer = ContextComposer()
+        for count in 8...24 {
+            let messages = (0..<count).map {
+                ContextMessage(id: $0, role: $0.isMultiple(of: 3) ? "user" : "assistant",
+                               text: "step", tokens: 500)
+            }
+            let plan = composer.plan(systemPrompt: "", messages: messages,
+                                     contextWindow: 10_000, thresholdPercent: 100)
+            let ids = (plan.included + plan.compacted).map(\.id).sorted()
+            XCTAssertEqual(ids, messages.map(\.id), "count=\(count)")
+        }
+    }
+
+    func testFallbackSuffixUsesCalibratedCosts() {
+        let messages = (0..<10).map {
+            ContextMessage(id: $0, role: "user", text: "step", tokens: 1_000)
+        }
+        let composer = ContextComposer()
+        let plan = composer.plan(systemPrompt: "", messages: messages,
+                                 contextWindow: 10_000, thresholdPercent: 100, estimateScale: 2)
+        XCTAssertLessThanOrEqual(plan.usedTokens,
+                                 composer.budget(for: 10_000, thresholdPercent: 100).targetTokens)
+    }
+
     func testBudgetReservesOutputAndKeepsThresholdBelowUsable() {
         let composer = ContextComposer()
 

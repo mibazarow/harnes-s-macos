@@ -25,7 +25,6 @@ final class ChatStore {
     var pendingReasoning = ""
     var pendingReasoningID = UUID()
     var flushTask: Task<Void, Never>?
-    var flushDeadline = Date.distantPast
 
     private var replyIndex = 0
     let services: AppServices?
@@ -507,6 +506,7 @@ final class ChatStore {
                 break
             }
 
+            guard !Task.isCancelled else { return }
             let finalStepHadTools = messages.first(where: { $0.id == assistantID })?
                 .exchanges.isEmpty == false
             finish(assistantID)
@@ -520,6 +520,7 @@ final class ChatStore {
             await maybeExtractStyleCard(provider: provider, model: model, services: services)
             return
         } catch {
+            guard !Task.isCancelled else { return }
             // The provider rejected the request as too long. Retrying the same body is
             // pointless, so compact harder and try once more: this is the one case where
             // the estimate was provably low and only the provider knew the real limit.
@@ -1328,6 +1329,7 @@ final class ChatStore {
     /// Returns false when the step produced nothing, in which case its bubble is dropped.
     @discardableResult
     func settle(_ id: UUID) -> Bool {
+        guard !Task.isCancelled else { return false }
         // Everything still buffered belongs to this bubble: a step boundary must not
         // silently swallow the last few hundred milliseconds of an answer.
         flush()
@@ -1358,6 +1360,7 @@ final class ChatStore {
     }
 
     func finish(_ id: UUID, notice: String? = nil, fallback: String? = nil) {
+        guard !Task.isCancelled else { return }
         // The turn is over: paint what is left, then forget the timer entirely so a
         // late flush cannot append to a bubble that is already marked complete.
         flush()

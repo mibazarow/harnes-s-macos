@@ -66,12 +66,26 @@ actor FileSafetyService {
         let stored = trashDirectory.appendingPathComponent("\(stamp)-\(unique)-\(url.lastPathComponent)")
         try fileManager.moveItem(at: url, to: stored)
 
-        let entryID: Int64 = try database.queue.write { db in
-            try db.execute(sql: """
-                INSERT INTO trash (original_path, stored_path, created_at)
-                VALUES (?, ?, ?)
-                """, arguments: [url.path, stored.path, Timestamps.now()])
-            return db.lastInsertedRowID
+        let entryID: Int64
+        do {
+            entryID = try database.queue.write { db in
+                try db.execute(sql: """
+                    INSERT INTO trash (original_path, stored_path, created_at)
+                    VALUES (?, ?, ?)
+                    """, arguments: [url.path, stored.path, Timestamps.now()])
+                return db.lastInsertedRowID
+            }
+        } catch {
+            let databaseError = error
+            do {
+                try fileManager.moveItem(at: stored, to: url)
+            } catch {
+                throw ConfigurationError.invalidArguments(
+                    "Не удалось записать корзину и вернуть файл. Данные сохранены: \(stored.path). "
+                    + "Ошибка восстановления: \(error.localizedDescription)"
+                )
+            }
+            throw databaseError
         }
 
         return TrashEntry(
@@ -153,7 +167,14 @@ actor FileSafetyService {
         }
         _ = try snapshot(target)
         try AppPaths.ensureDirectory(target.deletingLastPathComponent())
-        try FileManager.default.removeItem(at: target)
-        try FileManager.default.copyItem(at: source, to: target)
+        let staged = target.deletingLastPathComponent()
+            .appendingPathComponent(".harness-restore-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: staged) }
+        try FileManager.default.copyItem(at: source, to: staged)
+        if FileManager.default.fileExists(atPath: target.path) {
+            _ = try FileManager.default.replaceItemAt(target, withItemAt: staged)
+        } else {
+            try FileManager.default.moveItem(at: staged, to: target)
+        }
     }
 }

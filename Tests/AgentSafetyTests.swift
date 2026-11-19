@@ -1,7 +1,34 @@
 import XCTest
+import GRDB
 @testable import Harness
 
 final class AgentSafetyTests: XCTestCase {
+    func testTrashDatabaseFailurePreservesOriginal() async throws {
+        let root = try tempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let database = try AppDatabase(inMemory: true)
+        let safety = FileSafetyService(
+            database: database,
+            versionsDirectory: root.appendingPathComponent("versions"),
+            trashDirectory: root.appendingPathComponent("trash")
+        )
+        let file = root.appendingPathComponent("important.txt")
+        try "keep me".write(to: file, atomically: true, encoding: .utf8)
+        try await database.queue.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER reject_trash BEFORE INSERT ON trash
+                BEGIN SELECT RAISE(ABORT, 'test database failure'); END
+                """)
+        }
+        do {
+            _ = try await safety.trash(file)
+            XCTFail("Expected database failure")
+        } catch {}
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "keep me")
+        let entries = try await safety.listTrash()
+        XCTAssertTrue(entries.isEmpty)
+    }
+
     private func tempDir() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("safety-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -56,6 +83,44 @@ final class AgentSafetyTests: XCTestCase {
         _ = try await safety.restore(entry.id)
         XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
         XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "данные")
+    }
+
+    func testRestoreVersionAfterOriginalWasRemoved() async throws {
+        let root = try tempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let safety = FileSafetyService(
+            database: try AppDatabase(inMemory: true),
+            versionsDirectory: root.appendingPathComponent("versions"),
+            trashDirectory: root.appendingPathComponent("trash")
+        )
+        let file = root.appendingPathComponent("note.txt")
+        try "saved content".write(to: file, atomically: true, encoding: .utf8)
+        let snapshot = try await safety.snapshot(file)
+        let path = try XCTUnwrap(snapshot)
+        try FileManager.default.removeItem(at: file)
+        try await safety.restoreVersion(path, to: file.path)
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "saved content")
+    }
+
+    func testRestoreCopyFailureKeepsExistingFile() async throws {
+        let root = try tempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let safety = FileSafetyService(
+            database: try AppDatabase(inMemory: true),
+            versionsDirectory: root.appendingPathComponent("versions"),
+            trashDirectory: root.appendingPathComponent("trash")
+        )
+        let file = root.appendingPathComponent("note.txt")
+        try "current content".write(to: file, atomically: true, encoding: .utf8)
+        let source = root.appendingPathComponent("unreadable.txt")
+        try "old content".write(to: source, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: source.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: source.path) }
+        do {
+            try await safety.restoreVersion(source.path, to: file.path)
+            XCTFail("Expected unreadable snapshot to fail")
+        } catch {}
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "current content")
     }
 
     func testReadOnlyModeBlocksMutation() async {

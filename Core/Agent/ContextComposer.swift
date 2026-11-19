@@ -218,7 +218,7 @@ struct ContextComposer: Sendable {
         if fixed + protectedTokens + oneTail > cap {
             // Even the protected prefix does not fit with the newest message. Keeping
             // the newest is the only way to answer, so the old behaviour wins here.
-            let kept = fitSuffix(messages, budget: max(cap - fixed, 0))
+            let kept = fitSuffix(messages, budget: max(cap - fixed, 0), scale: estimateScale)
             return ContextPlan(
                 included: kept,
                 compacted: Array(messages.dropLast(kept.count)),
@@ -248,17 +248,15 @@ struct ContextComposer: Sendable {
             }
 
             // A tail that opens with an assistant reply reads as a dangling answer. Move
-            // the cut back to the last user message, which is also where a reader would
+            // the cut forward to the next user message, which is also where a reader would
             // resume.
             var aligned = kept
-            var alignedIndex = index
-            while let first = aligned.first, first.role != "user", alignedIndex >= 0 {
+            while let first = aligned.first, first.role != "user", index >= 0 {
                 aligned.removeFirst()
-                alignedIndex -= 1
             }
             if aligned.isEmpty { aligned = kept }
 
-            let compacted = Array(rest.prefix(alignedIndex + 1))
+            let compacted = Array(rest.dropLast(aligned.count))
             return ContextPlan(
                 included: protectedMessages + aligned,
                 compacted: compacted,
@@ -273,7 +271,7 @@ struct ContextComposer: Sendable {
         }
 
         // Not even the protected prefix plus the minimum tail fits.
-        let kept = fitSuffix(rest, budget: max(cap - fixed - protectedTokens, 0))
+        let kept = fitSuffix(rest, budget: max(cap - fixed - protectedTokens, 0), scale: estimateScale)
         return ContextPlan(
             included: protectedMessages + kept,
             compacted: Array(rest.dropLast(kept.count)),
@@ -328,12 +326,13 @@ struct ContextComposer: Sendable {
         return Int((Double(tokens) * scale).rounded(.up))
     }
 
-    private func fitSuffix(_ messages: [ContextMessage], budget: Int) -> [ContextMessage] {
+    private func fitSuffix(_ messages: [ContextMessage], budget: Int, scale: Double) -> [ContextMessage] {
         var used = 0
         var kept: [ContextMessage] = []
         for message in messages.reversed() {
-            if used + message.tokens > budget, !kept.isEmpty { break }
-            used += message.tokens
+            let cost = scaled(message.tokens, by: scale)
+            if used + cost > budget, !kept.isEmpty { break }
+            used += cost
             kept.insert(message, at: 0)
         }
         return kept

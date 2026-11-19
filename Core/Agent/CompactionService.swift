@@ -48,6 +48,16 @@ actor CompactionService {
 
         try database.queue.write { db in
             try AppStateStore.write(db, key: Self.key, value: raw)
+            if let boundary = checkpoint.summarizedUpTo {
+                try db.execute(sql: """
+                    INSERT INTO chat_state (id, summarized_up_to, covered_message_count, updated_at)
+                    VALUES (1, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        summarized_up_to = excluded.summarized_up_to,
+                        covered_message_count = excluded.covered_message_count,
+                        updated_at = excluded.updated_at
+                    """, arguments: [boundary, checkpoint.coveredMessageCount, checkpoint.createdAt])
+            }
         }
     }
 

@@ -7,6 +7,17 @@ import XCTest
 /// sequential `bash` calls rendered as ten bubbles with one trace each and read as ten
 /// unrelated answers. Storage and the replay sent to the model must stay untouched.
 final class TranscriptGroupingTests: XCTestCase {
+    func testToolCompletionInvalidatesTranscriptWithoutChangingCounts() {
+        let running = ChatMessage(role: .assistant, text: "", tools: [
+            ToolTrace(name: "bash", summary: "running", isRunning: true)
+        ])
+        var finished = running
+        finished.tools[0].isRunning = false
+        finished.tools[0].summary = "finished"
+        XCTAssertNotEqual([running], [finished])
+        XCTAssertFalse(ChatMessage.groupedForDisplay([finished])[0].tools[0].isRunning)
+    }
+
     private func toolOnly(_ names: [String], text: String = "") -> ChatMessage {
         ChatMessage(
             role: .assistant,

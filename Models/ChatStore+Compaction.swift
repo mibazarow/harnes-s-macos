@@ -269,11 +269,12 @@ extension ChatStore {
             // B1: the pointer is a message id, the count is a count. Writing the count
             // into the id field is what let the boundary drift past the end of the
             // history once the app restarted and rebuilt it from the wrong coordinate.
-            let boundary = (try? await services.compaction.boundaryID(
+            let boundary = try await services.compaction.boundaryID(
                 forCovered: coveredAfter, database: services.database
-            )) ?? 0
+            )
 
-            try? await services.compaction.saveCheckpoint(
+            try Task.checkCancellation()
+            try await services.compaction.saveCheckpoint(
                 CompactionService.Checkpoint(
                     summary: summary,
                     coveredMessageCount: coveredAfter,
@@ -281,14 +282,6 @@ extension ChatStore {
                     summarizedUpTo: boundary
                 ),
                 database: services.database
-            )
-            // The pointer lives in its own table as well: a checkpoint rewritten by an
-            // older build must not move the boundary back (M33).
-            try? await services.compaction.saveSummarizedUpTo(
-                boundary, database: services.database
-            )
-            try? await services.compaction.saveCoveredCount(
-                coveredAfter, database: services.database
             )
 
             checkpointSummary = summary

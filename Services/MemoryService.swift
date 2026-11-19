@@ -41,7 +41,7 @@ actor MemoryService {
         // R33.2: a replacement is a new row by definition. Merging it into the record
         // it supersedes would erase the change it exists to record.
         if supersedesID == nil,
-           let duplicate = try item(hash: hash) ?? nearDuplicate(of: content, scope: scope) {
+           let duplicate = try item(hash: hash, scope: scope) ?? nearDuplicate(of: content, scope: scope) {
             let now = Timestamps.now()
             let mergedTags = tags.isEmpty ? duplicate.tags : Array(Set(duplicate.tags + tags)).sorted()
             let mergedPin = pinned || duplicate.pinned
@@ -593,12 +593,16 @@ actor MemoryService {
         }
     }
 
-    func item(hash: String) throws -> MemoryItem? {
+    func item(hash: String, scope: String? = nil) throws -> MemoryItem? {
         try database.queue.read { db in
             try Row.fetchOne(
                 db,
-                sql: "SELECT * FROM memory WHERE content_hash = ? ORDER BY id LIMIT 1",
-                arguments: [hash]
+                sql: """
+                    SELECT * FROM memory WHERE content_hash = ?
+                      AND (? IS NULL OR scope = ?) AND \(Self.activeClause)
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                arguments: [hash, scope, scope]
             ).map(Self.item(from:))
         }
     }
@@ -801,7 +805,7 @@ actor MemoryService {
         return candidates.first { Self.contentTokens($0.content) == incomingContent }
     }
 
-    private static let tokenRegex = try! NSRegularExpression(pattern: "[\\p{L}\\p{N}]{2,}")
+    private static let tokenRegex = try! NSRegularExpression(pattern: "[\\p{L}\\p{N}]+")
 
     static func tokenSet(_ text: String) -> Set<String> {
         let lower = text.lowercased()

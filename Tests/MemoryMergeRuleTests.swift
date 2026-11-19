@@ -127,4 +127,35 @@ final class MemoryMergeRuleTests: XCTestCase {
             ["сервер", "кухне"]
         )
     }
+
+    func testSingleCharacterSubjectsStaySeparate() async throws {
+        let first = try await memory.add("Server X runs Ubuntu")
+        let second = try await memory.add("Server Y runs Ubuntu")
+        XCTAssertNotEqual(first.id, second.id)
+        let original = try await memory.item(id: first.id)
+        XCTAssertEqual(original?.content, "Server X runs Ubuntu")
+    }
+
+    func testSingleDigitValuesStaySeparate() async throws {
+        let first = try await memory.add("Server has 2 processors")
+        let second = try await memory.add("Server has 4 processors")
+        XCTAssertNotEqual(first.id, second.id)
+    }
+
+    func testExactDuplicateDoesNotCrossScopes() async throws {
+        let workspace = try await memory.add("Server runs Ubuntu", scope: "workspace")
+        let user = try await memory.add("Server runs Ubuntu")
+        XCTAssertNotEqual(workspace.id, user.id)
+        let stored = try await memory.item(id: user.id)
+        XCTAssertEqual(stored?.scope, "user")
+    }
+
+    func testRestoringOldFactCreatesActiveRecord() async throws {
+        let old = try await memory.add("Server runs Ubuntu 22.04")
+        _ = try await memory.add("Server runs Ubuntu 24.04", supersedesID: old.id)
+        let restored = try await memory.add("Server runs Ubuntu 22.04")
+        XCTAssertNotEqual(restored.id, old.id)
+        let active = try await memory.list()
+        XCTAssertTrue(active.contains { $0.id == restored.id })
+    }
 }

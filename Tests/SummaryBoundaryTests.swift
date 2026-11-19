@@ -1,8 +1,42 @@
 import XCTest
+import GRDB
 @testable import Harness
 
 /// M33: a checkpoint grows by appending, never by rebuilding what it already said.
 final class SummaryBoundaryTests: XCTestCase {
+    func testCheckpointPersistsBoundaryAndCountTogether() async throws {
+        let database = try AppDatabase(inMemory: true)
+        let service = CompactionService()
+        try await service.saveCheckpoint(.init(
+            summary: "checkpoint", coveredMessageCount: 3,
+            createdAt: Timestamps.now(), summarizedUpTo: 7
+        ), database: database)
+        let boundary = try await service.loadSummarizedUpTo(database: database)
+        let count = try await service.loadCoveredCount(database: database)
+        XCTAssertEqual(boundary, 7)
+        XCTAssertEqual(count, 3)
+    }
+
+    func testCheckpointRollsBackWhenBoundaryWriteFails() async throws {
+        let database = try AppDatabase(inMemory: true)
+        let service = CompactionService()
+        try await database.queue.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER reject_checkpoint BEFORE INSERT ON chat_state
+                BEGIN SELECT RAISE(ABORT, 'test write failure'); END
+                """)
+        }
+        do {
+            try await service.saveCheckpoint(.init(
+                summary: "must not survive", coveredMessageCount: 3,
+                createdAt: Timestamps.now(), summarizedUpTo: 7
+            ), database: database)
+            XCTFail("A failed boundary write must fail the checkpoint")
+        } catch {}
+        let checkpoint = try await service.loadCheckpoint(database: database)
+        XCTAssertNil(checkpoint)
+    }
+
     func testMergeKeepsTheFirstSummaryVerbatim() {
         let first = "## Цель\n- Первый факт"
         let merged = CompactionService.merge(

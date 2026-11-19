@@ -8,21 +8,66 @@ import XCTest
 final class StreamingBufferTests: XCTestCase {
     private func store() -> ChatStore { ChatStore() }
 
+    func testCancelledProducerCannotOverwriteNewTurnBuffer() async {
+        let store = ChatStore()
+        let old = store.appendAssistant()
+        store.stop()
+        let current = store.appendAssistant()
+        store.append("new", to: current)
+        let producer = Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            store.append("stale", to: old)
+            store.appendReasoning("stale reasoning", to: old)
+        }
+        await producer.value
+        XCTAssertEqual(store.pendingID, current)
+        XCTAssertEqual(store.pendingText, "new")
+        XCTAssertTrue(store.pendingReasoning.isEmpty)
+        store.flush()
+    }
+
+    func testCancelledFinishCannotResetNewTurn() async {
+        let store = ChatStore()
+        let old = store.appendAssistant()
+        store.stop()
+        let current = store.appendAssistant()
+        store.isStreaming = true
+        store.append("new answer", to: current)
+        let lateFinish = Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            store.finish(old)
+        }
+        await lateFinish.value
+        XCTAssertTrue(store.isStreaming)
+        XCTAssertEqual(store.pendingText, "new answer")
+        XCTAssertEqual(store.messages.last?.state, .streaming)
+    }
+
     /// The answer is not painted while it is being written: the buffer is shown whole
     /// when the step settles. Before this, `append` scheduled a paint and the text
     /// arrived in lumps of a few words.
-    func testTextWaitsForTheStepBoundary() {
+    func testTextIsCoalescedBeforePainting() {
         let store = ChatStore()
         let id = store.appendAssistant()
         store.append("первые ", to: id)
         store.append("слова", to: id)
 
-        XCTAssertNil(store.flushTask, "текст больше не будит таймер")
+        XCTAssertNotNil(store.flushTask)
         XCTAssertEqual(store.messages.last?.text, "")
         XCTAssertEqual(store.messageText(of: id), "первые слова", "guard видит весь текст")
 
         XCTAssertTrue(store.settle(id))
         XCTAssertEqual(store.messages.last?.text, "первые слова")
+    }
+
+    func testTextAppearsBeforeStepCompletes() async throws {
+        let store = ChatStore()
+        let id = store.appendAssistant()
+        store.append("available now", to: id)
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(store.messages.last?.text, "available now")
+        XCTAssertEqual(store.messages.last?.state, .streaming)
+        XCTAssertNil(store.flushTask)
     }
 
     func testPendingTextIsPartOfTheAnswerBeforePaint() {
