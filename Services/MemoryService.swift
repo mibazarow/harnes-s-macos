@@ -46,11 +46,13 @@ actor MemoryService {
                     UPDATE memory SET content = ?, kind = ?, area = ?, tags = ?, pinned = ?,
                         content_hash = ?, quote = COALESCE(?, quote),
                         quote_message_id = COALESCE(?, quote_message_id),
-                        quote_verified = MAX(quote_verified, ?), updated_at = ?
+                        quote_verified = MAX(quote_verified, ?),
+                        importance = MIN(importance, ?), updated_at = ?
                     WHERE id = ?
                     """, arguments: [
                         content, kind, area, tagsJSON, mergedPin ? 1 : 0, hash,
-                        quote, quoteMessageID, quoteVerified ? 1 : 0, now, duplicate.id
+                        quote, quoteMessageID, quoteVerified ? 1 : 0,
+                        max(0, min(importance, 3)), now, duplicate.id
                     ])
             }
 
@@ -65,7 +67,8 @@ actor MemoryService {
                 hits: duplicate.hits,
                 lastUsedAt: duplicate.lastUsedAt,
                 area: area,
-                quote: quote ?? duplicate.quote
+                quote: quote ?? duplicate.quote,
+                importance: min(duplicate.importance, max(0, min(importance, 3)))
             )
         }
 
@@ -269,12 +272,12 @@ actor MemoryService {
             // workspace chunks out of the prompt: they live in the same table.
             let lessons = try Row.fetchAll(db, sql: """
                 SELECT * FROM memory WHERE scope = 'user' AND area = 'lessons'
-                  AND \(Self.activeClause)
+                  AND importance > 0 AND \(Self.activeClause)
                 ORDER BY id DESC LIMIT 20
                 """).map(Self.item(from:)).reversed() as [MemoryItem]
             let others = try Row.fetchAll(db, sql: """
                 SELECT * FROM memory WHERE scope = 'user' AND area != 'lessons'
-                  AND \(Self.activeClause)
+                  AND importance > 0 AND \(Self.activeClause)
                 """).map(Self.item(from:))
 
             let priority = ["about", "preferences", "people", "routines", "decision", "fact"]

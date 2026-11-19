@@ -818,7 +818,8 @@ extension ToolRegistry {
                 "quote": ["type": "string", "description": "Verbatim fragment of the user's message"],
                 "source_message_id": ["type": "string", "description": "Optional id of the user's message"],
                 "pinned": ["type": "boolean", "description": "true when the user asked to remember this explicitly"],
-                "supersedes_id": ["type": "integer", "description": "Id of the outdated fact this one replaces; the old row stays readable by id"]
+                "supersedes_id": ["type": "integer", "description": "Id of the outdated fact this one replaces; the old row stays readable by id"],
+                "verified_command": ["type": "string", "description": "Command that proved a claim of a result (released, works, done); without it such a record is saved unverified"]
             ], required: ["text"])
         ),
         ToolDefinition(

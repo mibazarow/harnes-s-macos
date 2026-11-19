@@ -93,15 +93,26 @@ extension ToolRegistry {
         let supersedesID = (args["supersedes_id"] as? Int64)
             ?? (args["supersedes_id"] as? Int).map(Int64.init)
             ?? (args["supersedes_id"] as? String).flatMap(Int64.init)
+
+        // R33.1: "already released" without a command is a claim, not a fact. It is
+        // still saved — the user said it — but out of the prompt and under GC.
+        let verifiedCommand = (args["verified_command"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let claim = MemoryClaim.check(text: text, area: area, verifiedCommand: verifiedCommand)
+        let unverified = claim == .unverified
+        let tags = unverified ? [MemoryClaim.unverifiedTag] : []
+
         let item = try await memory.add(
             text,
             kind: kind,
+            tags: tags,
             pinned: pinned,
             area: area,
             quote: quote,
             quoteMessageID: currentUserMessageID.map(String.init),
             quoteVerified: true,
-            supersedesID: supersedesID
+            supersedesID: supersedesID,
+            importance: unverified ? 0 : 1
         )
 
         // R33.4: embed now, not at the next re-index. Best-effort: the record is
@@ -110,7 +121,10 @@ extension ToolRegistry {
 
         let mark = item.pinned ? " (закреплено)" : ""
         let replaced = supersedesID.map { " Заменил #\($0), старая запись осталась по id." } ?? ""
-        return .ok("Запомнил #\(item.id)\(mark): \(item.content)\(replaced)")
+        let note = unverified
+            ? " " + MemoryClaim.note(for: nil)
+            : (verifiedCommand.map { " " + MemoryClaim.note(for: $0) } ?? "")
+        return .ok("Запомнил #\(item.id)\(mark): \(item.content)\(replaced)\(note)")
     }
 
     func memoryForget(_ args: [String: Any]) async throws -> ToolResult {
