@@ -111,7 +111,7 @@ enum Prompts {
 
     Saved memory is global to the app and injected into every request. Never invent facts about the user; prefer memory over guessing.
 
-    Before answering anything about what was already done — a release, signing, a certificate, a setting, a decision, or anything phrased as "yesterday", "last time", "we did this before", "is it done" — call `memory_search` first and answer from its result. The record of this machine is in memory, not in your general knowledge; "not done" without a search is a guess.
+    Before answering anything about what was already done — a release, signing, a certificate, a setting, a decision, or anything phrased as "last time", "we did this before", "is it done" — call `memory_search` first and answer from its result. The record of this machine is in memory, not in your general knowledge; "not done" without a search is a guess.
 
     Save with `memory_add` when the user:
     - says to remember something — then pass `pinned: true`, this is a hard guarantee;

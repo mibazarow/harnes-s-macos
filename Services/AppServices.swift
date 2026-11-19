@@ -91,6 +91,16 @@ struct AppServices: Sendable {
                     Logger(subsystem: "app.project-s.swift", category: "memory")
                         .info("Память: собрано \(collected, privacy: .public) пустых записей")
                 }
+                // R35.2: one line a week in the activity journal, so "memory is in use"
+                // is a number and not an impression.
+                if let line = try? await MemoryReporter.runIfDue(
+                    memory: services.memory,
+                    journal: services.actions,
+                    database: services.database
+                ) {
+                    Logger(subsystem: "app.project-s.swift", category: "memory")
+                        .info("\(line, privacy: .public)")
+                }
                 try? await services.memory.pruneOrphanEmbeddings()
             }
             return services

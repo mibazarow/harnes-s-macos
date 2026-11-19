@@ -99,6 +99,15 @@ actor ActionJournal {
         }
     }
 
+    /// R35.2: how many times one tool ran since a moment, for the weekly memory report.
+    func count(tool: String, since: Date) throws -> Int {
+        try database.queue.read { db in
+            try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM actions WHERE tool = ? AND at >= ?
+                """, arguments: [tool, since.ISO8601Format()]) ?? 0
+        }
+    }
+
     /// CSV in `artifacts/`, one row per action. The header is fixed so a spreadsheet can
     /// be built from it without guessing.
     func export(from: Date, to: Date) throws -> URL {

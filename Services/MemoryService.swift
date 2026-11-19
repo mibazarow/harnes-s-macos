@@ -223,6 +223,17 @@ actor MemoryService {
         }
     }
 
+    /// R35.2: records written since a moment, active only. The weekly report counts
+    /// what actually happened this week, not the whole history.
+    func created(since stamp: String) async throws -> [MemoryItem] {
+        try await database.queue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT * FROM memory
+                WHERE scope = 'user' AND created_at >= ? AND \(Self.activeClause)
+                """, arguments: [stamp]).map(Self.item(from:))
+        }
+    }
+
     func count() throws -> Int {
         try database.queue.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM memory") ?? 0
