@@ -20,6 +20,8 @@ actor ActionJournal {
         let costUSD: Double
         let becauseKind: String
         let becauseQuote: String
+        /// B8: the tool's own error text. Empty for a successful call.
+        let error: String
     }
 
     struct Draft: Sendable {
@@ -35,6 +37,8 @@ actor ActionJournal {
         let costUSD: Double
         let becauseKind: String
         let becauseQuote: String
+        /// B8: why the call failed, in the tool's own words.
+        var error: String? = nil
     }
 
     static let retentionDays = 30
@@ -66,13 +70,14 @@ actor ActionJournal {
             try db.execute(sql: """
                 INSERT INTO actions (session_id, message_id, step, at, tool, args_summary,
                     outcome, model, prompt_tokens, completion_tokens, cost_usd,
-                    because_kind, because_quote)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    because_kind, because_quote, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, arguments: [
                     draft.sessionID, draft.messageID, draft.step, now.ISO8601Format(),
                     draft.tool, Self.summary(draft.args), draft.outcome, draft.model,
                     draft.promptTokens, draft.completionTokens, draft.costUSD,
-                    draft.becauseKind, String(draft.becauseQuote.prefix(300))
+                    draft.becauseKind, String(draft.becauseQuote.prefix(300)),
+                    draft.error.map { String($0.prefix(500)) }
                 ])
             return db.lastInsertedRowID
         }
@@ -172,7 +177,7 @@ actor ActionJournal {
             argsSummary: row["args_summary"], outcome: row["outcome"], model: row["model"],
             promptTokens: row["prompt_tokens"], completionTokens: row["completion_tokens"],
             costUSD: row["cost_usd"], becauseKind: row["because_kind"],
-            becauseQuote: row["because_quote"]
+            becauseQuote: row["because_quote"], error: row["error"] as String? ?? ""
         )
     }
 }

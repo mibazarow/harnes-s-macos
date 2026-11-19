@@ -523,6 +523,15 @@ final class AppDatabase: Sendable {
             )
         }
 
+        migrator.registerMigration("v23_action_error") { db in
+            // B8: `outcome = failed` said nothing about why. 44% of `memory_add` calls
+            // ended that way and the reason was nowhere: not in the args, not in the log.
+            let columns = try db.columns(in: "actions").map(\.name)
+            if !columns.contains("error") {
+                try db.execute(sql: "ALTER TABLE actions ADD COLUMN error TEXT;")
+            }
+        }
+
         return migrator
 
     }

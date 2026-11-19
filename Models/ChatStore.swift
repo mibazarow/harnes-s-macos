@@ -421,7 +421,9 @@ final class ChatStore {
                             // Autopilot records an empty quote: there was no question to
                             // the checker, so the turn's message is the honest citation.
                             becauseQuote: trustSession.decision(tool: name)
-                                .flatMap { $0.quote.isEmpty ? nil : $0.quote } ?? text
+                                .flatMap { $0.quote.isEmpty ? nil : $0.quote } ?? text,
+                            // B8: a failed call without its reason cannot be diagnosed.
+                            error: isError ? output : nil
                         ))
                     case .usage(let promptTokens, let completionTokens, let cacheHit, let cacheMiss):
                         let ratio = promptTokens > 0 ? cacheHit * 100 / promptTokens : 0

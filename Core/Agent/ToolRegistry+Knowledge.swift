@@ -94,6 +94,14 @@ extension ToolRegistry {
             ?? (args["supersedes_id"] as? Int).map(Int64.init)
             ?? (args["supersedes_id"] as? String).flatMap(Int64.init)
 
+        // B8: the same replacement may have been written by an attempt that then timed
+        // out. Repeating it must not create a second row.
+        if let supersedesID,
+           let existing = try? await memory.replacement(content: text, supersedesID: supersedesID) {
+            return .ok("Уже записано #\(existing.id): \(existing.content). "
+                + "Повтор не создал новую строку.")
+        }
+
         // R33.4: a deadline without a year cannot be compared with another deadline.
         if MemoryDeadline.needsFullDate(text: text, area: area) {
             return .fail(MemoryDeadline.refusal)

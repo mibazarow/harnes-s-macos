@@ -576,6 +576,18 @@ actor MemoryService {
             .joined()
     }
 
+    /// B8: a retried `memory_add` that already landed. The first attempt may have
+    /// timed out after the row was written; asking again must return that row instead of
+    /// creating a second one or failing again.
+    func replacement(content: String, supersedesID: Int64) throws -> MemoryItem? {
+        let hash = Self.hash(content)
+        return try database.queue.read { db in
+            try Row.fetchOne(db, sql: """
+                SELECT * FROM memory WHERE content_hash = ? AND supersedes_id = ? LIMIT 1
+                """, arguments: [hash, supersedesID]).map(Self.item(from:))
+        }
+    }
+
     func item(hash: String) throws -> MemoryItem? {
         try database.queue.read { db in
             try Row.fetchOne(
