@@ -31,3 +31,22 @@ final class MemoryUsageCounter: @unchecked Sendable {
         "memory_hits=\(hits) memory_search_calls=\(calls)"
     }
 }
+
+/// R32.4: a search that found nothing in a non-empty memory.
+///
+/// Ten such lines in a row mean the records are worded differently from the questions,
+/// which is a memory-quality problem, not a search problem. Logging the query is the
+/// only way to see it.
+enum MemoryMiss {
+    static let maxQueryChars = 160
+
+    static func line(query: String, hits: Int, total: Int) -> String? {
+        guard hits == 0, total > 0 else { return nil }
+        let cleaned = query
+            .replacingOccurrences(of: "\\", with: " ")
+            .replacingOccurrences(of: "\"", with: "'")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return "memory_miss query=\"\(String(cleaned.prefix(maxQueryChars)))\""
+    }
+}

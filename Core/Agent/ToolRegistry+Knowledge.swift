@@ -164,6 +164,7 @@ extension ToolRegistry {
             let outcome = await search.searchDetailed(query)
             let hits = outcome.hits
             memoryUsage?.recordHits(hits.count)
+            if hits.isEmpty { await noteMiss(query) }
             guard !hits.isEmpty else { return .ok("Ничего не найдено.") }
             return .ok(hits.prefix(8).map { hit in
                 let source = hit.semanticScore != nil ? "semantic+fts" : "fts"
@@ -173,8 +174,18 @@ extension ToolRegistry {
 
         let hits = try await memory.search(query)
         memoryUsage?.recordHits(hits.count)
+        if hits.isEmpty { await noteMiss(query) }
         guard !hits.isEmpty else { return .ok("Ничего не найдено.") }
         return .ok(hits.prefix(8).map { "#\($0.id) [\($0.kind)] \($0.content)" }.joined(separator: "\n"))
+    }
+
+    /// R32.4: an empty result over a non-empty memory is worth one log line.
+    private func noteMiss(_ query: String) async {
+        guard let memory else { return }
+        let total = (try? await memory.count()) ?? 0
+        if let line = MemoryMiss.line(query: query, hits: 0, total: total) {
+            ChatStore.logLatency(line)
+        }
     }
 
 // MARK: - Secrets
