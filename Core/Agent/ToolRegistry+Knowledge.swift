@@ -94,6 +94,11 @@ extension ToolRegistry {
             ?? (args["supersedes_id"] as? Int).map(Int64.init)
             ?? (args["supersedes_id"] as? String).flatMap(Int64.init)
 
+        // R33.4: a deadline without a year cannot be compared with another deadline.
+        if MemoryDeadline.needsFullDate(text: text, area: area) {
+            return .fail(MemoryDeadline.refusal)
+        }
+
         // R33.2: a restatement and a correction look the same to a similarity score.
         // Ask which one it is instead of merging silently — the user knows.
         if supersedesID == nil {
