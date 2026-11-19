@@ -740,9 +740,20 @@ actor MemoryService {
             .map(\.item)
     }
 
-    /// Jaccard overlap over distinct content tokens. 0.5 means half the words
-    /// are shared, which merges restatements and contradictions instead of
-    /// duplicating them.
+    /// B14: at 0.5 any two records sharing half their words merged, and the merge
+    /// overwrites `content`, so the first fact was lost. "Принтер стоит на кухне" and
+    /// "Сканер стоит на кухне" score 0.6 — two different facts, one row. At 0.7 the
+    /// cutoff sits above that pair and below a genuine restatement (a longer sentence
+    /// with one added clause scores 0.9+).
+    ///
+    /// The alternative — requiring the same area plus a number or a path — was rejected:
+    /// it keeps the 0.5 cutoff for number-bearing records, which is exactly where a wrong
+    /// merge costs the most, and it needs a definition of "path" that is easy to get
+    /// wrong. A single number is one rule with one edge.
+    static let mergeThreshold = 0.7
+
+    /// Jaccard overlap over distinct content tokens, compared against
+    /// `mergeThreshold`.
     private func nearDuplicate(of text: String, scope: String) throws -> MemoryItem? {
         let incoming = Self.tokenSet(text)
         guard !incoming.isEmpty else { return nil }
@@ -763,7 +774,7 @@ actor MemoryService {
             }
         }
 
-        guard let best, best.score >= 0.5 else { return nil }
+        guard let best, best.score >= Self.mergeThreshold else { return nil }
         return best.item
     }
 
