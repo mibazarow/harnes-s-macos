@@ -740,23 +740,53 @@ actor MemoryService {
             .map(\.item)
     }
 
-    /// B14: at 0.5 any two records sharing half their words merged, and the merge
-    /// overwrites `content`, so the first fact was lost. "Принтер стоит на кухне" and
-    /// "Сканер стоит на кухне" score 0.6 — two different facts, one row. At 0.7 the
-    /// cutoff sits above that pair and below a genuine restatement (a longer sentence
-    /// with one added clause scores 0.9+).
+    /// B16: a shared template is not a shared fact.
     ///
-    /// The alternative — requiring the same area plus a number or a path — was rejected:
-    /// it keeps the 0.5 cutoff for number-bearing records, which is exactly where a wrong
-    /// merge costs the most, and it needs a definition of "path" that is easy to get
-    /// wrong. A single number is one rule with one edge.
-    static let mergeThreshold = 0.7
+    /// B14 raised the similarity cutoff to 0.7, but "Сервер альфа на Ubuntu 24.04" and
+    /// "Сервер бета на Ubuntu 24.04" score 0.714 — above any cutoff that still catches a
+    /// restatement — and they are two different machines. Merging overwrites `content`,
+    /// so one of them is silently lost. Similarity cannot separate "same fact reworded"
+    /// from "different subject, same wording", because the difference is exactly one
+    /// word in both cases.
+    ///
+    /// The rule is therefore structural, not numeric: two records are the same fact only
+    /// when they carry the same content words. Stopwords may differ ("на"/"в", word
+    /// order), negations never count as stopwords, and any content word present in one
+    /// text and absent in the other — a name, a number, a version, a path — keeps the
+    /// records apart.
+    ///
+    /// The cost is the other direction: two paraphrases with different vocabulary stay
+    /// as two rows instead of one. That is the safe failure: a duplicate costs prompt
+    /// budget, a lost fact costs correctness.
+    static let stopwords: Set<String> = [
+        // Russian function words. Negations (не, ни, нет) are deliberately absent: they
+        // carry meaning, and dropping them would merge "работает" with "не работает".
+        "на", "в", "во", "и", "с", "со", "по", "для", "от", "у", "к", "ко", "о", "об",
+        "из", "за", "при", "или", "а", "но", "же", "ли", "бы", "то", "как", "это",
+        "его", "её", "ее", "их", "он", "она", "оно", "они", "мы", "вы", "я", "ты",
+        "свой", "своя", "своё", "свое", "свои", "этот", "эта", "эти", "тот", "та", "те",
+        "весь", "вся", "всё", "все", "был", "была", "было", "были", "быть", "будет",
+        "уже", "ещё", "еще", "тоже", "также", "очень", "просто", "именно", "так",
+        "там", "тут", "сейчас", "теперь", "всегда", "обычно", "чтобы", "если", "где",
+        "чем", "кто", "потому", "поэтому", "затем", "потом",
+        // English function words.
+        "the", "an", "of", "in", "on", "to", "for", "and", "or", "is", "are", "was",
+        "were", "it", "this", "that", "with", "by", "at", "from", "as", "be", "been",
+        "has", "have", "had", "will", "would", "can", "could"
+    ]
 
-    /// Jaccard overlap over distinct content tokens, compared against
-    /// `mergeThreshold`.
+    /// Word tokens with the function words removed. Two texts with equal content tokens
+    /// state the same thing, whatever their word order and prepositions.
+    static func contentTokens(_ text: String) -> Set<String> {
+        tokenSet(text).subtracting(stopwords)
+    }
+
+    /// A record that states the same fact. Equality of content words, not a similarity
+    /// score: see `stopwords` for why a score cannot decide this.
     private func nearDuplicate(of text: String, scope: String) throws -> MemoryItem? {
         let incoming = Self.tokenSet(text)
         guard !incoming.isEmpty else { return nil }
+        let incomingContent = Self.contentTokens(text)
 
         let candidates = try database.queue.read { db in
             try Row.fetchAll(db, sql: """
@@ -766,16 +796,9 @@ actor MemoryService {
             .map(Self.item(from:))
         }
 
-        var best: (item: MemoryItem, score: Double)?
-        for candidate in candidates {
-            let score = Self.jaccard(incoming, Self.tokenSet(candidate.content))
-            if score > (best?.score ?? 0) {
-                best = (candidate, score)
-            }
-        }
-
-        guard let best, best.score >= Self.mergeThreshold else { return nil }
-        return best.item
+        // Newest first: when several records say the same thing, the merge lands on the
+        // most recent one, so `created_at` does not move backwards.
+        return candidates.first { Self.contentTokens($0.content) == incomingContent }
     }
 
     private static let tokenRegex = try! NSRegularExpression(pattern: "[\\p{L}\\p{N}]{2,}")
