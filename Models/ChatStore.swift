@@ -1045,11 +1045,20 @@ final class ChatStore {
         // pruning never moves the compaction threshold and the session still compacts
         // as if the history were full.
         let pruning = plannedPruning()
+        // B4: capture the boundary before it is cleared. Pruning at a task boundary is a
+        // visible event, and it is not a fold: the user must not read "история сжата"
+        // when only tool output left the request.
+        let boundaryPrune = pruneAtBoundary
         if !pruning.isEmpty {
             Self.logLatency(
                 "pruned tool_results=\(pruning.replacements.count) saved_tokens=\(pruning.savedTokens) "
                 + "first_index=\(pruning.firstPrunedIndex ?? -1)"
             )
+            if boundaryPrune {
+                notice(CompactionLog.pruneNotice(
+                    results: pruning.replacements.count, savedTokens: pruning.savedTokens
+                ))
+            }
         }
         pruneAtBoundary = false
         // The same seven-argument plan is built after every fold; three copies had

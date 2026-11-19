@@ -33,6 +33,15 @@ final class CompactionLogTests: XCTestCase {
         )
     }
 
+    func testPruneNoticeSaysHistoryWasNotFolded() {
+        // B4: pruning and folding are different events and must not share a message.
+        let text = CompactionLog.pruneNotice(results: 4, savedTokens: 5_000)
+        XCTAssertTrue(text.contains("Результаты инструментов"), text)
+        XCTAssertTrue(text.contains("около 5000 токенов"), text)
+        XCTAssertTrue(text.contains("История не сжималась"), text)
+        XCTAssertFalse(text.contains("сжата"), "нельзя называть прунинг сжатием")
+    }
+
     func testFailureLineCarriesTheAttemptCount() {
         XCTAssertEqual(
             CompactionLog.failure(attempts: 1, reason: "timeout"),
