@@ -305,26 +305,15 @@ extension ChatStore {
                 Self.logLatency("facts_extracted candidates=0")
                 return
             }
-            var saved = 0
-            for candidate in candidates {
-                do {
-                    let item = try await services.memory.add(
-                        candidate.content,
-                        kind: FactExtraction.kind(for: candidate.area),
-                        source: "compaction",
-                        area: candidate.area,
-                        quote: candidate.quote,
-                        quoteVerified: true
-                    )
-                    await MemoryIndexer.index(
-                        id: item.id, content: item.content, sink: services.embeddings
-                    )
-                    saved += 1
-                } catch {
-                    continue
-                }
-            }
-            Self.logLatency("facts_extracted candidates=\(candidates.count) saved=\(saved)")
+            // R35.1: a fact that restates an existing one replaces it through
+            // supersedes_id instead of piling up beside it.
+            let outcome = await MemoryFactWriter().write(
+                candidates, memory: services.memory, embeddings: services.embeddings
+            )
+            Self.logLatency(
+                "facts_extracted candidates=\(candidates.count) added=\(outcome.added) "
+                + "replaced=\(outcome.replaced) skipped=\(outcome.skipped)"
+            )
         } catch {
             Self.logLatency("facts_extracted failed: \(error.localizedDescription)")
         }
