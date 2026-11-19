@@ -838,8 +838,10 @@ extension ToolRegistry {
         ToolDefinition(
             name: "memory_search",
             exposure: .core,
-            description: "Full-text search over saved memory.",
-            parameters: schema(["query": ["type": "string"]], required: ["query"])
+            description: "Search saved memory. Without query: pinned records and recent decisions, ten lines.",
+            parameters: schema([
+                "query": ["type": "string", "description": "Words to find; omit to see what is worth knowing"]
+            ], required: [])
         ),
         ToolDefinition(
             name: "secret_save",

@@ -136,7 +136,19 @@ extension ToolRegistry {
 
     func memorySearch(_ args: [String: Any]) async throws -> ToolResult {
         guard let memory else { return .fail("Память недоступна") }
-        guard let query = args["query"] as? String else { return .fail("query обязателен") }
+        let query = (args["query"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        // R32.2: no query means "show me what I should know before answering": pinned
+        // records and recent decisions, ten lines at most. It is the cheap way to look
+        // up when there is nothing specific to search for.
+        if query.isEmpty {
+            let overview = try await memory.overview()
+            guard !overview.isEmpty else { return .ok("Память пуста.") }
+            return .ok(overview.map { item in
+                let mark = item.pinned ? "📌 " : ""
+                return "#\(item.id) \(mark)[\(item.kind)] \(item.content)"
+            }.joined(separator: "\n"))
+        }
 
         if let embeddings {
             let search = HybridSearch(

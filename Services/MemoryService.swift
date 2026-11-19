@@ -191,6 +191,35 @@ actor MemoryService {
         try list(limit: limit)
     }
 
+    /// R32.2: what to look at when the question does not name anything searchable.
+    /// Pinned records first (the user asked to keep them), then decisions from the last
+    /// `days` — those are the ones an answer about "what we already did" usually needs.
+    /// Never the whole memory: a list of everything is not an answer.
+    func overview(limit: Int = 10, days: Int = 30) throws -> [MemoryItem] {
+        let cutoff = ISO8601DateFormatter().string(
+            from: Date().addingTimeInterval(-Double(days) * 86_400)
+        )
+        return try database.queue.read { db in
+            let pinned = try Row.fetchAll(db, sql: """
+                SELECT * FROM memory
+                WHERE scope = 'user' AND pinned = 1 AND \(Self.activeClause)
+                ORDER BY id DESC LIMIT ?
+                """, arguments: [limit]).map(Self.item(from:))
+
+            let room = limit - pinned.count
+            guard room > 0 else { return Array(pinned.prefix(limit)) }
+
+            let decisions = try Row.fetchAll(db, sql: """
+                SELECT * FROM memory
+                WHERE scope = 'user' AND pinned = 0 AND area = 'decision'
+                  AND created_at >= ? AND \(Self.activeClause)
+                ORDER BY id DESC LIMIT ?
+                """, arguments: [cutoff, room]).map(Self.item(from:))
+
+            return pinned + decisions
+        }
+    }
+
     func count() throws -> Int {
         try database.queue.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM memory") ?? 0
