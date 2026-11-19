@@ -276,7 +276,7 @@ actor MemoryService {
     func forPromptWithOverflow(
         budgetTokens: Int = Tuning.memoryPromptBudgetTokens,
         relevance: [Int64: Double] = [:]
-    ) throws -> (items: [MemoryItem], omitted: Int) {
+    ) throws -> (items: [MemoryItem], omitted: Int, omittedByArea: [String: Int]) {
         try database.queue.read { db in
             // R30.3: corrections are always in the prompt, newest twenty of them; other
             // areas are bounded by the token budget. `scope = 'user'` keeps indexed
@@ -308,6 +308,7 @@ actor MemoryService {
 
             var result: [MemoryItem] = []
             var omitted = 0
+            var omittedByArea: [String: Int] = [:]
             var used = 0
             for item in Array(lessons) + ordered {
                 // R30.8: a record longer than the line limit is not chopped into the
@@ -322,12 +323,13 @@ actor MemoryService {
                 let cost = TokenEstimator.tokens(in: item.promptText)
                 guard used + cost <= budgetTokens else {
                     omitted += 1
+                    omittedByArea[item.area, default: 0] += 1
                     continue
                 }
                 result.append(item)
                 used += cost
             }
-            return (result, omitted)
+            return (result, omitted, omittedByArea)
         }
     }
 
@@ -519,6 +521,26 @@ actor MemoryService {
             gcSoon: gcSoon,
             neverUsed: neverUsed
         )
+    }
+
+    /// B6: a record nobody has ever read is ballast in a budget that is already full.
+    /// After 30 days it stops entering the prompt (`importance = 0`); it is not deleted
+    /// and `memory_search` still finds it. Pinned records and lessons are exempt: the
+    /// user asked for those.
+    @discardableResult
+    func demoteUnread(now: Date = Date(), olderThanDays: Int = 30) throws -> Int {
+        let cutoff = ISO8601DateFormatter().string(
+            from: now.addingTimeInterval(-Double(olderThanDays) * 86_400)
+        )
+        return try database.queue.write { db in
+            try db.execute(sql: """
+                UPDATE memory SET importance = 0, updated_at = ?
+                WHERE hits = 0 AND pinned = 0 AND importance > 0
+                  AND area != 'lessons'
+                  AND created_at < ?
+                """, arguments: [Timestamps.now(), cutoff])
+            return db.changesCount
+        }
     }
 
     /// R33.3: the only automatic deletion. A record is collected when it is worthless by

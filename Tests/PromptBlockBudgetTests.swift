@@ -57,6 +57,7 @@ final class PromptBlockBudgetTests: XCTestCase {
         let selection = try await memory.forPromptWithOverflow(budgetTokens: 60)
         XCTAssertFalse(selection.items.isEmpty)
         XCTAssertGreaterThan(selection.omitted, 0, "переполнение должно быть названо числом")
+        XCTAssertGreaterThan(selection.omittedByArea.values.reduce(0, +), 0)
     }
 
     func testMemoryPromptWithoutOverflowReportsZero() async throws {

@@ -272,6 +272,7 @@ final class ChatStore {
         let memorySelection = await Self.promptMemoriesWithOverflow(services: services, query: text)
         promptMemoryBlock = memorySelection.items
         promptMemoryOmitted = memorySelection.omitted
+        promptMemoryOmittedByArea = memorySelection.omittedByArea
         let trustInstructions = (promptMemoryBlock ?? [])
             .filter { $0.area == "preferences" || $0.area == "lessons" }
             .map(\.content)
@@ -743,6 +744,9 @@ final class ChatStore {
     /// sent, not the records that existed.
     var promptMemoryCount = 0
     var promptMemoryTokens = 0
+    /// B6: how many records the budget dropped, per area. Without this the block looks
+    /// complete while half of it never reaches the model.
+    var promptMemoryOmittedByArea: [String: Int] = [:]
     /// R30.8: the prompt block, read once per turn.
     ///
     /// The block deliberately ignores the current question. Ordering it by relevance to
@@ -757,8 +761,8 @@ final class ChatStore {
     static func promptMemoriesWithOverflow(
         services: AppServices,
         query _: String
-    ) async -> (items: [MemoryItem], omitted: Int) {
-        (try? await services.memory.forPromptWithOverflow()) ?? ([], 0)
+    ) async -> (items: [MemoryItem], omitted: Int, omittedByArea: [String: Int]) {
+        (try? await services.memory.forPromptWithOverflow()) ?? ([], 0, [:])
     }
 
     /// R30.7: `current` is this turn's message; earlier user messages are the fallback
@@ -896,6 +900,14 @@ final class ChatStore {
         }
         promptMemoryCount = memories.count
         promptMemoryTokens = memories.reduce(0) { $0 + TokenEstimator.tokens(in: $1.promptText) }
+        if !promptMemoryOmittedByArea.isEmpty {
+            // B6: one line names the areas that did not fit, so the budget can be judged
+            // from the log instead of guessed from a silent omission.
+            let detail = promptMemoryOmittedByArea.sorted { $0.key < $1.key }
+                .map { "\($0.key)=\($0.value)" }
+                .joined(separator: ",")
+            Self.logLatency("memory_omitted total=\(promptMemoryOmitted) \(detail)")
+        }
         if let services, !memories.isEmpty {
             // R30.2/R30.3: grouped by area, one line per record. Lessons are corrections
             // and are always here; they outrank facts. R30.8: the body is 600 characters

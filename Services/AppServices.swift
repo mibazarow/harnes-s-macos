@@ -81,6 +81,12 @@ struct AppServices: Sendable {
                     Logger(subsystem: "app.project-s.swift", category: "memory")
                         .info("Память: досчитано \(filled, privacy: .public) хешей")
                 }
+                // B6: records nobody read in a month stop taking budget. Not deleted:
+                // search still finds them, and `memory_search` can bring them back.
+                if let demoted = try? await services.memory.demoteUnread(), demoted > 0 {
+                    Logger(subsystem: "app.project-s.swift", category: "memory")
+                        .info("Память: \(demoted, privacy: .public) нечитанных записей убраны из промпта")
+                }
                 if let pruned = try? await services.memory.pruneUnused(), pruned > 0 {
                     Logger(subsystem: "app.project-s.swift", category: "memory")
                         .info("Память: удалено \(pruned, privacy: .public) неиспользуемых записей")
