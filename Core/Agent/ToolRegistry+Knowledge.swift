@@ -94,6 +94,19 @@ extension ToolRegistry {
             ?? (args["supersedes_id"] as? Int).map(Int64.init)
             ?? (args["supersedes_id"] as? String).flatMap(Int64.init)
 
+        // R33.2: a restatement and a correction look the same to a similarity score.
+        // Ask which one it is instead of merging silently — the user knows.
+        if supersedesID == nil {
+            let similar = (try? await memory.similar(text: text, area: area)) ?? []
+            if let existing = similar.first {
+                let others = similar.dropFirst().map { " #\($0.id)" }.joined()
+                return .ok("Похоже на #\(existing.id) [\(existing.area)]: \(existing.content)"
+                    + (others.isEmpty ? "" : " (ещё похожие:\(others))")
+                    + ". Обновить его (supersedes_id: \(existing.id)) или создать новую? "
+                    + "Пока ничего не записано.")
+            }
+        }
+
         // R33.1: "already released" without a command is a claim, not a fact. It is
         // still saved — the user said it — but out of the prompt and under GC.
         let verifiedCommand = (args["verified_command"] as? String)?

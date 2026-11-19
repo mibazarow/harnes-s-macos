@@ -603,6 +603,31 @@ actor MemoryService {
         }
     }
 
+    /// R33.2: records that already say roughly the same thing in the same area. The
+    /// tool asks before writing instead of merging silently: a restated fact and a
+    /// corrected fact look identical to a word-overlap score, and only the user knows
+    /// which one it is.
+    func similar(text: String, area: String, limit: Int = 3, threshold: Double = 0.35) throws -> [MemoryItem] {
+        let incoming = Self.tokenSet(text)
+        guard !incoming.isEmpty else { return [] }
+
+        let candidates = try database.queue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT * FROM memory
+                WHERE scope = 'user' AND area = ? AND \(Self.activeClause)
+                ORDER BY id DESC LIMIT 400
+                """, arguments: [area])
+            .map(Self.item(from:))
+        }
+
+        return candidates
+            .map { (item: $0, score: Self.jaccard(incoming, Self.tokenSet($0.content))) }
+            .filter { $0.score >= threshold }
+            .sorted { $0.score > $1.score }
+            .prefix(limit)
+            .map(\.item)
+    }
+
     /// Jaccard overlap over distinct content tokens. 0.5 means half the words
     /// are shared, which merges restatements and contradictions instead of
     /// duplicating them.
