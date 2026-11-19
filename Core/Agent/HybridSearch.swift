@@ -86,13 +86,6 @@ struct HybridSearch {
         let (mode, reason) = Self.mode(
             hasQueryVector: hasQueryVector, semanticCount: semantic.count
         )
-        if mode == .lexicalOnly {
-            log?("\(label) mode=\(mode.rawValue) reason=\(reason ?? "unknown") "
-                + "lexical=\(lexical.count)")
-        } else {
-            log?("\(label) mode=hybrid lexical=\(lexical.count) semantic=\(semantic.count)")
-        }
-
         let lexicalRank = Dictionary(uniqueKeysWithValues: lexical.enumerated().map { ($1.id, $0) })
         let lexicalScores = Dictionary(uniqueKeysWithValues: lexical.map { ($0.id, $0.score ?? 0) })
         let semanticScore = Dictionary(uniqueKeysWithValues: semantic.map { ($0.id, $0.score) })
@@ -130,6 +123,17 @@ struct HybridSearch {
         .sorted { $0.score > $1.score }
         .prefix(limit)
         .map { $0 }
+
+        // B7: `hits_used` is what the caller actually gets back, after fusion and the
+        // limit. Without it "search found nothing" and "search found records the agent
+        // then ignored" look the same in the log.
+        if mode == .lexicalOnly {
+            log?("\(label) mode=\(mode.rawValue) reason=\(reason ?? "unknown") "
+                + "lexical=\(lexical.count) hits_used=\(hits.count)")
+        } else {
+            log?("\(label) mode=hybrid lexical=\(lexical.count) semantic=\(semantic.count) "
+                + "hits_used=\(hits.count)")
+        }
 
         return Outcome(hits: hits, mode: mode, reason: reason)
     }

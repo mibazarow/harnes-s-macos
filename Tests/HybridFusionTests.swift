@@ -57,6 +57,8 @@ final class HybridFusionTests: XCTestCase {
         XCTAssertEqual(outcome.reason, "no_query_vector")
         XCTAssertFalse(outcome.hits.isEmpty)
         XCTAssertTrue(box.value.contains { $0.contains("lexical_only") })
+        // B7: the line names what the caller actually received.
+        XCTAssertTrue(box.value.contains { $0.contains("hits_used=\(outcome.hits.count)") })
     }
 }
 
