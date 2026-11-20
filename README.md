@@ -30,7 +30,7 @@ HARNES-S работает на Mac. Но Mac не всегда с собой —
 <td width="220" valign="top"><img src="DOCS/meha/meha-chat.png" alt="Меха — ИИ-агент для Android"></td>
 <td valign="top">
 
-**Меха** — ИИ-агент для Android, который живёт целиком на телефоне: своя память, свои инструменты, свои чаты. Отдельный проект, отдельное приложение, качается с [bazarow.ru/tools/meha](https://bazarow.ru/tools/meha/).
+**Меха** — ИИ-агент для Android, который живёт целиком на телефоне: своя память, свои инструменты, свои чаты. Отдельный проект, отдельное приложение, качается с [bazarow.ru/tools/meha](https://bazarow.ru/tools/meha/), исходники — [github.com/mibazarow/meha](https://github.com/mibazarow/meha).
 
 Мы соединяем их так, чтобы телефон стал **пультом к HARNES-S**, а не второй головой:
 
@@ -41,7 +41,7 @@ HARNES-S работает на Mac. Но Mac не всегда с собой —
 
 Транспорт — тонкий общий журнал с курсорами, без облачного хранилища: недоступен — обе стороны работают дальше и синхронизируются, когда он вернётся.
 
-[**Что такое Меха →**](https://bazarow.ru/tools/meha/) · [План связки и открытые вопросы →](MEHA_HARNESS_DUET.md)
+[**Что такое Меха →**](https://bazarow.ru/tools/meha/) · [Исходники Мехи на GitHub →](https://github.com/mibazarow/meha) · [План связки и открытые вопросы →](MEHA_HARNESS_DUET.md)
 
 </td>
 </tr>
