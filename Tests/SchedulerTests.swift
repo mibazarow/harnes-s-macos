@@ -2,6 +2,31 @@ import XCTest
 @testable import Harness
 
 final class SchedulerTests: XCTestCase {
+    func testMemoryReportScheduleIsCreatedOnlyOnce() throws {
+        let scheduler = SchedulerService(database: try AppDatabase(inMemory: true))
+        try scheduler.ensureMemoryReportSchedule()
+        try scheduler.ensureMemoryReportSchedule()
+        let tasks = try scheduler.list()
+        XCTAssertEqual(tasks.count, 1)
+        XCTAssertEqual(tasks[0].intervalMinutes, 1440)
+        XCTAssertEqual(tasks[0].prompt, SchedulerService.memoryReportPrompt)
+    }
+
+    func testBusyMemoryReportRemainsDueAndDoesNotEnterAgent() async throws {
+        let database = try AppDatabase(inMemory: true)
+        let scheduler = SchedulerService(database: database)
+        try scheduler.ensureMemoryReportSchedule()
+        try await database.queue.write { db in
+            try db.execute(sql: "UPDATE schedules SET next_run_at = '2000-01-01T00:00:00Z'")
+        }
+        let attempted = expectation(description: "read-only handler attempted")
+        scheduler.onFire = { _ in XCTFail("Report must not enter the agent") }
+        scheduler.onMemoryReport = { attempted.fulfill(); return false }
+        scheduler.tick()
+        await fulfillment(of: [attempted], timeout: 2)
+        XCTAssertEqual(try scheduler.due().count, 1)
+    }
+
     func testTickWithoutConsumerKeepsDueTask() async throws {
         let database = try AppDatabase(inMemory: true)
         let scheduler = SchedulerService(database: database)

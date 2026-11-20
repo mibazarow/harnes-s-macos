@@ -30,8 +30,8 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(width: 660, height: 540)
-        .tint(Palette.current.accent)
-        .preferredColorScheme(.dark)
+        .tint(settings.theme.palette.accent)
+        .preferredColorScheme(settings.theme.palette.scheme)
     }
 }
 
@@ -42,8 +42,11 @@ struct GeneralSettingsView: View {
         @Bindable var settings = settings
 
         Form {
-            Section("Вид") {
-                LabeledContent("Тема", value: "Copper (тёмная)")
+            Section("Внешний вид") {
+                Picker("Тема", selection: $settings.theme) {
+                    Text("Тёмная").tag(AppTheme.dark)
+                    Text("Светлая").tag(AppTheme.light)
+                }
 
                 Picker("Шрифт", selection: $settings.fontFamily) {
                     Text("Nordwand Mono (встроенный)")

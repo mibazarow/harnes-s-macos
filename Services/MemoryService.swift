@@ -4,9 +4,136 @@ import GRDB
 
 actor MemoryService {
     private let database: AppDatabase
+    private let backupDirectory: URL
 
-    init(database: AppDatabase) {
+    /// High similarity only nominates candidates; it never authorizes consolidation.
+    static let reportSimilarity = 0.88
+
+    static func saveReport(_ report: String, directory: URL, date: Date = .now) throws -> URL {
+        try AppPaths.ensureDirectory(directory)
+        let url = directory.appendingPathComponent("memory-report-\(String(date.ISO8601Format().prefix(10))).md")
+        let temporary = directory.appendingPathComponent(".memory-report-\(UUID().uuidString)")
+        guard FileManager.default.createFile(atPath: temporary.path, contents: Data(report.utf8),
+                                            attributes: [.posixPermissions: 0o600]) else {
+            throw ConfigurationError.invalidArguments("Не удалось сохранить отчёт памяти.")
+        }
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        if FileManager.default.fileExists(atPath: url.path) {
+            _ = try FileManager.default.replaceItemAt(url, withItemAt: temporary,
+                                                      options: .usingNewMetadataOnly)
+        } else {
+            try FileManager.default.moveItem(at: temporary, to: url)
+        }
+        return url
+    }
+
+    func maintenanceReport() throws -> String {
+        try database.queue.read { db in
+            let items = try Row.fetchAll(db, sql: "SELECT * FROM memory WHERE scope = 'user' AND \(Self.activeClause) ORDER BY id")
+                .map(Self.item(from:))
+            let rows = try Row.fetchAll(db, sql: "SELECT ref_id, model, vector FROM embeddings WHERE ref_kind = 'memory' ORDER BY updated_at, model")
+            var vectors: [Int64: (String, [Float])] = [:]
+            for row in rows {
+                let ref: String = row["ref_id"]
+                let blob: Data = row["vector"]
+                if let id = Int64(ref), let vector = EmbeddingsService.decode(blob) {
+                    vectors[id] = (row["model"], vector)
+                }
+            }
+            var clusters: [[MemoryItem]] = []
+            var conflicts: [String] = []
+            for item in items {
+                if let index = clusters.firstIndex(where: { group in
+                    group.allSatisfy { other in
+                        guard other.area == item.area, !MemoryContradiction.conflicts(other, item) else { return false }
+                        if let a = vectors[other.id], let b = vectors[item.id], a.0 == b.0 {
+                            return EmbeddingsService.cosine(a.1, b.1) >= Self.reportSimilarity
+                        }
+                        return Self.jaccard(Self.tokenSet(other.content), Self.tokenSet(item.content)) >= Self.reportSimilarity
+                    }
+                }) { clusters[index].append(item) }
+                else { clusters.append([item]) }
+            }
+            for (index, item) in items.enumerated() {
+                for other in items.dropFirst(index + 1) where item.area == other.area && MemoryContradiction.conflicts(item, other) {
+                    let newer = item.createdAt > other.createdAt ? item : other
+                    conflicts.append("#\(item.id) / #\(other.id): новее #\(newer.id) (\(newer.createdAt))\n\(item.content)\n\(other.content)")
+                }
+            }
+            let candidates = clusters.filter { $0.count > 1 }
+            let unread = items.filter { $0.hits == 0 && !$0.pinned }
+            var sections = ["# Отчёт памяти", "Кластеров: \(candidates.count); кандидатов: \(candidates.reduce(0) { $0 + $1.count }); непрочитанных незакреплённых: \(unread.count).",
+                            "Только предложения. Данные памяти не изменены. Сводки требуют проверки смысла и подтверждения."]
+            for group in candidates {
+                sections.append("## Тема: \(group[0].area) · #\(group[0].id)\n" + group.map {
+                    "#\($0.id)\($0.pinned ? " [закреплено]" : ""): " + $0.content.replacingOccurrences(of: "\n", with: " ")
+                }.joined(separator: "\n") + "\nПредложение сводки (экстрактивное, требует редактирования):\n" + group.map(\.content).joined(separator: "\n"))
+            }
+            sections.append("## Противоречия\n" + (conflicts.isEmpty ? "Не обнаружены эвристикой." : conflicts.joined(separator: "\n\n")))
+            sections.append("## Непрочитанные кандидаты\n" + unread.map { "#\($0.id): \($0.content)" }.joined(separator: "\n"))
+            return sections.joined(separator: "\n\n") + "\n"
+        }
+    }
+
+    init(database: AppDatabase, backupDirectory: URL = AppPaths.dataDirectory.appendingPathComponent("backup")) {
         self.database = database
+        self.backupDirectory = backupDirectory
+    }
+
+    /// Explicit consolidation only: preserve all source rows and a pre-change snapshot.
+    func successor(of id: Int64) throws -> Int64? {
+        try database.queue.read { db in
+            try Int64.fetchOne(db, sql: """
+                SELECT merged_into FROM memory WHERE id = ? AND merged_into IS NOT NULL
+                UNION ALL SELECT id FROM memory WHERE supersedes_id = ? LIMIT 1
+                """, arguments: [id, id])
+        }
+    }
+
+    func merge(ids: [Int64], into summary: String, allowPinned: Bool = false) throws -> MemoryItem {
+        let ids = Array(Set(ids)).sorted()
+        let summary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard ids.count >= 2, !summary.isEmpty else {
+            throw ConfigurationError.invalidArguments("Нужны минимум два id и непустая сводка.")
+        }
+        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+        try AppPaths.ensureDirectory(backupDirectory)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: backupDirectory.path)
+        let backup = backupDirectory.appendingPathComponent("memory-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString).db")
+        let content = summary + "\n\nИсточники: " + ids.map { "#\($0)" }.joined(separator: ", ")
+        let now = Timestamps.now()
+        let mergedID: Int64 = try database.queue.writeWithoutTransaction { db in
+            func sources() throws -> [MemoryItem] {
+                let rows = try Row.fetchAll(db, sql: "SELECT * FROM memory WHERE id IN (\(placeholders)) AND \(Self.activeClause)", arguments: StatementArguments(ids))
+                let items = rows.map(Self.item(from:))
+                guard items.count == ids.count, Set(items.map(\.scope)).count == 1,
+                      allowPinned || !items.contains(where: \.pinned) else {
+                    throw ConfigurationError.invalidArguments("Источники должны быть активными, одной области и не закреплёнными без явного разрешения.")
+                }
+                return items
+            }
+            _ = try sources()
+            try db.execute(sql: "VACUUM INTO ?", arguments: [backup.path])
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backup.path)
+            var id: Int64 = 0
+            try db.inTransaction {
+                let items = try sources()
+                try db.execute(sql: """
+                    INSERT INTO memory (scope, content, kind, area, tags, source, pinned,
+                        content_hash, importance, created_at, updated_at)
+                    VALUES (?, ?, 'fact', ?, '[]', 'merge', ?, ?, ?, ?, ?)
+                    """, arguments: [items[0].scope, content, items[0].area,
+                        items.contains(where: \.pinned) ? 1 : 0, Self.hash(content),
+                        items.map(\.importance).max() ?? 1, now, now])
+                id = db.lastInsertedRowID
+                try db.execute(sql: "UPDATE memory SET merged_into = ?, archived = 1 WHERE id IN (\(placeholders))",
+                               arguments: StatementArguments([id] + ids))
+                return .commit
+            }
+            return id
+        }
+        guard let item = try item(id: mergedID) else { throw ConfigurationError.invalidArguments("Сводная запись недоступна.") }
+        return item
     }
 
     @discardableResult
@@ -249,6 +376,7 @@ actor MemoryService {
     /// no longer current. Everything that answers a query filters through this.
     static let activeClause = """
         id NOT IN (SELECT supersedes_id FROM memory WHERE supersedes_id IS NOT NULL)
+        AND merged_into IS NULL AND archived = 0
         """
 
     /// Marks `newID` as the replacement of `oldID`. Both rows stay; only the old one
@@ -294,6 +422,7 @@ actor MemoryService {
             let others = try Row.fetchAll(db, sql: """
                 SELECT * FROM memory WHERE scope = 'user' AND area != 'lessons'
                   AND importance > 0 AND \(Self.activeClause)
+                  AND (kind != 'fact' OR hits > 0 OR pinned = 1)
                 """).map(Self.item(from:))
 
             let priority = ["about", "preferences", "people", "routines", "decision", "fact"]
@@ -393,7 +522,7 @@ actor MemoryService {
         return matches
     }
 
-    /// Self-reflection: drops unpinned memories that were never used and are older than `days`.
+    /// Keep unused history readable by id; housekeeping never deletes these rows.
     @discardableResult
     func pruneUnused(olderThanDays days: Int = 90) throws -> Int {
         let cutoff = ISO8601DateFormatter().string(
@@ -401,13 +530,11 @@ actor MemoryService {
         )
         let removed = try database.queue.write { db in
             try db.execute(sql: """
-                DELETE FROM memory
-                WHERE pinned = 0 AND hits = 0 AND COALESCE(last_used_at, updated_at) < ?
+                UPDATE memory SET archived = 1
+                WHERE pinned = 0 AND hits = 0 AND archived = 0
+                  AND COALESCE(last_used_at, updated_at) < ?
                 """, arguments: [cutoff])
             return db.changesCount
-        }
-        if removed > 0 {
-            try pruneOrphanEmbeddings()
         }
         return removed
     }
@@ -524,7 +651,10 @@ actor MemoryService {
             unverified: unverified,
             contradictions: MemoryContradiction.marks(items).count,
             gcSoon: gcSoon,
-            neverUsed: neverUsed
+            neverUsed: neverUsed,
+            archived: try database.queue.read { db in
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM memory WHERE scope = 'user' AND archived = 1") ?? 0
+            }
         )
     }
 
@@ -614,7 +744,7 @@ actor MemoryService {
         return (try? database.queue.read { db in
             try Row.fetchAll(
                 db,
-                sql: "SELECT * FROM memory WHERE id IN (\(placeholders))",
+                sql: "SELECT * FROM memory WHERE id IN (\(placeholders)) AND \(Self.activeClause)",
                 arguments: StatementArguments(ids)
             )
             .reduce(into: [Int64: MemoryItem]()) { result, row in
@@ -870,6 +1000,8 @@ actor MemoryService {
             area: row["area"] as String? ?? "fact",
             quote: row["quote"] as String?,
             supersedesID: row["supersedes_id"] as Int64?,
+            mergedInto: row["merged_into"] as Int64?,
+            archived: (row["archived"] as Int? ?? 0) != 0,
             importance: row["importance"] as Int? ?? 1,
             updatedAt: row["updated_at"] as String? ?? ""
         )
@@ -887,6 +1019,7 @@ struct MemoryStats: Equatable, Sendable {
     var gcSoon: Int
     /// Never read since it was written.
     var neverUsed: Int
+    var archived: Int = 0
 
     var total: Int { byArea.values.reduce(0, +) }
 }

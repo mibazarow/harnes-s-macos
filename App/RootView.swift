@@ -12,7 +12,7 @@ struct RootView: View {
     /// Set while the user drags a window edge; rows drop text selection for the drag.
     @State private var liveResize = LiveResizeState()
 
-    private var palette: Palette { Palette.current }
+    private var palette: Palette { settings.theme.palette }
 
     var body: some View {
         // The context numbers come from a snapshot, not from the plan: reading the plan
@@ -58,7 +58,7 @@ struct RootView: View {
         )
         .environment(liveResize)
         .tint(palette.accent)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(palette.scheme)
         .frame(minWidth: 560, minHeight: 420)
         .task {
             #if DEBUG
@@ -127,6 +127,20 @@ struct RootView: View {
     private func startScheduler() {
         guard let services else { return }
         try? services.scheduler.bootstrap()
+        try? services.scheduler.ensureMemoryReportSchedule()
+        services.scheduler.onMemoryReport = {
+            guard await !chat.isStreaming else { return false }
+            do {
+                let report = try await services.memory.maintenanceReport()
+                guard await !chat.isStreaming else { return false }
+                let url = try MemoryService.saveReport(report, directory: AppPaths.dataDirectory)
+                await chat.notice("Отчёт памяти: \(report.components(separatedBy: "\n").dropFirst(2).first ?? "готов")\n\(url.path)")
+                return true
+            } catch {
+                ChatStore.logLatency("memory-report failed: \(error.localizedDescription)")
+                return false
+            }
+        }
         services.scheduler.onFire = { task in
             Task { @MainActor in
                 chat.send(task.prompt)

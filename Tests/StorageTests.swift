@@ -77,6 +77,10 @@ final class StorageTests: XCTestCase {
         XCTAssertTrue(ids.contains(pinned.id))
         XCTAssertTrue(ids.contains(used.id))
         XCTAssertFalse(ids.contains(stale.id))
+        let archived = try await memory.item(id: stale.id)
+        XCTAssertEqual(archived?.content, stale.content)
+        let secondPass = try await memory.pruneUnused(olderThanDays: -1)
+        XCTAssertEqual(secondPass, 0)
     }
 
     func testMemoryForPromptPinsFirst() async throws {
@@ -140,6 +144,7 @@ final class StorageTests: XCTestCase {
 
         let first = try await memory.add("Первая заметка")
         let second = try await memory.add("Вторая заметка")
+        try await memory.touch(ids: [first.id, second.id])
 
         let before = try await memory.forPrompt().map(\.id)
         XCTAssertEqual(before, [first.id, second.id])

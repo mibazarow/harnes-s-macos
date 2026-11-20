@@ -6,6 +6,36 @@ import Foundation
 /// to show the contradiction in `memory_list` before it reaches the prompt and gets
 /// repeated as fact.
 enum MemoryContradiction {
+    /// Display grouping is deliberately conservative; it never replaces source text.
+    static let displaySimilarity = 0.7
+
+    static func groupedSearchText(_ items: [MemoryItem]) -> String {
+        var groups: [[MemoryItem]] = []
+        let marks = marks(items)
+        for item in items {
+            let tokens = MemoryService.tokenSet(item.content)
+            if let index = groups.firstIndex(where: { group in
+                group.allSatisfy {
+                    $0.area == item.area && $0.scope == item.scope
+                        && !conflicts($0, item)
+                        && MemoryService.jaccard(MemoryService.tokenSet($0.content), tokens) >= displaySimilarity
+                }
+            }) {
+                groups[index].append(item)
+            } else {
+                groups.append([item])
+            }
+        }
+        return groups.map { group in
+            let lines = group.map {
+                "#\($0.id) [\($0.kind)] \($0.content)" + suffix($0.id, marks: marks)
+            }
+            return group.count > 1
+                ? "Близкие записи (не сведены):\n" + lines.joined(separator: "\n")
+                : lines.joined(separator: "\n")
+        }.joined(separator: "\n\n")
+    }
+
     /// Word pairs that flip the meaning. Matched as whole tokens, so "нет" does not fire
     /// inside "нетерпеливый".
     static let opposites: [(String, String)] = [

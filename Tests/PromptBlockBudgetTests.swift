@@ -52,7 +52,8 @@ final class PromptBlockBudgetTests: XCTestCase {
             "Очки", "Зонт", "Кошелёк", "Ключи", "Паспорт"
         ]
         for (index, topic) in topics.enumerated() {
-            _ = try await memory.add("\(topic) заметка\(index)")
+            let item = try await memory.add("\(topic) заметка\(index)")
+            try await memory.touch(ids: [item.id])
         }
         let selection = try await memory.forPromptWithOverflow(budgetTokens: 60)
         XCTAssertFalse(selection.items.isEmpty)
@@ -63,7 +64,8 @@ final class PromptBlockBudgetTests: XCTestCase {
     func testMemoryPromptWithoutOverflowReportsZero() async throws {
         let database = try AppDatabase(inMemory: true)
         let memory = MemoryService(database: database)
-        _ = try await memory.add("Один короткий факт")
+        let item = try await memory.add("Один короткий факт")
+        try await memory.touch(ids: [item.id])
         let selection = try await memory.forPromptWithOverflow()
         XCTAssertEqual(selection.items.count, 1)
         XCTAssertEqual(selection.omitted, 0)

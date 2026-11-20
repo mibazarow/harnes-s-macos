@@ -311,6 +311,11 @@ extension ChatMessage {
             && state != .queued
     }
 
+    var isClosingAnswer: Bool {
+        role == .assistant && state == .complete && tools.isEmpty
+            && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// A system row the user never sees: the note the store leaves after it pruned
     /// finished tool output at a task boundary.
     ///
@@ -339,6 +344,17 @@ extension ChatMessage {
 
         for message in messages {
             guard message.isToolOnly else {
+                if message.isClosingAnswer, let accumulated = run,
+                   accumulated.state == .complete {
+                    var answer = message
+                    answer.tools = accumulated.tools
+                    answer.reasoning = [accumulated.reasoning, message.reasoning]
+                        .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
+                    answer.warning = message.warning ?? accumulated.warning
+                    result.append(answer)
+                    run = nil
+                    continue
+                }
                 if let run { result.append(run) }
                 run = nil
                 result.append(message)
@@ -392,7 +408,12 @@ extension ChatMessage {
         var index = messages.count - 1
         while index >= 0 {
             let start: Int
-            if messages[index].isToolOnly {
+            if messages[index].isClosingAnswer, index > 0,
+               messages[index - 1].isToolOnly, messages[index - 1].state == .complete {
+                var beginning = index - 1
+                while beginning > 0, messages[beginning - 1].isToolOnly { beginning -= 1 }
+                start = beginning
+            } else if messages[index].isToolOnly {
                 var beginning = index
                 while beginning > 0, messages[beginning - 1].isToolOnly { beginning -= 1 }
                 start = beginning

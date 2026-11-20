@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 extension ToolRegistry {
     /// One line per reveal, never the value.
@@ -49,6 +50,23 @@ extension ToolRegistry {
     func memoryAdd(_ args: [String: Any]) async throws -> ToolResult {
         guard let memory else { return .fail("Память недоступна") }
         guard let text = args["text"] as? String else { return .fail("text обязателен") }
+        if let rawIDs = args["supersedes_id"] as? [Any] {
+            guard let userMessage = currentUserMessage, !userMessage.isEmpty,
+                  Self.bool(args, "confirm") == true else {
+                return .fail("Свёртка требует сообщения пользователя и confirm: true после подтверждения id и текста сводки.")
+            }
+            let ids = rawIDs.compactMap { value -> Int64? in
+                guard let number = value as? NSNumber,
+                      CFGetTypeID(number) != CFBooleanGetTypeID(),
+                      number.doubleValue == Double(number.int64Value), number.int64Value > 0 else { return nil }
+                return number.int64Value
+            }
+            guard ids.count == rawIDs.count else { return .fail("supersedes_id: ожидается список целых положительных id.") }
+            let item = try await memory.merge(ids: ids, into: text,
+                                               allowPinned: Self.bool(args, "allow_pinned") == true)
+            await MemoryIndexer.index(id: item.id, content: item.content, sink: embeddings)
+            return .ok("Сведено в #\(item.id): \(item.content). Источники сохранены по id; резервная копия создана до свёртки.")
+        }
         let pinned = Self.bool(args, "pinned") ?? false
         let kind = ((args["kind"] as? String) ?? "fact").lowercased()
         // R30.8: a correction is a lesson by definition, and `lessons` is the area the
@@ -197,6 +215,13 @@ extension ToolRegistry {
 
         memoryUsage?.recordCall()
 
+        if let id = Int64(query.hasPrefix("#") ? String(query.dropFirst()) : query),
+           let item = try await memory.item(id: id) {
+            let destination = try await memory.successor(of: id)
+            let suffix = destination.map { " ⤶ #\($0)" } ?? (item.archived ? " [архив]" : "")
+            return .ok("#\(item.id) [\(item.kind)] \(item.content)\(suffix)")
+        }
+
         if let embeddings {
             let search = HybridSearch(
                 memory: memory,
@@ -209,17 +234,14 @@ extension ToolRegistry {
             memoryUsage?.recordHits(hits.count)
             if hits.isEmpty { await noteMiss(query) }
             guard !hits.isEmpty else { return .ok("Ничего не найдено.") }
-            return .ok(hits.prefix(8).map { hit in
-                let source = hit.semanticScore != nil ? "semantic+fts" : "fts"
-                return "#\(hit.item.id) [\(hit.item.kind)] (\(source)) \(hit.item.content)"
-            }.joined(separator: "\n"))
+            return .ok(MemoryContradiction.groupedSearchText(hits.prefix(8).map(\.item)))
         }
 
         let hits = try await memory.search(query)
         memoryUsage?.recordHits(hits.count)
         if hits.isEmpty { await noteMiss(query) }
         guard !hits.isEmpty else { return .ok("Ничего не найдено.") }
-        return .ok(hits.prefix(8).map { "#\($0.id) [\($0.kind)] \($0.content)" }.joined(separator: "\n"))
+        return .ok(MemoryContradiction.groupedSearchText(Array(hits.prefix(8))))
     }
 
     /// R32.4: an empty result over a non-empty memory is worth one log line.
@@ -235,13 +257,14 @@ extension ToolRegistry {
     func memoryStats(_ args: [String: Any]) async throws -> ToolResult {
         guard let memory else { return .fail("Память недоступна") }
         let stats = try await memory.stats()
-        guard stats.total > 0 else { return .ok("Память пуста.") }
+        guard stats.total > 0 || stats.archived > 0 else { return .ok("Память пуста.") }
 
         let areas = stats.byArea.sorted { $0.key < $1.key }
             .map { "\($0.key): \($0.value)" }
             .joined(separator: ", ")
         return .ok("""
         Всего: \(stats.total)
+        Архивировано: \(stats.archived)
         По area: \(areas)
         Закреплено: \(stats.pinned)
         Не проверено (R33.1): \(stats.unverified)

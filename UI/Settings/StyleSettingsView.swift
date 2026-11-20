@@ -75,7 +75,6 @@ struct StyleSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .tint(Palette.current.accent)
         .task { await reload() }
         .onChange(of: mode) { _, _ in Task { await save() } }
         .onChange(of: profanityEnabled) { _, _ in Task { await save() } }

@@ -1,8 +1,192 @@
 import XCTest
+import GRDB
 @testable import Harness
 
 /// R33.2: an outdated fact is replaced, not erased. The old row stays by id.
 final class MemorySupersedeTests: XCTestCase {
+    func testTwentyLabelledQueriesPreserveTopThreeInDisplay() async throws {
+        let memory = MemoryService(database: try AppDatabase(inMemory: true))
+        let topics = ["Ubuntu", "Fastmail", "Keenetic", "Brother", "Epson",
+                      "Logitech", "Nordwand", "PostgreSQL", "Redis", "Docker",
+                      "Swift", "Kotlin", "Rust", "Python", "SQLite",
+                      "Grafana", "Prometheus", "Tailscale", "Synology", "Obsidian"]
+        var expected: [(String, Int64)] = []
+        for topic in topics {
+            let item = try await memory.add("\(topic): отдельная настройка рабочего окружения", contentHash: UUID().uuidString)
+            expected.append((topic, item.id))
+        }
+        for (query, id) in expected {
+            let hits = try await memory.search(query)
+            let top = Array(hits.prefix(3))
+            XCTAssertTrue(top.contains { $0.id == id }, "Baseline top-3: \(query)")
+            let rendered = MemoryContradiction.groupedSearchText(top)
+            XCTAssertTrue(rendered.contains("#\(id) ["), "Display must retain top-3: \(query)")
+        }
+    }
+
+    func testReportUsesStoredEmbeddingsWithoutChangingUsage() async throws {
+        let database = try AppDatabase(inMemory: true)
+        let memory = MemoryService(database: database)
+        let embeddings = EmbeddingsService(database: database)
+        let first = try await memory.add("Архивы размещены на удалённом хранилище")
+        let second = try await memory.add("Резервирование выполняется вне офиса")
+        for id in [first.id, second.id] {
+            try await embeddings.store(refKind: "memory", refID: String(id),
+                                       vector: .init(values: [1, 0, 0], model: "fixture"))
+        }
+        let before = try await memory.list()
+        let report = try await memory.maintenanceReport()
+        XCTAssertTrue(report.contains("Кластеров: 1; кандидатов: 2"), report)
+        XCTAssertTrue(report.contains("#\(first.id)"))
+        XCTAssertTrue(report.contains("#\(second.id)"))
+        let after = try await memory.list()
+        XCTAssertEqual(before, after)
+    }
+
+    func testReportFileIsPrivateAndReplaceable() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let url = try MemoryService.saveReport("first", directory: directory, date: date)
+        _ = try MemoryService.saveReport("second", directory: directory, date: date)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "second")
+        let permissions = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(permissions?.intValue, 0o600)
+    }
+
+    func testMaintenanceReportIsDeterministicAndReadOnly() async throws {
+        let memory = MemoryService(database: try AppDatabase(inMemory: true))
+        _ = try await memory.add("Сервер alpha можно выключать ночью")
+        _ = try await memory.add("Сервер alpha нельзя выключать ночью", supersedesID: nil)
+        let before = try await memory.list()
+        let first = try await memory.maintenanceReport()
+        let second = try await memory.maintenanceReport()
+        let after = try await memory.list()
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(before, after)
+        XCTAssertTrue(first.contains("Противоречия"))
+        XCTAssertTrue(first.contains("Непрочитанные"))
+    }
+
+    func testSearchDisplayGroupsWithoutDiscardingFactsOrContradictions() {
+        func item(_ id: Int64, _ text: String) -> MemoryItem {
+            MemoryItem(id: id, scope: "user", content: text, kind: "fact", tags: [],
+                       createdAt: "2026-11-20", pinned: false, hits: 1, lastUsedAt: nil)
+        }
+        let first = item(1, "Сервер alpha использует Ubuntu для всех рабочих задач")
+        let similar = item(2, "Сервер alpha использует Ubuntu для всех рабочих задач ежедневно")
+        let output = MemoryContradiction.groupedSearchText([first, similar])
+        XCTAssertTrue(output.contains("Близкие записи"))
+        XCTAssertTrue(output.contains(first.content))
+        XCTAssertTrue(output.contains(similar.content))
+        let conflict = MemoryContradiction.groupedSearchText([
+            item(3, "Сервер alpha можно выключать ночью"),
+            item(4, "Сервер alpha нельзя выключать ночью")
+        ])
+        XCTAssertFalse(conflict.contains("Близкие записи"))
+        XCTAssertTrue(conflict.contains("противоречит"))
+    }
+
+    func testUnreadFactsStaySearchableButDoNotConsumePromptBudget() async throws {
+        let memory = MemoryService(database: try AppDatabase(inMemory: true))
+        let fact = try await memory.add("Копии сервера хранятся в Казани")
+        let pinned = try await memory.add("Проверять резервные копии еженедельно", pinned: true)
+        let before = try await memory.forPrompt()
+        XCTAssertFalse(before.contains { $0.id == fact.id })
+        XCTAssertTrue(before.contains { $0.id == pinned.id })
+        let found = try await memory.search("Казани")
+        XCTAssertTrue(found.contains { $0.id == fact.id })
+        try await memory.touch(ids: [fact.id])
+        let after = try await memory.forPrompt()
+        XCTAssertTrue(after.contains { $0.id == fact.id })
+    }
+
+    func testMergeRollsBackWhenArchivingFails() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try AppDatabase(inMemory: true)
+        let memory = MemoryService(database: database, backupDirectory: directory)
+        let first = try await memory.add("Первичный сервер расположен в Москве")
+        let second = try await memory.add("Резервные копии отправляются в Казань")
+        try await database.queue.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER reject_archive BEFORE UPDATE OF archived ON memory
+                BEGIN SELECT RAISE(ABORT, 'archive unavailable'); END
+                """)
+        }
+        do {
+            _ = try await memory.merge(ids: [first.id, second.id], into: "Инфраструктура")
+            XCTFail("The entire transaction must fail")
+        } catch {}
+        let count = try await memory.count()
+        let active = try await memory.list()
+        XCTAssertEqual(count, 2)
+        XCTAssertEqual(Set(active.map(\.id)), Set([first.id, second.id]))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 1)
+    }
+
+    func testMergeDoesNotWriteWithoutBackup() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let blocked = directory.appendingPathComponent("not-a-directory")
+        try Data("blocked".utf8).write(to: blocked)
+        let memory = MemoryService(database: try AppDatabase(inMemory: true), backupDirectory: blocked)
+        let first = try await memory.add("Первичный сервер расположен в Москве")
+        let second = try await memory.add("Резервные копии отправляются в Казань")
+        do {
+            _ = try await memory.merge(ids: [first.id, second.id], into: "Инфраструктура")
+            XCTFail("Backup failure must prevent consolidation")
+        } catch {}
+        let count = try await memory.count()
+        let active = try await memory.list()
+        XCTAssertEqual(count, 2)
+        XCTAssertEqual(active.count, 2)
+    }
+
+    func testMergePreservesSourcesAndCreatesBackup() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try AppDatabase(inMemory: true)
+        let memory = MemoryService(database: database, backupDirectory: directory)
+        let first = try await memory.add("Сервер alpha расположен в Москве")
+        let second = try await memory.add("Резервная копия хранится в Казани")
+        let merged = try await memory.merge(ids: [first.id, second.id], into: "Инфраструктура: Москва и Казань")
+        let active = try await memory.list()
+        XCTAssertEqual(active.map(\.id), [merged.id])
+        let old = try await memory.item(id: first.id)
+        XCTAssertEqual(old?.content, first.content)
+        XCTAssertEqual(old?.mergedInto, merged.id)
+        XCTAssertEqual(old?.archived, true)
+        let searchResolved = await memory.items(ids: [first.id, second.id, merged.id])
+        XCTAssertEqual(Set(searchResolved.keys), Set([merged.id]))
+        let stats = try await memory.stats()
+        XCTAssertEqual(stats.archived, 2)
+        XCTAssertEqual(stats.total, 1)
+        let count = try await memory.count()
+        XCTAssertEqual(count, 3)
+        XCTAssertTrue(merged.content.contains("#\(first.id)"))
+        let backups = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        XCTAssertEqual(backups.count, 1)
+        let restored = try AppDatabase(path: XCTUnwrap(backups.first))
+        let backupCount = try await MemoryService(database: restored).count()
+        XCTAssertEqual(backupCount, 2)
+    }
+
+    func testMergeRejectsPinnedWithoutPermission() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let memory = MemoryService(database: try AppDatabase(inMemory: true), backupDirectory: directory)
+        let first = try await memory.add("Не менять закреплённое правило", pinned: true)
+        let second = try await memory.add("Отдельный факт про резервирование")
+        do {
+            _ = try await memory.merge(ids: [first.id, second.id], into: "Сводка")
+            XCTFail("Pinned sources require explicit permission")
+        } catch {}
+        let active = try await memory.list()
+        XCTAssertEqual(active.count, 2)
+    }
+
     func testNewFactReplacesOldInSearchButOldStaysByID() async throws {
         let database = try AppDatabase(inMemory: true)
         let memory = MemoryService(database: database)
@@ -33,6 +217,9 @@ final class MemorySupersedeTests: XCTestCase {
             "Встречи по четвергам", area: "routines", quote: "четверги",
             quoteVerified: true, supersedesID: old.id
         )
+
+        let active = try await memory.list()
+        try await memory.touch(ids: active.map(\.id))
 
         let prompt = try await memory.forPrompt()
         XCTAssertTrue(prompt.contains { $0.content.contains("четвергам") })

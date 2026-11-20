@@ -6,6 +6,7 @@ import Observation
 final class AppSettings {
     private enum Key {
         static let fontSize = "fontSize"
+        static let theme = "appearanceTheme"
 
         static let showTimestamps = "showTimestamps"
         static let compactionThresholdPercent = "compactionThresholdPercent"
@@ -13,6 +14,10 @@ final class AppSettings {
     }
 
     private let defaults: UserDefaults
+
+    var theme: AppTheme {
+        didSet { defaults.set(theme.rawValue, forKey: Key.theme) }
+    }
 
     var fontSize: Double {
         didSet { defaults.set(fontSize, forKey: Key.fontSize) }
@@ -36,6 +41,7 @@ final class AppSettings {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        self.theme = AppTheme(rawValue: defaults.string(forKey: Key.theme) ?? "") ?? .dark
 
         let storedFontSize = defaults.double(forKey: Key.fontSize)
         self.fontSize = storedFontSize > 0 ? storedFontSize : 13

@@ -35,6 +35,8 @@ final class MemoryBudgetVisibilityTests: XCTestCase {
             _ = try await memory.add(fact, area: "fact")
         }
         _ = try await memory.add("Сборка через xcodebuild", area: "decision")
+        let eligible = try await memory.list()
+        try await memory.touch(ids: eligible.map(\.id))
 
         let selection = try await memory.forPromptWithOverflow(budgetTokens: 60)
         XCTAssertGreaterThan(selection.omitted, 0)

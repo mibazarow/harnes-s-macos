@@ -24,6 +24,27 @@ final class SchedulerService: @unchecked Sendable {
     private var timer: Task<Void, Never>?
 
     var onFire: (@Sendable (ScheduledTask) -> Void)?
+    static let memoryReportPrompt = "harness:memory-report"
+    var onMemoryReport: (@Sendable () async -> Bool)?
+    private let reportLock = NSLock()
+    private var reportRunning = false
+
+    func ensureMemoryReportSchedule() throws {
+        guard try !list().contains(where: { $0.prompt == Self.memoryReportPrompt }) else { return }
+        _ = try add(title: "Ежедневный отчёт памяти", prompt: Self.memoryReportPrompt, intervalMinutes: 1440)
+    }
+
+    private func claimReport() -> Bool {
+        reportLock.lock(); defer { reportLock.unlock() }
+        guard !reportRunning else { return false }
+        reportRunning = true
+        return true
+    }
+
+    private func releaseReport() {
+        reportLock.lock(); defer { reportLock.unlock() }
+        reportRunning = false
+    }
 
     init(database: AppDatabase) {
         self.database = database
@@ -143,6 +164,16 @@ final class SchedulerService: @unchecked Sendable {
     func tick() {
         guard let onFire, let tasks = try? due(), !tasks.isEmpty else { return }
         for task in tasks {
+            if task.prompt == Self.memoryReportPrompt {
+                guard let onMemoryReport, claimReport() else { continue }
+                Task { [weak self] in
+                    defer { self?.releaseReport() }
+                    if await onMemoryReport() {
+                        try? self?.markRun(task, result: "Отчёт сохранён; память не изменена")
+                    }
+                }
+                continue
+            }
             onFire(task)
             try? markRun(task, result: "запущено")
         }

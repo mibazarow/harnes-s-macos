@@ -254,6 +254,7 @@ final class MemoryProvenanceTests: XCTestCase {
             area: "fact", quote: "запомни", quoteVerified: true
         )
 
+        try await memory.touch(ids: [short.id, long.id])
         let withRelevance = try await memory.forPrompt(relevance: [short.id: 0.9])
         XCTAssertTrue(withRelevance.contains { $0.id == short.id })
         XCTAssertFalse(

@@ -341,7 +341,7 @@ struct ProviderEditorView: View {
                             systemImage: "exclamationmark.triangle"
                         )
                         .font(.caption)
-                        .foregroundStyle(Palette.current.reasoning)
+                        .foregroundStyle(settings.theme.palette.reasoning)
                     }
 
                     Picker("Уровень размышлений", selection: $provider.reasoningLevel) {

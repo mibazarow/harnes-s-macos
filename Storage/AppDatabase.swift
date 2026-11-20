@@ -547,6 +547,14 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v25_memory_merged") { db in
+            try db.execute(sql: """
+                ALTER TABLE memory ADD COLUMN merged_into INTEGER REFERENCES memory(id);
+                ALTER TABLE memory ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+                CREATE INDEX memory_merged_into ON memory(merged_into);
+                """)
+        }
+
         return migrator
 
     }

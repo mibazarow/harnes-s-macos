@@ -9,6 +9,39 @@ import SwiftUI
 /// unrelated answers. Storage and the replay sent to the model must stay untouched.
 final class TranscriptGroupingTests: XCTestCase {
     @MainActor
+    func testThemePersistsWithDarkDefault() {
+        let name = "theme-test-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.theme, .dark)
+        XCTAssertEqual(settings.theme.palette, Palette.dark)
+        settings.theme = .light
+        XCTAssertEqual(AppSettings(defaults: defaults).theme, .light)
+        XCTAssertEqual(settings.theme.palette.scheme, .light)
+    }
+
+    @MainActor
+    func testLightPaletteContrast() throws {
+        func luminance(_ color: Color) throws -> Double {
+            let rgb = try XCTUnwrap(NSColor(color).usingColorSpace(.sRGB))
+            let channels = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent].map {
+                $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4)
+            }
+            return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
+        }
+        let palette = Palette.light
+        for background in [palette.background, palette.panel, palette.codeBackground, palette.userBackground] {
+            for foreground in [palette.text, palette.assistantText, palette.dim, palette.faint, palette.comment] {
+                let a = try luminance(background)
+                let b = try luminance(foreground)
+                let ratio = (max(a, b) + 0.05) / (min(a, b) + 0.05)
+                XCTAssertGreaterThanOrEqual(ratio, foreground == palette.text ? 7 : 4.5)
+            }
+        }
+    }
+
+    @MainActor
     func testStreamingMarkdownUpdatesBeforeStreamEnds() async throws {
         let resize = LiveResizeState()
         let host = NSHostingView(rootView: MarkdownView(
@@ -76,7 +109,7 @@ final class TranscriptGroupingTests: XCTestCase {
 
         let shown = ChatMessage.groupedForDisplay(history)
 
-        XCTAssertEqual(shown.count, 3, "user + one merged tool run + answer")
+        XCTAssertEqual(shown.count, 2, "user + answer including the tool run")
         XCTAssertEqual(shown[1].tools.count, 3, "all three traces stay visible")
     }
 
@@ -140,8 +173,8 @@ final class TranscriptGroupingTests: XCTestCase {
             history.append(ChatMessage(role: .assistant, text: "готово \(run)"))
         }
 
-        // Six display groups in 304 raw messages: nothing has to be dropped.
-        XCTAssertEqual(ChatMessage.groupedForDisplay(history).count, 6)
+        // Each completed answer includes its preceding tool run.
+        XCTAssertEqual(ChatMessage.groupedForDisplay(history).count, 4)
         XCTAssertEqual(ChatMessage.trimToDisplayLimit(history, limit: 200), 0)
     }
 
@@ -211,6 +244,28 @@ final class TranscriptGroupingTests: XCTestCase {
         let shown = ChatMessage.groupedForDisplay(history)
 
         XCTAssertEqual(shown.count, 2, "plain answers are never merged")
+    }
+
+    func testClosingAnswerIncludesToolsWithoutChangingStoredSteps() {
+        let first = toolOnly(["bash"])
+        let second = toolOnly(["read"])
+        let answer = ChatMessage(role: .assistant, text: "готово")
+        let history = [first, second, answer]
+        let shown = ChatMessage.groupedForDisplay(history)
+        XCTAssertEqual(shown.count, 1)
+        XCTAssertEqual(shown[0].id, answer.id)
+        XCTAssertEqual(shown[0].text, answer.text)
+        XCTAssertEqual(shown[0].tools.count, 2)
+        XCTAssertTrue(history[2].tools.isEmpty)
+        XCTAssertEqual(ChatMessage.trimToDisplayLimit(history, limit: 1), 0)
+    }
+
+    func testStreamingAnswerStaysSeparateUntilComplete() {
+        let step = toolOnly(["bash"])
+        var answer = ChatMessage(role: .assistant, text: "пишу", state: .streaming)
+        XCTAssertEqual(ChatMessage.groupedForDisplay([step, answer]).count, 2)
+        answer.state = .complete
+        XCTAssertEqual(ChatMessage.groupedForDisplay([step, answer]).count, 1)
     }
 }
 
