@@ -271,13 +271,14 @@ struct AgentLoop: Sendable {
         return total + ToolCost.catalog(schemas)
     }
 
-    /// Read-only tools that can run concurrently. Consecutive runs of these execute in
-    /// one task group; a mutating call splits the batch and runs alone, so ordering
-    /// between a read and a later write is preserved.
-    static let parallelSafeTools: Set<String> = [
-        "fs_read", "fs_list", "fs_grep", "fs_glob", "fs_tree", "read_many",
-        "search_code", "memory_search", "websearch", "webfetch"
-    ]
+    /// D9: safety is declared by the tool, not by a list next to the loop. The default
+    /// is `false`, so a new tool is serialized until its author opts in.
+    ///
+    /// Consecutive safe calls run in one task group; a mutating call splits the batch
+    /// and runs alone, so ordering between a read and a later write is preserved.
+    static let parallelSafeTools: Set<String> = Set(
+        ToolRegistry.definitions.filter(\.isConcurrencySafe).map(\.name)
+    )
 
     /// Results in call order; `nil` means the run was cancelled before that call.
     /// R30.1: one place decides whether a result is foreign data. Kept as a function so

@@ -3,7 +3,20 @@ import Foundation
 /// Tool catalog: JSON schemas sent to the model. Kept separate from the
 /// implementation so `ToolRegistry.swift` stays navigable.
 extension ToolRegistry {
-    static let definitions: [ToolDefinition] = [
+    /// D9: tools whose calls may run in one task group. Everything else is serialized.
+    /// Kept next to the catalog so opting in is one line next to the tool it describes.
+    static let concurrencySafeNames: Set<String> = [
+        "fs_read", "fs_list", "fs_grep", "fs_glob", "fs_tree", "read_many",
+        "search_code", "memory_search", "websearch", "webfetch"
+    ]
+
+    static let definitions: [ToolDefinition] = baseDefinitions.map { definition in
+        var copy = definition
+        copy.isConcurrencySafe = concurrencySafeNames.contains(copy.name)
+        return copy
+    }
+
+    private static let baseDefinitions: [ToolDefinition] = [
         ToolDefinition(
             name: "fs_list",
             exposure: .core,

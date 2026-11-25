@@ -43,6 +43,9 @@ struct ToolDefinition: Sendable {
     /// D3: declared shape of the result. When set, a successful result must come from
     /// `ToolResult.canonical` and pass `ToolOutputContract`.
     var outputSchema: [String: AnySendable]?
+    /// D9: the tool may run concurrently with other safe tools in one batch. Default
+    /// false, so a new tool is serialized until someone says otherwise.
+    var isConcurrencySafe: Bool = false
 }
 
 /// Session-scoped set of schemas the model asked to see in full.
