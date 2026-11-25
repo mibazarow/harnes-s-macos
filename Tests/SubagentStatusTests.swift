@@ -107,3 +107,37 @@ final class SubagentStatusTests: XCTestCase {
         XCTAssertEqual(report.role, .system)
     }
 }
+
+/// S4: the header renders `ChatStore.runningSubagents`, never the actor.
+@MainActor
+final class SubagentPillDataTests: XCTestCase {
+    func testRunningListFollowsStartAndFinish() async throws {
+        let chat = ChatStore()
+        XCTAssertTrue(chat.runningSubagents.isEmpty)
+
+        let ticket = try await chat.subagents.begin(
+            parent: SubagentRegistry.root, title: "читает TASKS.md"
+        )
+        await chat.refreshRunningSubagents()
+        XCTAssertEqual(chat.runningSubagents.map(\.id), [ticket.id])
+        XCTAssertEqual(chat.runningSubagents.first?.title, "читает TASKS.md")
+
+        await chat.subagents.end(ticket.id)
+        await chat.refreshRunningSubagents()
+        XCTAssertTrue(chat.runningSubagents.isEmpty, "отработал — пилюля исчезла")
+    }
+
+    func testPillShowsAtMostThreeAndCountsTheRest() {
+        XCTAssertEqual(SubagentPills.visibleLimit, 3)
+        let agents = (1...5).map {
+            SubagentInfo(SubagentRegistry.Child(
+                id: "agent-\($0)", parent: SubagentRegistry.root, depth: 1,
+                title: "задача \($0)", startedAt: Date(),
+                step: 0, maxSteps: 12, calls: 0, lastTool: nil, lastToolAt: nil,
+                cancelled: false, reason: nil, finishedAt: nil, outcome: nil
+            ))
+        }
+        XCTAssertEqual(agents.prefix(SubagentPills.visibleLimit).count, 3)
+        XCTAssertEqual(agents.count - SubagentPills.visibleLimit, 2)
+    }
+}

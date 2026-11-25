@@ -200,6 +200,10 @@ struct HeaderBar: View {
 
             Spacer(minLength: 12)
 
+            // S4: only the fact that a child is working. Finished children lose their
+            // pill immediately; the report arrives in the transcript.
+            SubagentPills(agents: chat.runningSubagents, palette: palette)
+
             if planMode {
                 Text("plan")
                     .foregroundStyle(palette.reasoning)
