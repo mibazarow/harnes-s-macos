@@ -237,7 +237,7 @@ final class TranscriptGroupingTests: XCTestCase {
     }
 
     func testPruneNoticeIsRecognisedAndStaysOutOfTheTranscript() {
-        let notice = CompactionLog.pruneNotice(results: 4, savedTokens: 5_000)
+        let notice = CompactionLog.pruneNotice(results: 4, savedTokens: 5_000, prunedChars: 12_000)
 
         XCTAssertTrue(ChatMessage(role: .system, text: notice).isPruneNotice)
         XCTAssertFalse(ChatMessage(role: .assistant, text: notice).isPruneNotice,

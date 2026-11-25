@@ -212,14 +212,24 @@ extension ChatStore {
 
     /// One decision for "what can leave the request". Used by the window plan, the
     /// calibration and the request builder, so all three talk about the same volume.
-    func plannedPruning() -> ToolOutputPruner.Plan {
+    func plannedPruning(threshold: Int = Tuning.toolOutputPruneBatchTokens) -> ToolOutputPruner.Plan {
         ToolOutputPruner.plan(
             messages: messages,
             mode: Tuning.toolOutputPruning,
             compactionHappened: compactedInWindow || pruneAtBoundary,
-            threshold: Tuning.toolOutputPruneBatchTokens,
+            threshold: threshold,
             protectedSteps: Tuning.toolOutputPruneProtectedSteps
         )
+    }
+
+    /// D6: a cache reset is priced in the provider's tokens. A calibration that has
+    /// converged scales the default with the real ratio; an unproven one keeps it.
+    func pruneThreshold(provider: ProviderModel, model: String) async -> Int {
+        let base = Tuning.toolOutputPruneBatchTokens
+        guard let drift = await calibration.drift(providerID: provider.id, model: model),
+              drift.withinTolerance else { return base }
+        let scaled = Int(Double(base) * drift.ratio)
+        return min(max(scaled, base / 2), base * 2)
     }
 
     /// Folds messages into the checkpoint. Returns false when the model refused, so the

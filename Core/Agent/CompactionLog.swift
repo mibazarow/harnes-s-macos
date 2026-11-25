@@ -32,8 +32,8 @@ enum CompactionLog {
     /// B4: pruning and folding are two different events, and the UI used to describe
     /// both as "история сжата". Pruning only replaces finished tool output inside the
     /// request; nothing is summarized and nothing in the database changes.
-    static func pruneNotice(results: Int, savedTokens: Int) -> String {
-        "Результаты инструментов убраны из запроса: \(results), около \(savedTokens) токенов. "
-            + "История не сжималась, в базе всё осталось."
+    static func pruneNotice(results: Int, savedTokens: Int, prunedChars: Int) -> String {
+        "Результаты инструментов убраны из запроса: \(results), \(prunedChars) символов, "
+            + "около \(savedTokens) токенов. История не сжималась, в базе всё осталось."
     }
 }

@@ -223,3 +223,38 @@ final class ToolPruningTests: XCTestCase {
         XCTAssertFalse(retained.contains("первое условие"), "старое вытесняется бюджетом")
     }
 }
+
+/// D6: the pruner reports what it removed, not only the token total.
+@MainActor
+final class ToolPruningAccountingTests: XCTestCase {
+    func testPlanReportsCutCharactersPerResult() {
+        let output = String(repeating: "x", count: 10_000)
+        let messages = [
+            ChatMessage(role: .assistant, text: "",
+                        exchanges: [ToolExchange(callID: "c1", name: "bash",
+                                                 arguments: #"{"command":"ls"}"#,
+                                                 output: output, isError: false)]),
+            ChatMessage(role: .assistant, text: "Вывод разобран: " + String(repeating: "y", count: 300)),
+            ChatMessage(role: .assistant, text: "",
+                        exchanges: [ToolExchange(callID: "c2", name: "fs_read",
+                                                 arguments: #"{"path":"a.txt"}"#,
+                                                 output: "short", isError: false)])
+        ]
+        let plan = ToolOutputPruner.plan(messages: messages, mode: .always,
+                                         threshold: 1, protectedSteps: 1)
+        XCTAssertFalse(plan.isEmpty)
+        let cut = plan.perResult["c1"]
+        XCTAssertNotNil(cut)
+        // `before` is what the history actually holds: ToolExchange already cut the
+        // 10 000-character result to its 4 000-character replay limit.
+        XCTAssertEqual(cut?.before, 4_096)
+        XCTAssertLessThanOrEqual(cut?.after ?? .max, ToolOutputPruner.stubVisibleChars + 200)
+        XCTAssertGreaterThan(plan.cutChars, 3_500)
+    }
+
+    func testNoticeNamesCharacters() {
+        let line = CompactionLog.pruneNotice(results: 2, savedTokens: 900, prunedChars: 5_432)
+        XCTAssertTrue(line.contains("5_432") || line.contains("5432"), line)
+        XCTAssertTrue(line.contains("символов"), line)
+    }
+}

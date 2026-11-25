@@ -32,9 +32,20 @@ enum ToolOutputPruner {
     /// parse.
     static let prunedArguments = #"{"pruned":true}"#
 
+    /// D6: what one result lost, so the log can say "what" and "how much", not only
+    /// the total token win.
+    struct Cut: Sendable, Equatable {
+        let before: Int
+        let after: Int
+        var removed: Int { max(0, before - after) }
+    }
+
     struct Plan: Sendable {
         var replacements: [String: String] = [:]
         var savedTokens = 0
+        /// Characters removed across every pruned result.
+        var cutChars = 0
+        var perResult: [String: Cut] = [:]
         var firstPrunedIndex: Int?
         var candidates = 0
         var trivialCount = 0
@@ -106,12 +117,15 @@ enum ToolOutputPruner {
                         originalLength: exchange.originalLength
                     )
                 let gain = ToolCost.result(exchange.output) - ToolCost.result(replacement)
+                let cut = Cut(before: exchange.output.count, after: replacement.count)
                 if exchange.isTrivial {
                     // The point is a cleaner history, not a token win: a status line
                     // can be shorter than any stub.
                     guard result.replacements[exchange.callID] == nil else { continue }
                     result.replacements[exchange.callID] = replacement
                     result.savedTokens += max(0, gain)
+                    result.cutChars += cut.removed
+                    result.perResult[exchange.callID] = cut
                     result.candidates += 1
                     result.trivialCount += 1
                     result.firstPrunedIndex = index + 1
@@ -121,6 +135,8 @@ enum ToolOutputPruner {
                 if result.replacements[exchange.callID] == nil {
                     result.replacements[exchange.callID] = replacement
                     result.savedTokens += gain
+                    result.cutChars += cut.removed
+                    result.perResult[exchange.callID] = cut
                     result.candidates += 1
                     result.firstPrunedIndex = index + 1
                 }

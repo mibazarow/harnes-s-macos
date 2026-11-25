@@ -1052,7 +1052,9 @@ final class ChatStore {
         // Prune before the plan: the window must be sized by what actually goes out, or
         // pruning never moves the compaction threshold and the session still compacts
         // as if the history were full.
-        let pruning = plannedPruning()
+        let pruning = plannedPruning(
+            threshold: await pruneThreshold(provider: provider, model: model)
+        )
         // B4: capture the boundary before it is cleared. Pruning at a task boundary is a
         // visible event, and it is not a fold: the user must not read "история сжата"
         // when only tool output left the request.
@@ -1060,11 +1062,13 @@ final class ChatStore {
         if !pruning.isEmpty {
             Self.logLatency(
                 "pruned tool_results=\(pruning.replacements.count) saved_tokens=\(pruning.savedTokens) "
-                + "first_index=\(pruning.firstPrunedIndex ?? -1)"
+                + "pruned_chars=\(pruning.cutChars) first_index=\(pruning.firstPrunedIndex ?? -1)"
             )
             if boundaryPrune {
                 notice(CompactionLog.pruneNotice(
-                    results: pruning.replacements.count, savedTokens: pruning.savedTokens
+                    results: pruning.replacements.count,
+                    savedTokens: pruning.savedTokens,
+                    prunedChars: pruning.cutChars
                 ))
             }
         }
