@@ -1471,6 +1471,12 @@ final class ChatStore {
 
         guard let services else { return }
 
+        // D5: a fold that died between start and end leaves its lock behind. Report it
+        // once and clear it, so the next fold is not blocked by a ghost.
+        if let orphan = try? await services.compaction.recoverOrphanedLock(database: services.database) {
+            Self.logLatency(CompactionLog.orphaned(at: orphan.startedAt))
+        }
+
         // Restore the compaction checkpoint, otherwise a saved summary would be
         // silently dropped on restart.
         var boundaryID: Int = 0

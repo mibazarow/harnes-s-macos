@@ -244,6 +244,9 @@ extension ChatStore {
         )
 
         do {
+            // D5: start before the request, clear after the boundary is on disk. A crash
+            // in between leaves the start without its end, and the next session sees it.
+            try await services.compaction.beginLock(turn: messages.count, database: services.database)
             var summary = try await services.compaction.summarize(
                 messages: CompactionService.summarizable(contextMessages),
                 provider: provider,
@@ -284,6 +287,7 @@ extension ChatStore {
                 database: services.database
             )
 
+            try await services.compaction.clearLock(database: services.database)
             checkpointSummary = summary
             checkpointCovered = coveredAfter
             if let lastCompacted { compactedThroughID = lastCompacted }

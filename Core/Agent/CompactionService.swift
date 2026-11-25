@@ -32,6 +32,65 @@ actor CompactionService {
 
     private static let key = "compaction.checkpoint"
 
+    /// D5: written before `summarize`, removed after the boundary is saved. A process
+    /// that dies mid-fold leaves the start without its pair, which is the only honest
+    /// way to say "this attempt did not finish".
+    struct Lock: Codable, Sendable, Equatable {
+        var startedAt: String
+        var turn: Int
+        var pid: Int32
+        /// Boundary at the moment the fold began: if it moved, the fold did land and
+        /// only the cleanup was lost.
+        var boundaryAtStart: Int
+
+        enum CodingKeys: String, CodingKey {
+            case startedAt = "started_at"
+            case turn
+            case pid
+            case boundaryAtStart = "boundary_at_start"
+        }
+    }
+
+    private static let lockKey = "compaction.lock"
+
+    func loadLock(database: AppDatabase) throws -> Lock? {
+        try database.queue.read { db in
+            guard let raw = try AppStateStore.read(db, key: Self.lockKey),
+                  let data = raw.data(using: .utf8) else { return nil }
+            return try? JSONDecoder().decode(Lock.self, from: data)
+        }
+    }
+
+    func beginLock(turn: Int, database: AppDatabase) throws {
+        let lock = Lock(
+            startedAt: Timestamps.now(),
+            turn: turn,
+            pid: ProcessInfo.processInfo.processIdentifier,
+            boundaryAtStart: try loadSummarizedUpTo(database: database)
+        )
+        let data = try JSONEncoder().encode(lock)
+        let raw = String(data: data, encoding: .utf8) ?? "{}"
+        try database.queue.write { db in
+            try AppStateStore.write(db, key: Self.lockKey, value: raw)
+        }
+    }
+
+    func clearLock(database: AppDatabase) throws {
+        try database.queue.write { db in
+            try AppStateStore.delete(db, key: Self.lockKey)
+        }
+    }
+
+    /// Returns the orphaned lock, if any, and always clears it: an old start must not
+    /// block the next fold forever.
+    func recoverOrphanedLock(database: AppDatabase) throws -> Lock? {
+        guard let lock = try loadLock(database: database) else { return nil }
+        let boundary = try loadSummarizedUpTo(database: database)
+        try clearLock(database: database)
+        // The fold landed and only the cleanup was lost: nothing to report.
+        return boundary == lock.boundaryAtStart ? lock : nil
+    }
+
     func loadCheckpoint(database: AppDatabase) throws -> Checkpoint? {
         try database.queue.read { db in
             guard let raw = try AppStateStore.read(db, key: Self.key),

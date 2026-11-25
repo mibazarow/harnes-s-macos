@@ -23,6 +23,12 @@ enum CompactionLog {
         "compaction skipped: cooldown failures=\(failures)"
     }
 
+    /// D5: a fold that died between its start and its end. One line, so the next
+    /// session knows the previous attempt never finished instead of silently trusting it.
+    static func orphaned(at startedAt: String) -> String {
+        "compaction: orphaned lock from \(startedAt)"
+    }
+
     /// B4: pruning and folding are two different events, and the UI used to describe
     /// both as "история сжата". Pruning only replaces finished tool output inside the
     /// request; nothing is summarized and nothing in the database changes.

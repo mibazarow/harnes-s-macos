@@ -16,4 +16,8 @@ enum AppStateStore {
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
             """, arguments: [key, value])
     }
+
+    static func delete(_ db: Database, key: String) throws {
+        try db.execute(sql: "DELETE FROM app_state WHERE key = ?", arguments: [key])
+    }
 }
