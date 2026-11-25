@@ -69,13 +69,13 @@ final class TrustCheckTests: XCTestCase {
     }
 
     private func interceptor(
-        _ answer: TrustAnswer?, autopilot: Bool = false,
+        _ answer: TrustAnswer?,
         session: TrustCheckSession = TrustCheckSession()
     ) -> TrustCheckInterceptor {
         session.beginTurn()
         return TrustCheckInterceptor(
             session: session, candidates: candidates, instructions: [],
-            autopilot: autopilot, asker: StubAsker(answer)
+            asker: StubAsker(answer)
         )
     }
 
@@ -172,7 +172,7 @@ final class TrustCheckTests: XCTestCase {
             call("power", #"{"action":"sleep"}"#), context: context
         )
 
-        XCTAssertEqual(verdict, .allow)
+        XCTAssertEqual(verdict, .pass)
         let decision = session.decision(tool: "power")
         XCTAssertEqual(decision?.basis, .message)
         XCTAssertEqual(decision?.quote, "Почини кэш на сервере")
@@ -200,7 +200,7 @@ final class TrustCheckTests: XCTestCase {
             call("power", #"{"action":"sleep"}"#), context: context
         )
 
-        XCTAssertEqual(verdict, .allow)
+        XCTAssertEqual(verdict, .pass)
         XCTAssertEqual(session.decision(tool: "power")?.basis, .rule)
     }
 
@@ -223,26 +223,37 @@ final class TrustCheckTests: XCTestCase {
             call("power", #"{"action":"sleep","confirm":true}"#), context: context
         )
 
-        XCTAssertEqual(verdict, .allow)
+        XCTAssertEqual(verdict, .pass)
     }
 
-    func testAutopilotSkipsTheCheckerEntirely() async throws {
+    func testAutopilotIsPolicyNotAGuard() async throws {
         let session = TrustCheckSession()
         session.beginTurn()
         let asker = FailingAsker()
-        let gate = TrustCheckInterceptor(
-            session: session, candidates: candidates, instructions: [],
-            autopilot: true, asker: asker
-        )
+        let audit = AutopilotAuditInterceptor(session: session)
 
-        let verdict = try await gate.beforeCall(
+        let verdict = try await audit.beforeCall(
             call("power", #"{"action":"sleep"}"#), context: context
         )
 
-        XCTAssertEqual(verdict, .allow)
+        XCTAssertEqual(verdict, .pass, "аудит не разрешает, только фиксирует")
         XCTAssertEqual(session.decision(tool: "power")?.basis, .autopilot)
         let calls = await asker.calls()
         XCTAssertEqual(calls, 0, "автопилот не должен звать модель-арбитра")
+    }
+
+    func testAutopilotCannotOverrideAnotherGuardDenial() async throws {
+        let denyAll = DenyAllGuard()
+        let chain = ToolInterceptorChain(
+            [denyAll, AutopilotAuditInterceptor(session: TrustCheckSession())]
+        )
+        let outcome = await chain.before(
+            call("power", #"{"action":"sleep"}"#), context: context
+        )
+        guard case .denied(let result) = outcome else {
+            return XCTFail("действующий deny обязан остаться в силе")
+        }
+        XCTAssertTrue(result.isError)
     }
 
     func testMemoryAddIsNotCheckedAtAll() async throws {
@@ -251,14 +262,14 @@ final class TrustCheckTests: XCTestCase {
         let asker = FailingAsker()
         let gate = TrustCheckInterceptor(
             session: session, candidates: candidates, instructions: [],
-            autopilot: false, asker: asker
+            asker: asker
         )
 
         let verdict = try await gate.beforeCall(
             call("memory_add", #"{"text":"пользователь любит тёмную тему"}"#), context: context
         )
 
-        XCTAssertEqual(verdict, .allow)
+        XCTAssertEqual(verdict, .pass)
         let calls = await asker.calls()
         XCTAssertEqual(calls, 0)
     }
@@ -269,7 +280,7 @@ final class TrustCheckTests: XCTestCase {
         session.beginTurn()
         let gate = TrustCheckInterceptor(
             session: session, candidates: candidates, instructions: [],
-            autopilot: false, asker: asker
+            asker: asker
         )
 
         _ = try await gate.beforeCall(call("power", #"{"action":"sleep"}"#), context: context)
@@ -285,7 +296,7 @@ final class TrustCheckTests: XCTestCase {
         session.beginTurn()
         let gate = TrustCheckInterceptor(
             session: session, candidates: candidates, instructions: [],
-            autopilot: false, asker: asker
+            asker: asker
         )
 
         _ = try await gate.beforeCall(
@@ -308,7 +319,7 @@ final class TrustCheckTests: XCTestCase {
         session.beginTurn()
         let gate = TrustCheckInterceptor(
             session: session, candidates: candidates, instructions: [],
-            autopilot: false, asker: asker
+            asker: asker
         )
 
         let first = try await gate.beforeCall(
@@ -319,7 +330,7 @@ final class TrustCheckTests: XCTestCase {
         let second = try await gate.beforeCall(
             call("power", #"{"action":"sleep"}"#), context: context
         )
-        XCTAssertEqual(second, .allow, "после отказа проверка спрашивается снова, а не «лимит»")
+        XCTAssertEqual(second, .pass, "после отказа проверка спрашивается снова, а не «лимит»")
         let calls = await asker.calls()
         XCTAssertEqual(calls, 2)
     }
@@ -329,7 +340,7 @@ final class TrustCheckTests: XCTestCase {
         session.beginTurn()
         let gate = TrustCheckInterceptor(
             session: session, candidates: candidates, instructions: [],
-            autopilot: false,
+
             asker: StubAsker(.yes(sourceID: "current", quote: "Почини кэш"))
         )
 
@@ -357,7 +368,7 @@ final class TrustCheckTests: XCTestCase {
         ]
         for (index, item) in calls.enumerated() {
             let verdict = try await gate.beforeCall(item, context: context)
-            XCTAssertEqual(verdict, .allow, "проверка \(index + 1)")
+            XCTAssertEqual(verdict, .pass, "проверка \(index + 1)")
         }
         XCTAssertEqual(session.callsUsed(), 20)
         let powerKey = key("power", #"{"action":"sleep"}"#)
@@ -388,7 +399,7 @@ final class TrustCheckTests: XCTestCase {
         }
         let quotaGate = TrustCheckInterceptor(
             session: session, candidates: candidates, instructions: [],
-            autopilot: false, asker: StubAsker(.no)
+ asker: StubAsker(.no)
         )
         guard case .deny(let quotaReason, _) = try await quotaGate.beforeCall(
             call("power", #"{"action":"sleep"}"#), context: context
@@ -405,7 +416,7 @@ final class TrustCheckTests: XCTestCase {
         session.beginTurn()
         let gate = TrustCheckInterceptor(
             session: session, candidates: candidates, instructions: [],
-            autopilot: false, asker: StubAsker(nil, throws: true)
+ asker: StubAsker(nil, throws: true)
         )
 
         do {
@@ -482,5 +493,21 @@ final class TrustCheckTests: XCTestCase {
         XCTAssertEqual(built.count, 1 + Tuning.trustCandidateMessages)
         XCTAssertFalse(built.contains { $0.text == "Реплика 0" }, "самые старые не нужны")
         XCTAssertTrue(built.contains { $0.text == "Реплика 14" })
+    }
+}
+
+/// A guard that only refuses: the monotonic case.
+struct DenyAllGuard: ToolInterceptor {
+    let name = "deny_all"
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict {
+        .deny(reason: "запрещено политикой", guidance: nil)
+    }
+}
+
+/// A guard that says nothing about this call.
+struct PassGuard: ToolInterceptor {
+    let name = "pass_guard"
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict {
+        .pass
     }
 }

@@ -5,11 +5,11 @@ import Foundation
 final class SystemUIGuardInterceptor: ToolInterceptor, @unchecked Sendable {
     let name = "system_ui_guard"
 
-    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
-        guard call.name == "ui" else { return .allow }
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict {
+        guard call.name == "ui" else { return .pass }
         guard let data = call.arguments.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let action = object["action"] as? String else { return .allow }
+              let action = object["action"] as? String else { return .pass }
         let confirmed = object["confirm"] as? Bool ?? false
 
         if action == "menu_click", !confirmed,
@@ -27,10 +27,10 @@ final class SystemUIGuardInterceptor: ToolInterceptor, @unchecked Sendable {
         }
 
         guard ["click", "set_value"].contains(action), !confirmed,
-              let app = object["app"] as? String else { return .allow }
+              let app = object["app"] as? String else { return .pass }
         let lowered = app.lowercased()
         let settings = lowered.contains("system settings") || lowered.contains("системные настройки")
-        guard settings else { return .allow }
+        guard settings else { return .pass }
         return .deny(
             reason: "нажатие в Системных настройках без подтверждения",
             guidance: "Гранты TCC выдаёт человек. Если действие действительно нужно, "

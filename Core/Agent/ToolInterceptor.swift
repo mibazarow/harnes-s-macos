@@ -16,13 +16,19 @@ struct ToolCallContext: Sendable {
     }
 }
 
-/// What an interceptor decided about a call.
-enum ToolVerdict: Sendable, Equatable {
-    /// Run the call as it came.
-    case allow
+/// What a guard decided about a call.
+///
+/// There is no "allow" outcome on purpose: a guard can only refuse or say "not my
+/// business". A later `.pass` therefore cannot undo an earlier `.deny`, and the order
+/// of listeners can never turn a refusal back into permission. `autopilot` is a policy
+/// flag applied when the chain is assembled, not a verdict a guard can return.
+enum GuardVerdict: Sendable, Equatable {
+    /// Not this guard's business. Not an approval.
+    case pass
     /// Do not run it; the model gets `reason` and `guidance` as the tool result.
     case deny(reason: String, guidance: String?)
-    /// Run a different call instead. The replacement is schema-checked before it runs.
+    /// Run a different call instead. The replacement is schema-checked before it runs
+    /// and still faces the guards after this one.
     case rewrite(ToolCall)
 }
 
@@ -36,7 +42,7 @@ protocol ToolInterceptor: Sendable {
     var name: String { get }
     /// `throws`: a broken check must fail closed. Before R16.2 an exception (or a hang)
     /// meant "run the call anyway", which is the wrong default for a gate.
-    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict
     func afterResult(_ call: ToolCall, result: ToolResult, context: ToolCallContext) async -> ToolResult
     /// A gate that calls a model needs more than the chain default. `nil` keeps it.
     var timeoutOverride: Duration? { get }
@@ -45,7 +51,7 @@ protocol ToolInterceptor: Sendable {
 extension ToolInterceptor {
     var timeoutOverride: Duration? { nil }
 
-    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict { .allow }
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict { .pass }
 
     func afterResult(
         _ call: ToolCall, result: ToolResult, context: ToolCallContext
@@ -82,7 +88,7 @@ struct ToolInterceptorChain: Sendable {
         var current = call
         for interceptor in interceptors {
             switch await verdict(from: interceptor, call: current, context: context) {
-            case .allow:
+            case .pass:
                 continue
             case .deny(let reason, let guidance):
                 return .denied(Self.denial(call: current, reason: reason, guidance: guidance))
@@ -106,10 +112,10 @@ struct ToolInterceptorChain: Sendable {
         from interceptor: ToolInterceptor,
         call: ToolCall,
         context: ToolCallContext
-    ) async -> ToolVerdict {
+    ) async -> GuardVerdict {
         let started = ContinuousClock.now
         do {
-            return try await withThrowingTaskGroup(of: ToolVerdict.self) { group in
+            return try await withThrowingTaskGroup(of: GuardVerdict.self) { group in
                 group.addTask { try await interceptor.beforeCall(call, context: context) }
                 let deadline = interceptor.timeoutOverride ?? self.timeout
                 group.addTask {

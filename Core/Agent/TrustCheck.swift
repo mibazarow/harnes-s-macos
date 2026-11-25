@@ -223,6 +223,30 @@ final class TrustCheckSession: @unchecked Sendable {
     }
 }
 
+/// Standing "go ahead" as a policy flag, not a guard.
+///
+/// When autopilot is on, the model arbiter is left out of the chain entirely and this
+/// pass-only interceptor records the basis for the audit trail. It can never undo a
+/// refusal from another guard: a `.pass` is not permission.
+struct AutopilotAuditInterceptor: ToolInterceptor {
+    let name = "autopilot_audit"
+    let session: TrustCheckSession
+
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict {
+        let args = ToolRegistry.decodeArguments(call.arguments) ?? [:]
+        guard TrustPolicy.requirement(
+            tool: call.name, args: args, workspace: context.workspace
+        ) != nil else { return .pass }
+        session.record(
+            tool: call.name,
+            key: TrustCheckSession.cacheKey(tool: call.name, args: args),
+            basis: .autopilot,
+            quote: ""
+        )
+        return .pass
+    }
+}
+
 /// The gate. It runs after the existing `confirm` arguments, never instead of them.
 struct TrustCheckInterceptor: ToolInterceptor {
     let name = "trust_check"
@@ -232,30 +256,22 @@ struct TrustCheckInterceptor: ToolInterceptor {
     let session: TrustCheckSession
     let candidates: [TrustCandidate]
     let instructions: [String]
-    let autopilot: Bool
     let asker: any TrustAsking
 
-    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict {
         let args = ToolRegistry.decodeArguments(call.arguments) ?? [:]
         guard TrustPolicy.requirement(
             tool: call.name, args: args, workspace: context.workspace
-        ) != nil else { return .allow }
+        ) != nil else { return .pass }
 
         let confirmed = (args["confirm"] as? Bool) == true
         let key = TrustCheckSession.cacheKey(tool: call.name, args: args)
-
-        // R30.7: autopilot is the user's standing "go ahead". Asking a second model on
-        // every action added latency and produced refusals the user had already allowed.
-        if autopilot {
-            session.record(tool: call.name, key: key, basis: .autopilot, quote: "")
-            return .allow
-        }
 
         switch session.reserve(tool: call.name, key: key) {
         case .reuse:
             // One verdict per action per turn: the first answer stands, and it was only
             // recorded when it passed.
-            return .allow
+            return .pass
         case .exhausted:
             return Self.refuse(.quota, confirmed: confirmed)
         case .call:
@@ -285,7 +301,7 @@ struct TrustCheckInterceptor: ToolInterceptor {
             }
             let basis: TrustBasis = source.id == "current" ? .message : .rule
             session.record(tool: call.name, key: key, basis: basis, quote: quote)
-            return .allow
+            return .pass
         }
     }
 
@@ -300,9 +316,9 @@ struct TrustCheckInterceptor: ToolInterceptor {
 
     /// `confirm` is the last resort, not a bypass: without it the call is refused with a
     /// reason the model can act on.
-    static func refuse(_ kind: Refusal, confirmed: Bool, detail: String? = nil) -> ToolVerdict {
+    static func refuse(_ kind: Refusal, confirmed: Bool, detail: String? = nil) -> GuardVerdict {
         if confirmed {
-            return .allow
+            return .pass
         }
         switch kind {
         case .notCovered:

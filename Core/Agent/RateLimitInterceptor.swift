@@ -16,8 +16,8 @@ final class RateLimitInterceptor: ToolInterceptor, @unchecked Sendable {
         self.windowStart = clock()
     }
 
-    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
-        guard ["mouse", "keyboard", "ui"].contains(call.name) else { return .allow }
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict {
+        guard ["mouse", "keyboard", "ui"].contains(call.name) else { return .pass }
         guard allow() else {
             return .deny(
                 reason: "превышен лимит \(limit) UI-событий в секунду",
@@ -25,7 +25,7 @@ final class RateLimitInterceptor: ToolInterceptor, @unchecked Sendable {
                     + "что предыдущее действие не дало результата."
             )
         }
-        return .allow
+        return .pass
     }
 
     private func allow() -> Bool {

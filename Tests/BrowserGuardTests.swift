@@ -16,7 +16,7 @@ final class BrowserGuardTests: XCTestCase {
         ToolCall(id: "f", name: "webfetch", arguments: #"{"url":"\#(url)"}"#)
     }
 
-    private func verdict(_ interceptor: BrowserGuardInterceptor, _ call: ToolCall) async throws -> ToolVerdict {
+    private func verdict(_ interceptor: BrowserGuardInterceptor, _ call: ToolCall) async throws -> GuardVerdict {
         try await interceptor.beforeCall(call, context: context)
     }
 
@@ -35,7 +35,7 @@ final class BrowserGuardTests: XCTestCase {
 
     func testRegularPageIsAllowed() async throws {
         switch try await verdict(BrowserGuardInterceptor(), browser("https://example.com/")) {
-        case .allow: break
+        case .pass: break
         default: XCTFail("обычный http(s) не блокируется")
         }
     }

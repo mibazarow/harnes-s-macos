@@ -605,16 +605,17 @@ final class ChatStore {
             readOnly: readOnly,
             subagent: nil,
             interceptors: ToolInterceptorChain(
-                [ArgumentRulesInterceptor(), BrowserGuardInterceptor(), SystemUIGuardInterceptor(),
-                 GUIControlGuardInterceptor(session: subagentSession),
-                 TrustCheckInterceptor(
-                    session: subagentTrust,
-                    candidates: trustCandidates,
-                    instructions: [],
+                Self.guards(
+                    gui: GUIControlGuardInterceptor(session: subagentSession),
+                    trust: TrustCheckInterceptor(
+                        session: subagentTrust,
+                        candidates: trustCandidates,
+                        instructions: [],
+                        asker: TrustModelAsker(provider: provider, model: model)
+                    ),
                     autopilot: autopilot,
-                    asker: TrustModelAsker(provider: provider, model: model)
-                 ),
-                 RateLimitInterceptor(), UIActionJournalInterceptor()],
+                    auditSession: subagentTrust
+                ),
                 log: { line in ChatStore.logLatency(line) }
             ),
             catalog: toolCatalog,
@@ -1178,22 +1179,45 @@ final class ChatStore {
             ledger: services.fileLedger,
             skillScope: services.skillScope,
             interceptors: ToolInterceptorChain(
-                [ArgumentRulesInterceptor(), BrowserGuardInterceptor(), SystemUIGuardInterceptor(),
-                 GUIControlGuardInterceptor(session: guiSession),
-                 TrustCheckInterceptor(
-                    session: trustSession,
-                    candidates: trustCandidates,
-                    instructions: trustInstructions,
+                Self.guards(
+                    gui: GUIControlGuardInterceptor(session: guiSession),
+                    trust: TrustCheckInterceptor(
+                        session: trustSession,
+                        candidates: trustCandidates,
+                        instructions: trustInstructions,
+                        asker: TrustModelAsker(provider: provider, model: model)
+                    ),
                     autopilot: autopilot,
-                    asker: TrustModelAsker(provider: provider, model: model)
-                 ),
-                 RateLimitInterceptor(), UIActionJournalInterceptor()],
+                    auditSession: trustSession
+                ),
                 log: { line in ChatStore.logLatency(line) }
             ),
             catalog: toolCatalog,
             processes: backgroundProcesses,
             memoryUsage: memoryUsage
         )
+    }
+
+    /// Guards in one place. Autopilot is a policy: it swaps the model arbiter for a
+    /// pass-only audit, and every other guard still runs and can still refuse.
+    static func guards(
+        gui: GUIControlGuardInterceptor,
+        trust: TrustCheckInterceptor,
+        autopilot: Bool,
+        auditSession: TrustCheckSession
+    ) -> [any ToolInterceptor] {
+        var guards: [any ToolInterceptor] = [
+            ArgumentRulesInterceptor(), BrowserGuardInterceptor(),
+            SystemUIGuardInterceptor(), gui
+        ]
+        if autopilot {
+            guards.append(AutopilotAuditInterceptor(session: auditSession) as any ToolInterceptor)
+        } else {
+            guards.append(trust as any ToolInterceptor)
+        }
+        guards.append(RateLimitInterceptor() as any ToolInterceptor)
+        guards.append(UIActionJournalInterceptor() as any ToolInterceptor)
+        return guards
     }
 
     private static func millis(since start: ContinuousClock.Instant) -> Int {

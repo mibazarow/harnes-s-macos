@@ -24,9 +24,9 @@ final class BrowserGuardInterceptor: ToolInterceptor, @unchecked Sendable {
     ]
     static let blockedHosts = ["chromewebstore.google.com", "chrome.google.com"]
 
-    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
-        guard call.name == "browser" else { return .allow }
-        guard let url = Self.urlArgument(call.arguments) else { return .allow }
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict {
+        guard call.name == "browser" else { return .pass }
+        guard let url = Self.urlArgument(call.arguments) else { return .pass }
         let lower = url.lowercased()
         if Self.blockedPrefixes.contains(where: { lower.hasPrefix($0) }) {
             return .deny(
@@ -40,7 +40,7 @@ final class BrowserGuardInterceptor: ToolInterceptor, @unchecked Sendable {
                 guidance: "Установка расширений в этом приложении не поддерживается."
             )
         }
-        return .allow
+        return .pass
     }
 
     func afterResult(

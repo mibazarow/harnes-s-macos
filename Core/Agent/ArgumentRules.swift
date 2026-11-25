@@ -62,7 +62,7 @@ final class ArgumentRulesInterceptor: ToolInterceptor, @unchecked Sendable {
         }
     }
 
-    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict {
         // A silent first hit is remembered for every matching rule; the first refusal
         // wins and later rules do not see a call that is already refused.
         for rule in rules {
@@ -72,21 +72,21 @@ final class ArgumentRulesInterceptor: ToolInterceptor, @unchecked Sendable {
                 return .deny(reason: reason, guidance: guidance)
             }
         }
-        return .allow
+        return .pass
     }
 
     /// Synchronous on purpose: the lock is held only for a set lookup, and the caller
     /// must not await while holding it.
-    private func decide(_ rule: ToolArgumentRule) -> ToolVerdict {
+    private func decide(_ rule: ToolArgumentRule) -> GuardVerdict {
         lock.lock()
         defer { lock.unlock() }
-        if state.reminded.contains(rule.name) { return .allow }
+        if state.reminded.contains(rule.name) { return .pass }
         if state.seen.contains(rule.name) {
             state.reminded.insert(rule.name)
             return .deny(reason: "повтор известной ошибки (\(rule.name))", guidance: rule.reminder)
         }
         state.seen.insert(rule.name)
-        return .allow
+        return .pass
     }
 
     private func matches(_ rule: ToolArgumentRule, arguments: String) -> Bool {

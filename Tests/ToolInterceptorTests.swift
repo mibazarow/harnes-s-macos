@@ -9,7 +9,7 @@ final class ToolInterceptorTests: XCTestCase {
         let reason: String
         let guidance: String?
 
-        func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
+        func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict {
             .deny(reason: reason, guidance: guidance)
         }
     }
@@ -19,8 +19,8 @@ final class ToolInterceptorTests: XCTestCase {
         let replacement: ToolCall
         let require: Bool
 
-        func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
-            require ? .rewrite(replacement) : .allow
+        func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict {
+            require ? .rewrite(replacement) : .pass
         }
     }
 
@@ -77,6 +77,15 @@ final class ToolInterceptorTests: XCTestCase {
         XCTAssertTrue(result.output.contains("возьми другой"), result.output)
     }
 
+    func testPassCannotUndoDeny() async {
+        let chain = ToolInterceptorChain([PassGuard(), DenyAllGuard(), PassGuard()])
+        let outcome = await chain.before(
+            ToolCall(id: "c1", name: "bash", arguments: "{}"),
+            context: ToolCallContext(workspace: URL(fileURLWithPath: "/tmp"), readOnly: false)
+        )
+        guard case .denied = outcome else { return XCTFail("pass не может отменить deny") }
+    }
+
     func testFirstDenyWinsInTheDeclaredOrder() async {
         let tools = registry([
             Deny(name: "first", reason: "первый", guidance: nil),
@@ -125,7 +134,7 @@ final class ToolInterceptorTests: XCTestCase {
     private struct Broken: ToolInterceptor {
         let name = "broken"
 
-        func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
+        func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict {
             throw NSError(domain: "test", code: 1)
         }
     }
@@ -133,9 +142,9 @@ final class ToolInterceptorTests: XCTestCase {
     private struct Slow: ToolInterceptor {
         let name = "slow"
 
-        func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
+        func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict {
             try await Task.sleep(for: .seconds(5))
-            return .allow
+            return .pass
         }
     }
 

@@ -258,8 +258,8 @@ struct GUIControlGuardInterceptor: ToolInterceptor {
         self.frontmost = frontmost
     }
 
-    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> ToolVerdict {
-        guard Self.tools.contains(call.name) else { return .allow }
+    func beforeCall(_ call: ToolCall, context: ToolCallContext) async throws -> GuardVerdict {
+        guard Self.tools.contains(call.name) else { return .pass }
         if let reason = abort.current {
             return .deny(reason: "аварийный стоп: \(reason)",
                          guidance: "Пользователь остановил ход. Не повторяй действие.")
@@ -274,7 +274,7 @@ struct GUIControlGuardInterceptor: ToolInterceptor {
         if case .denied(let reason) = session.consume(cost) {
             return .deny(reason: reason, guidance: nil)
         }
-        return .allow
+        return .pass
     }
 
     func afterResult(
