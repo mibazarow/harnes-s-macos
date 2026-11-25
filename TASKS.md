@@ -23,6 +23,74 @@
 
 ---
 
+## R32 — завендорить ONNX Runtime, убрать зависимость от GitHub и download.onnxruntime.ai
+
+**Факт.** 18.11.2026 с GitHub исчезли `microsoft/onnxruntime` и
+`microsoft/onnxruntime-swift-package-manager` (оба 404, проверено 25.11.2026).
+Вместе с ними `microsoft/onnxruntime-genai` и `microsoft/onnxruntime-extensions`.
+Организация `microsoft` жива (`vscode`, `DirectML` — 200), сам продукт тоже:
+PyPI 1.32.0 от 13.11.2026, `onnxruntime.ai` и NuGet работают. Причина удаления
+не объявлена; в `onnx/onnx#8842` мейнтейнеры ONNX пишут, что не знают её.
+
+**Почему это блокер.** `Core/Agent/LocalEmbedder.swift` — единственный бэкенд
+семантики (EmbeddingGemma-2, 768d, локально). В базе 316 векторов
+(`embeddings`, `model=embeddinggemma-2`). `HybridSearch` мешает lexical 0.7 +
+semantic. Сейчас всё работает только потому, что цел локальный кэш:
+
+- `.build/SourcePackages/repositories/onnxruntime-swift-package-manager-0cdf79c9`
+  — 58 МБ, bare-копия с историей;
+- `.build/SourcePackages/checkouts/onnxruntime-swift-package-manager` — `b7fb7f7`
+  («Update ORT to 1.24.2»), 500 КБ;
+- `.build/SourcePackages/artifacts/onnxruntime-swift-package-manager` — 210 МБ
+  распакованного: `onnxruntime.xcframework` (macos-arm64_x86_64 87 МБ,
+  ios-arm64 40 МБ, simulator 81 МБ) и `onnxruntime_extensions` (57 МБ,
+  **в коде не используется** — в `project.yml` берётся только product
+  `onnxruntime`).
+
+Умрёт при `rm -rf .build`, `swift package update`, на новой машине или в CI:
+SwiftPM не разрешит пакет. Плюс `Package.swift:98,110` тянет бинарь с
+`download.onnxruntime.ai`, а домен не поднимает TLS вообще — то есть даже с
+зеркалом исходников бинарь не заберётся без подмены URL.
+
+**Что сделать.**
+
+1. Собрать `vendor/onnxruntime/` из локального кэша: `Package.swift` пакета +
+   `objectivec/` + `swift/OnnxRuntimeBindings` + распакованный
+   `onnxruntime.xcframework`. Слайс только `macos-arm64_x86_64`; `ARCHS: arm64`,
+   `ONLY_ACTIVE_ARCH: YES`, поэтому `lipo -extract arm64` срежет примерно вдвое.
+   iOS/simulator-слайсы и `onnxruntime_extensions` не кладём.
+2. В `vendor/.../Package.swift` заменить `Target.binaryTarget(name:url:checksum:)`
+   на `path:` и выкинуть target `onnxruntime_extensions`.
+3. В `project.yml:19-21` заменить `.package(url:)` на `.package(path:)`. Это
+   единственная разрешённая правка `project.yml` — остальное (подпись,
+   `CODE_SIGN_IDENTITY`, entitlements) не трогать.
+4. `.gitignore` игнорирует `*.zip` и `.build/` — проверить, что бинарь попадает
+   в индекс; git-lfs на машине **не установлен**, так что 40–90 МБ пойдут в git
+   как есть. Если это неприемлемо — обсудить с пользователем до коммита.
+5. Приёмка: `rm -rf .build` → чистая сборка **без сети** (или с `--disable-automatic-resolution`
+   / отключённым DNS для github.com) → тесты зелёные → `memory_search` реально
+   находит по смыслу, а не падает в `lexical_only`.
+
+**Чего не делать.** Не переходить на 1.32.0 (обновляться неоткуда, 1.24.2
+проверена). Не тянуть чужие форки и зеркала как источник бинаря — supply-chain
+риск, в комментах к HN уже поймали зеркало с несовпадающим sha256. Не менять
+сам `LocalEmbedder`/`HybridSearch`: задача только про доставку зависимости.
+
+**Рассмотренные альтернативы и почему нет.**
+
+- `NLContextualEmbedding` (Apple, встроенный, 512d, активы под латиницу и
+  кириллицу есть): качество негодное для поиска — замерено 25.11.2026 на
+  русском: «Память Харнеса хранится в SQLite» ↔ «Миха программирует на Битриксе»
+  косинус **0.980**, «Сборка через XcodeGen» ↔ «Кот спит на подоконнике» **0.860**.
+- CoreML: готовые конверсии EmbeddingGemma-2 есть только у случайных
+  HF-аккаунтов (31–375 скачиваний), своей конверсии нет; менять рабочую
+  библиотеку на чужой бинарь смысла нет.
+- llama.cpp / GGUF: `ggml-org/llama.cpp` жив, `embeddinggemma-300m-qat-Q8_0.gguf`
+  есть, но официального `Package.swift` нет (404) — пришлось бы собирать
+  xcframework самим. Одна зависимость меняется на другую, менее упакованную.
+
+---
+
 ## История
 
 Файл очищен 20.11.2026 под новый набор — полностью, включая прежний список
