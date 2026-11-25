@@ -18,7 +18,7 @@ struct RootView: View {
         // The context numbers come from a snapshot, not from the plan: reading the plan
         // here subscribed the whole screen — including the composer and the stop ring —
         // to `messages`, and every 60 ms paint tick re-evaluated it.
-        let usage = chat.contextUsage
+        let usage = chat.statusPressure()
 
         VStack(spacing: 0) {
             HeaderBar(palette: palette, planMode: chat.isPlanMode)
@@ -154,9 +154,9 @@ struct RootView: View {
         let used = Self.shortTokens(usage.usedTokens)
         let window = Self.shortTokens(usage.contextWindow)
         if usage.compacted > 0 {
-            return "\(used) / \(window) · сжато \(usage.compacted)"
+            return "\(usage.percent)% · \(used) / \(window) · сжато \(usage.compacted)"
         }
-        return "\(used) / \(window)"
+        return "\(usage.percent)% · \(used) / \(window)"
     }
 
     private static func shortTokens(_ value: Int) -> String {

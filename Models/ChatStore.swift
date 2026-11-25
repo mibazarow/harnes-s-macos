@@ -63,6 +63,11 @@ final class ChatStore {
     /// context plan, and every 60 ms paint tick re-evaluated the composer — and the stop
     /// button's animation with it.
     var contextUsage: ContextUsage?
+    /// D10: what the provider actually billed for the last prompt. Unlike
+    /// `contextUsage`, this is not rebuilt from a request plan, so the status line keeps
+    /// a real number after the turn ends instead of dying with the measurement.
+    private(set) var lastMeasuredPrompt: Int?
+    private(set) var lastPromptWindow: Int?
     /// The bubble that just settled. Its text is typed out by the UI; history and older
     /// bubbles are rendered immediately. `isStreaming` alone is not a signal — the final
     /// answer settles in the same runloop turn that clears it.
@@ -326,11 +331,15 @@ final class ChatStore {
             cacheKey: promptCacheKey
         )
         let envelope = prefixHash
+        let statusWindow = window(for: provider, model: model).window
         loop.onUsage = { measured, estimated in
             await calibration.record(
                 providerID: provider.id, model: model, measured: measured,
                 estimated: estimated, envelopeHash: envelope
             )
+            await MainActor.run {
+                self.recordMeasuredPrompt(measured, window: statusWindow)
+            }
             // R31.4: the estimate is what the window and the compaction trigger are
             // built from, so a silent drift is a budget bug nobody sees. One line per
             // request, with the twenty-request average next to it.
@@ -1522,6 +1531,30 @@ final class ChatStore {
     func warmUpMCP() async {
         guard let services else { return }
         _ = await services.mcpManager.tools()
+    }
+
+    /// D10: the measured half of the status line. Separate input from the plan: the
+    /// plan answers "will it fit", this answers "how full was it".
+    func recordMeasuredPrompt(_ tokens: Int, window: Int) {
+        guard tokens > 0, window > 0 else { return }
+        lastMeasuredPrompt = tokens
+        lastPromptWindow = window
+    }
+
+    /// Status pressure for the composer. Uses the measured prompt when there is one and
+    /// falls back to the plan so a fresh install still shows something before the first
+    /// answer.
+    func statusPressure() -> ContextUsage? {
+        if let lastMeasuredPrompt, let lastPromptWindow {
+            return ContextUsage(
+                usedTokens: lastMeasuredPrompt,
+                contextWindow: lastPromptWindow,
+                compacted: contextUsage?.compacted ?? 0,
+                overThreshold: Double(lastMeasuredPrompt) / Double(lastPromptWindow)
+                    > compactionThreshold / 100
+            )
+        }
+        return contextUsage
     }
 
     func loadHistory() async {

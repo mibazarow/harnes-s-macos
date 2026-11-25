@@ -110,6 +110,13 @@ struct ContextUsage: Equatable, Sendable {
     var contextWindow: Int
     var compacted: Int
     var overThreshold: Bool
+
+    /// D10: the number the composer shows. Clamped: a provider may report slightly more
+    /// than the window it was told about.
+    var percent: Int {
+        guard contextWindow > 0 else { return 0 }
+        return min(100, max(0, Int((Double(usedTokens) / Double(contextWindow) * 100).rounded())))
+    }
 }
 
 struct ContextPlan: Sendable {
