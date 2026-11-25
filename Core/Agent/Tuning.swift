@@ -68,4 +68,8 @@ enum Tuning {
     /// S0.8/S6: rounds a subagent may take before it has to report. It used to be a
     /// literal 12 in the loop, invisible to the status line.
     static let subagentSteps = 12
+
+    /// S6: a hard wall-clock ceiling per child. The timer lives in `SubagentRunner`, not
+    /// in the child loop: a loop parked in a long tool would never notice.
+    static let subagentTimeoutSeconds = 600
 }

@@ -180,6 +180,10 @@ final class AgentAbortSignal: @unchecked Sendable {
     /// stop hotkey sets the flag without cancelling the turn task; this is how a running
     /// `bash` or `process wait` learns about it.
     private var handlers: [UUID: @Sendable () -> Void] = [:]
+    /// S6: reactions that must survive every stop, not only the next one. One-shot
+    /// handlers are cleared on abort; a cascade that stops background children has to
+    /// fire on the second Esc too.
+    private var permanent: [UUID: @Sendable () -> Void] = [:]
 
     func abort(_ reason: String) {
         lock.lock()
@@ -188,10 +192,12 @@ final class AgentAbortSignal: @unchecked Sendable {
         let first = self.reason == nil
         if first { self.reason = reason }
         let callbacks = first ? Array(handlers.values) : []
+        let always = Array(permanent.values)
         if first { handlers.removeAll() }
         lock.unlock()
         // Outside the lock: a handler may take its own lock.
         for callback in callbacks { callback() }
+        for callback in always { callback() }
     }
 
     func clear() {
@@ -203,6 +209,14 @@ final class AgentAbortSignal: @unchecked Sendable {
     var current: String? {
         lock.lock(); defer { lock.unlock() }
         return reason
+    }
+
+    /// Registers a reaction that fires on every stop. Not removed by `abort`.
+    func onAbortAlways(_ handler: @escaping @Sendable () -> Void) {
+        let token = UUID()
+        lock.lock()
+        permanent[token] = handler
+        lock.unlock()
     }
 
     /// Registers a one-shot reaction to the next abort. Returns a token for removal.

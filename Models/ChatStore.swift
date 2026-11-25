@@ -61,6 +61,8 @@ final class ChatStore {
     /// S2/S4: what the header shows. The registry is an actor SwiftUI cannot observe, so
     /// this snapshot is refreshed on start and on finish.
     private(set) var runningSubagents: [SubagentInfo] = []
+    /// S6: installed once, fires on every stop. A second Esc must also reach children.
+    private var abortCascadeInstalled = false
     /// Scale applied to every "does it fit" decision, refreshed from `calibration`.
     var estimateScale: Double = 1
     /// What the composer shows about the context window. Snapshotted once per request
@@ -893,6 +895,17 @@ final class ChatStore {
         }
     }
 
+    /// S6: Esc stops background children too. Registered once per store, not per turn:
+    /// one-shot handlers are cleared by the first abort.
+    private func installAbortCascade() {
+        guard !abortCascadeInstalled else { return }
+        abortCascadeInstalled = true
+        let runner = subagentRunner
+        AgentAbortSignal.shared.onAbortAlways {
+            Task { await runner.cancelAll() }
+        }
+    }
+
     /// S1: `caller` keeps the old synchronous shape; `parent` starts the child in the
     /// background and returns a launch line at once. Provider, model and services are
     /// captured by value, so a settings switch does not change a running child.
@@ -907,6 +920,7 @@ final class ChatStore {
         services: AppServices,
         trustCandidates: [TrustCandidate]
     ) async -> SubagentOutcome {
+        installAbortCascade()
         if delivery == .caller {
             return await runSubagent(
                 prompt: prompt, readOnly: readOnly, provider: provider, model: model,
@@ -916,7 +930,15 @@ final class ChatStore {
         }
 
         let runner = subagentRunner
-        await runner.start(id: childID) { [weak self] in
+        let registry = subagents
+        await runner.start(
+            id: childID,
+            onTimeout: {
+                // S6: the ceiling is the runner's, so a child parked in a long tool is
+                // still stopped and its report says why.
+                await registry.interrupt(target: childID, by: "user", reason: "timeout")
+            }
+        ) { [weak self] in
             guard let self else {
                 ChatStore.logLatency("subagent id=\(childID) report dropped: store released")
                 return
