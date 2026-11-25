@@ -25,6 +25,17 @@
 
 ## R32 — завендорить ONNX Runtime, убрать зависимость от GitHub и download.onnxruntime.ai
 
+**Сделано 25.11.2026.** `vendor/onnxruntime/` (41 МБ, 74 файла), `project.yml:19-23`
+переведён на `.package(path:)`. Проверено на чистом `.build`: `xcodebuild build` —
+`BUILD SUCCEEDED`, `test` — 1077 тестов, 2 skipped, 0 падений,
+`LocalEmbedderTests` проходит без `XCTSkip` (значит ORT реально загружается и
+считает 768d). В `Package.resolved` записи `onnxruntime` больше нет —
+SwiftPM берёт пакет с диска. Полная git-история upstream сохранена вне
+репозитория: `~/HARNES_S_DATA/vendor-archive/onnxruntime-swift-package-manager.git`.
+Подробности и sha256 — `vendor/onnxruntime/README.md`.
+
+Ниже — исходная постановка, оставлена как обоснование.
+
 **Факт.** 18.11.2026 с GitHub исчезли `microsoft/onnxruntime` и
 `microsoft/onnxruntime-swift-package-manager` (оба 404, проверено 25.11.2026).
 Вместе с ними `microsoft/onnxruntime-genai` и `microsoft/onnxruntime-extensions`.

@@ -17,8 +17,10 @@ packages:
     url: https://github.com/huggingface/swift-transformers
     from: 1.4.0
   OnnxRuntime:
-    url: https://github.com/microsoft/onnxruntime-swift-package-manager
-    from: 1.24.2
+    # Vendored: upstream microsoft/onnxruntime-swift-package-manager was deleted
+    # from GitHub on 18.11.2026 and download.onnxruntime.ai no longer answers.
+    # See TASKS.md R32 and vendor/onnxruntime/Package.swift.
+    path: vendor/onnxruntime
 
 settings:
   configs:
