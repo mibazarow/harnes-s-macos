@@ -289,6 +289,18 @@ struct ProviderEditorView: View {
                         Text("Для подагентов только-чтение и разбора стиля: работы много, правок нет.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+
+                        // S5: one model for all subagents, regardless of read-only.
+                        Picker("Модель для подагентов", selection: subagentModelBinding) {
+                            Text("как основная").tag("")
+                            ForEach(provider.models, id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        Text("Оптом на всех подагентов. Пусто — как основная (или дешёвая для чтения).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     HStack(spacing: 10) {
@@ -474,12 +486,11 @@ struct ProviderEditorView: View {
     }
 
     /// Empty selection means "same as the main model", stored as nil.
-    /// S5 changes this one place: an explicit subagent model will win over the cheap one.
     private var subagentModelName: String {
-        provider.cheapModel
-            ?? provider.defaultModel
-            ?? provider.models.first
-            ?? ""
+        provider.resolvedSubagentModel(
+            readOnly: true,
+            main: provider.defaultModel ?? provider.models.first ?? ""
+        )
     }
 
     private func subagentWindowBinding(model: String) -> Binding<Int> {
@@ -495,6 +506,13 @@ struct ProviderEditorView: View {
                     $0, providerID: provider.id, model: model, scope: .subagent
                 )
             }
+        )
+    }
+
+    private var subagentModelBinding: Binding<String> {
+        Binding(
+            get: { provider.subagentModel ?? "" },
+            set: { provider.subagentModel = $0.isEmpty ? nil : $0 }
         )
     }
 

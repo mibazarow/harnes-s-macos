@@ -565,6 +565,14 @@ final class AppDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("v27_provider_subagent_model") { db in
+            // S5: additive. Existing rows get NULL, which means "as main".
+            let columns = try db.columns(in: "providers").map(\.name)
+            if !columns.contains("subagent_model") {
+                try db.execute(sql: "ALTER TABLE providers ADD COLUMN subagent_model TEXT;")
+            }
+        }
+
         return migrator
 
     }

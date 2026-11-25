@@ -55,12 +55,13 @@ actor ProvidersService {
                 try db.execute(sql: """
                     UPDATE providers SET
                         name = ?, base_url = ?, api_key = ?, models_json = ?,
-                        default_model = ?, cheap_model = ?, context_window = ?, reasoning_level = ?,
+                        default_model = ?, cheap_model = ?, subagent_model = ?, context_window = ?, reasoning_level = ?,
                         temperature = ?, input_price = ?, output_price = ?, is_default = ?, health = ?, last_check_at = ?, updated_at = ?
                     WHERE id = ?
                     """, arguments: [
                     provider.name, provider.baseURL, provider.apiKey, modelsJSON,
-                    provider.defaultModel, provider.cheapModel, provider.contextWindow, provider.reasoningLevel.rawValue,
+                    provider.defaultModel, provider.cheapModel, provider.subagentModel,
+                    provider.contextWindow, provider.reasoningLevel.rawValue,
                     provider.temperature, provider.inputPrice, provider.outputPrice,
                     provider.isDefault ? 1 : 0,
                     provider.health, provider.lastCheckAt, provider.updatedAt, provider.id
@@ -69,12 +70,14 @@ actor ProvidersService {
                 try db.execute(sql: """
                     INSERT INTO providers (
                         id, name, base_url, api_key, models_json, default_model, cheap_model,
-                        context_window, reasoning_level, temperature, input_price, output_price,
-                        is_default, health, last_check_at, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        subagent_model, context_window, reasoning_level, temperature,
+                        input_price, output_price, is_default, health, last_check_at,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, arguments: [
                     provider.id, provider.name, provider.baseURL, provider.apiKey, modelsJSON,
-                    provider.defaultModel, provider.cheapModel, provider.contextWindow, provider.reasoningLevel.rawValue,
+                    provider.defaultModel, provider.cheapModel, provider.subagentModel,
+                    provider.contextWindow, provider.reasoningLevel.rawValue,
                     provider.temperature, provider.inputPrice, provider.outputPrice,
                     provider.isDefault ? 1 : 0,
                     provider.health, provider.lastCheckAt, provider.createdAt, provider.updatedAt
@@ -188,6 +191,7 @@ actor ProvidersService {
             models: models,
             defaultModel: row["default_model"],
             cheapModel: row["cheap_model"],
+            subagentModel: row["subagent_model"],
             contextWindow: row["context_window"],
             reasoningLevel: ReasoningLevel(rawValue: row["reasoning_level"] ?? "off") ?? .off,
             temperature: row["temperature"] ?? ProviderModel.defaultTemperature,

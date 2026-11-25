@@ -656,7 +656,8 @@ final class ChatStore {
         // S3: the child works in English; the interface and the pill title stay Russian.
         let system = Prompts.system + "\n\n" + Prompts.subagent
 
-        let subagentModel = readOnly ? (provider.cheapModel ?? model) : model
+        // S5: explicit subagent model → cheap (read-only only) → main.
+        let subagentModel = provider.resolvedSubagentModel(readOnly: readOnly, main: model)
 
         // S7.1: the child's window is the window of the model it will actually use.
         // Taking the parent's number gives gemma (8k) a 128k budget.

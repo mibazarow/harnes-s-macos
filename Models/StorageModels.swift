@@ -40,6 +40,8 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
     /// Optional cheaper model for background work (read-only subagents, style card).
     /// Nil means "use `defaultModel`".
     var cheapModel: String?
+    /// S5: one model for every subagent, regardless of read-only. Nil means "as main".
+    var subagentModel: String?
     var contextWindow: Int
     var reasoningLevel: ReasoningLevel
     /// Sampling temperature for this provider. Individual per provider: a chatty
@@ -63,6 +65,7 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
         models: [String] = [],
         defaultModel: String? = nil,
         cheapModel: String? = nil,
+        subagentModel: String? = nil,
         contextWindow: Int = 128_000,
         reasoningLevel: ReasoningLevel = .off,
         temperature: Double = ProviderModel.defaultTemperature,
@@ -81,6 +84,7 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
         self.models = models
         self.defaultModel = defaultModel
         self.cheapModel = cheapModel
+        self.subagentModel = subagentModel
         self.contextWindow = contextWindow
         self.reasoningLevel = reasoningLevel
         self.temperature = temperature
@@ -171,5 +175,16 @@ struct MemoryItem: Identifiable, Sendable, Equatable {
     var snippet: String {
         let singleLine = content.replacingOccurrences(of: "\n", with: " ")
         return singleLine.count > 110 ? String(singleLine.prefix(109)) + "…" : singleLine
+    }
+
+}
+
+extension ProviderModel {
+    /// S5: explicit subagent model, then the cheap one for read-only work, then the
+    /// main model. Kept here so the rule is testable without a chat store.
+    func resolvedSubagentModel(readOnly: Bool, main: String) -> String {
+        if let explicit = subagentModel, !explicit.isEmpty { return explicit }
+        if readOnly, let cheap = cheapModel, !cheap.isEmpty { return cheap }
+        return main
     }
 }
