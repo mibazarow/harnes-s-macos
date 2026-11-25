@@ -7,7 +7,12 @@ actor MemoryService {
     private let backupDirectory: URL
 
     /// High similarity only nominates candidates; it never authorizes consolidation.
-    static let reportSimilarity = 0.88
+    /// Measured on the live base (182 embedded records): unrelated pairs sit near 0.70,
+    /// so 0.93 is the top ~1% and 0.86 is the middle band that needs lexical support.
+    static let reportExact = 0.93
+    static let reportLikely = 0.86
+    /// Token Jaccard on long facts is tiny (median 0.03), so the old 0.88 never fired.
+    static let reportLikelyJaccard = 0.4
 
     static func saveReport(_ report: String, directory: URL, date: Date = .now) throws -> URL {
         try AppPaths.ensureDirectory(directory)
@@ -40,39 +45,58 @@ actor MemoryService {
                     vectors[id] = (row["model"], vector)
                 }
             }
-            var clusters: [[MemoryItem]] = []
+            var exact: [[MemoryItem]] = []
+            var likely: [[MemoryItem]] = []
             var conflicts: [String] = []
-            for item in items {
-                if let index = clusters.firstIndex(where: { group in
-                    group.allSatisfy { other in
-                        guard other.area == item.area, !MemoryContradiction.conflicts(other, item) else { return false }
-                        if let a = vectors[other.id], let b = vectors[item.id], a.0 == b.0 {
-                            return EmbeddingsService.cosine(a.1, b.1) >= Self.reportSimilarity
-                        }
-                        return Self.jaccard(Self.tokenSet(other.content), Self.tokenSet(item.content)) >= Self.reportSimilarity
-                    }
-                }) { clusters[index].append(item) }
-                else { clusters.append([item]) }
-            }
             for (index, item) in items.enumerated() {
-                for other in items.dropFirst(index + 1) where item.area == other.area && MemoryContradiction.conflicts(item, other) {
-                    let newer = item.createdAt > other.createdAt ? item : other
-                    conflicts.append("#\(item.id) / #\(other.id): новее #\(newer.id) (\(newer.createdAt))\n\(item.content)\n\(other.content)")
+                for other in items.dropFirst(index + 1) where other.area == item.area {
+                    if MemoryContradiction.conflicts(item, other) {
+                        let newer = item.createdAt > other.createdAt ? item : other
+                        conflicts.append("#\(item.id) / #\(other.id): новее #\(newer.id) (\(newer.createdAt))\n\(item.content)\n\(other.content)")
+                        continue
+                    }
+                    let jaccard = Self.jaccard(Self.tokenSet(item.content), Self.tokenSet(other.content))
+                    let cosine: Double? = {
+                        guard let a = vectors[item.id], let b = vectors[other.id], a.0 == b.0 else { return nil }
+                        return EmbeddingsService.cosine(a.1, b.1)
+                    }()
+                    if let cosine, cosine >= Self.reportExact, jaccard >= Self.reportLikelyJaccard {
+                        Self.appendPair([item, other], to: &exact)
+                    } else if let cosine, cosine >= Self.reportLikely, jaccard >= Self.reportLikelyJaccard {
+                        Self.appendPair([item, other], to: &likely)
+                    }
                 }
             }
-            let candidates = clusters.filter { $0.count > 1 }
             let unread = items.filter { $0.hits == 0 && !$0.pinned }
-            var sections = ["# Отчёт памяти", "Кластеров: \(candidates.count); кандидатов: \(candidates.reduce(0) { $0 + $1.count }); непрочитанных незакреплённых: \(unread.count).",
+            var sections = ["# Отчёт памяти",
+                            "Точных дублей: \(exact.count); похожих на проверку: \(likely.count); непрочитанных незакреплённых: \(unread.count).",
                             "Только предложения. Данные памяти не изменены. Сводки требуют проверки смысла и подтверждения."]
-            for group in candidates {
-                sections.append("## Тема: \(group[0].area) · #\(group[0].id)\n" + group.map {
-                    "#\($0.id)\($0.pinned ? " [закреплено]" : ""): " + $0.content.replacingOccurrences(of: "\n", with: " ")
-                }.joined(separator: "\n") + "\nПредложение сводки (экстрактивное, требует редактирования):\n" + group.map(\.content).joined(separator: "\n"))
-            }
+            sections.append(Self.reportSection("Точные дубли", groups: exact))
+            sections.append(Self.reportSection("Похожие, проверь", groups: likely))
             sections.append("## Противоречия\n" + (conflicts.isEmpty ? "Не обнаружены эвристикой." : conflicts.joined(separator: "\n\n")))
             sections.append("## Непрочитанные кандидаты\n" + unread.map { "#\($0.id): \($0.content)" }.joined(separator: "\n"))
             return sections.joined(separator: "\n\n") + "\n"
         }
+    }
+
+    private static func appendPair(_ pair: [MemoryItem], to groups: inout [[MemoryItem]]) {
+        if let index = groups.firstIndex(where: { group in pair.allSatisfy { member in group.contains { $0.id == member.id } } }) {
+            for member in pair where !groups[index].contains(where: { $0.id == member.id }) {
+                groups[index].append(member)
+            }
+        } else {
+            groups.append(pair)
+        }
+    }
+
+    private static func reportSection(_ title: String, groups: [[MemoryItem]]) -> String {
+        guard !groups.isEmpty else { return "## \(title)\nНе обнаружено." }
+        let body = groups.map { group in
+            "### Тема: \(group[0].area) · #\(group[0].id)\n" + group.map {
+                "#\($0.id)\($0.pinned ? " [закреплено]" : ""): " + $0.content.replacingOccurrences(of: "\n", with: " ")
+            }.joined(separator: "\n") + "\nПредложение сводки (экстрактивное, требует редактирования):\n" + group.map(\.content).joined(separator: "\n")
+        }.joined(separator: "\n\n")
+        return "## \(title)\n" + body
     }
 
     init(database: AppDatabase, backupDirectory: URL = AppPaths.dataDirectory.appendingPathComponent("backup")) {

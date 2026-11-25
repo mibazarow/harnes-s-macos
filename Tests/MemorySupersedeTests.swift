@@ -29,18 +29,56 @@ final class MemorySupersedeTests: XCTestCase {
         let memory = MemoryService(database: database)
         let embeddings = EmbeddingsService(database: database)
         let first = try await memory.add("Архивы размещены на удалённом хранилище")
-        let second = try await memory.add("Резервирование выполняется вне офиса")
+        let second = try await memory.add("Архивы размещены на удалённом хранилище данных")
         for id in [first.id, second.id] {
             try await embeddings.store(refKind: "memory", refID: String(id),
                                        vector: .init(values: [1, 0, 0], model: "fixture"))
         }
         let before = try await memory.list()
         let report = try await memory.maintenanceReport()
-        XCTAssertTrue(report.contains("Кластеров: 1; кандидатов: 2"), report)
+        XCTAssertTrue(report.contains("Точных дублей: 1"), report)
         XCTAssertTrue(report.contains("#\(first.id)"))
         XCTAssertTrue(report.contains("#\(second.id)"))
         let after = try await memory.list()
         XCTAssertEqual(before, after)
+    }
+
+    func testReportSeparatesExactDuplicatesFromLikelyPairs() async throws {
+        let database = try AppDatabase(inMemory: true)
+        let memory = MemoryService(database: database)
+        let embeddings = EmbeddingsService(database: database)
+        // #129/#140: cosine 0.937 but Jaccard 0.125 — a restatement, not a duplicate.
+        let restated = try await memory.add("Пользователь сам удалит TASK_AGENT_FIXES.md")
+        let restatement = try await memory.add("Упоминания TASK_AGENT_FIXES.md нужно удалить из проекта")
+        // #131/#188: cosine 0.869, Jaccard 0.692 — the middle band that used to be lost.
+        let likelyA = try await memory.add("Графовая память Barbot хранит связи между заметками проекта")
+        let likelyB = try await memory.add("Графовая память Barbot хранит связи между заметками")
+        // A true duplicate: same wording, so both cosine and Jaccard are high.
+        let duplicateA = try await memory.add("Резервные копии сервера хранятся в Казани")
+        let duplicateB = try await memory.add("Резервные копии сервера хранятся в городе Казани")
+        let vectors: [(Int64, [Float])] = [
+            (restated.id, [1, 0, 0]),
+            (restatement.id, [0.937, 0.349, 0]),
+            (likelyA.id, [0, 1, 0]),
+            (likelyB.id, [0, 0.869, 0.494]),
+            (duplicateA.id, [0, 0, 1]),
+            (duplicateB.id, [0, 0, 1])
+        ]
+        for (id, values) in vectors {
+            try await embeddings.store(refKind: "memory", refID: String(id),
+                                       vector: .init(values: values, model: "fixture"))
+        }
+        let report = try await memory.maintenanceReport()
+        let exact = try XCTUnwrap(report.components(separatedBy: "## Похожие, проверь").first)
+        let likelySection = try XCTUnwrap(report.components(separatedBy: "## Похожие, проверь").last)
+        let likely = try XCTUnwrap(likelySection.components(separatedBy: "## Противоречия").first)
+        XCTAssertTrue(exact.contains("#\(duplicateA.id)"), "косинус 1.0 + жаккар 1.0 — точный дубль")
+        XCTAssertTrue(exact.contains("#\(duplicateB.id)"))
+        XCTAssertFalse(exact.contains("#\(restated.id)"), "0.937 без жаккара — не точный дубль")
+        XCTAssertFalse(exact.contains("#\(restatement.id)"))
+        XCTAssertTrue(likely.contains("#\(likelyA.id)"), "0.869 + жаккар 0.69 — средняя зона")
+        XCTAssertTrue(likely.contains("#\(likelyB.id)"))
+        XCTAssertFalse(likely.contains("#\(restated.id)"), "жаккар 0.125 ниже 0.4")
     }
 
     func testReportFileIsPrivateAndReplaceable() throws {
