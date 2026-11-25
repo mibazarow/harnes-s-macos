@@ -555,6 +555,16 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        migrator.registerMigration("v26_message_tools") { db in
+            // Traces lived only in memory: after a restart the transcript showed the
+            // tool calls as gone. Additive column; older rows stay NULL and are
+            // rebuilt from `exchanges` on read.
+            let columns = try db.columns(in: "messages").map(\.name)
+            if !columns.contains("tools") {
+                try db.execute(sql: "ALTER TABLE messages ADD COLUMN tools TEXT;")
+            }
+        }
+
         return migrator
 
     }

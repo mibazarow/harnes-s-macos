@@ -7,6 +7,7 @@ struct StoredMessage: Sendable {
     let text: String
     let reasoning: String?
     let exchanges: [ToolExchange]
+    let tools: [ToolTrace]
     let createdAt: String
 }
 
@@ -21,20 +22,22 @@ actor ChatHistoryService {
         role: ChatMessage.Role,
         text: String,
         reasoning: String?,
-        exchanges: [ToolExchange] = []
+        exchanges: [ToolExchange] = [],
+        tools: [ToolTrace] = []
     ) throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || reasoning != nil || !exchanges.isEmpty else { return }
+        guard !trimmed.isEmpty || reasoning != nil || !exchanges.isEmpty || !tools.isEmpty else { return }
 
         try database.queue.write { db in
             try db.execute(sql: """
-                INSERT INTO messages (role, text, reasoning, exchanges, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO messages (role, text, reasoning, exchanges, tools, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """, arguments: [
                 role.rawValue,
                 text,
                 reasoning,
                 Self.encodeExchanges(exchanges),
+                Self.encodeTools(tools),
                 Timestamps.now()
             ])
         }
@@ -86,8 +89,53 @@ actor ChatHistoryService {
         }
     }
 
-    func recent(limit: Int = 200) throws -> [StoredMessage] {
-        try page(before: nil, limit: limit)
+    /// Trace rows written before `tools` existed decode with empty strings, so an old
+    /// row is still readable instead of failing the whole transcript.
+    private struct TraceRow: Codable {
+        let name: String
+        let summary: String
+        let isError: Bool
+        let imagePath: String?
+        let callID: String?
+        let arguments: String?
+        let originalLength: Int?
+    }
+
+    static func encodeTools(_ tools: [ToolTrace]) -> String? {
+        guard !tools.isEmpty else { return nil }
+        let rows = tools.map {
+            TraceRow(
+                name: $0.name,
+                summary: $0.summary,
+                isError: $0.isError,
+                imagePath: $0.imagePath,
+                callID: $0.callID,
+                arguments: $0.arguments,
+                originalLength: $0.originalLength
+            )
+        }
+        guard let data = try? JSONEncoder().encode(rows) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decodeTools(_ raw: String?) -> [ToolTrace] {
+        guard let raw, let data = raw.data(using: .utf8) else { return [] }
+        guard let rows = try? JSONDecoder().decode([TraceRow].self, from: data) else { return [] }
+        return rows.map {
+            ToolTrace(
+                name: $0.name,
+                summary: $0.summary,
+                isError: $0.isError,
+                isRunning: false,
+                imagePath: $0.imagePath,
+                callID: $0.callID ?? "",
+                arguments: $0.arguments ?? "",
+                originalLength: $0.originalLength
+            )
+        }
+    }
+
+    func recent(limit: Int = 200) throws -> [StoredMessage] {        try page(before: nil, limit: limit)
     }
 
     /// A page older than `id`, oldest last. Used for scroll-up pagination.
@@ -110,7 +158,7 @@ actor ChatHistoryService {
             let rows: [Row]
             if let id {
                 rows = try Row.fetchAll(db, sql: """
-                    SELECT id, role, text, reasoning, exchanges, created_at
+                    SELECT id, role, text, reasoning, exchanges, tools, created_at
                     FROM messages
                     WHERE id < ?
                     ORDER BY id DESC
@@ -118,7 +166,7 @@ actor ChatHistoryService {
                     """, arguments: [id, limit])
             } else {
                 rows = try Row.fetchAll(db, sql: """
-                    SELECT id, role, text, reasoning, exchanges, created_at
+                    SELECT id, role, text, reasoning, exchanges, tools, created_at
                     FROM messages
                     ORDER BY id DESC
                     LIMIT ?
@@ -131,6 +179,7 @@ actor ChatHistoryService {
                     text: $0["text"],
                     reasoning: $0["reasoning"],
                     exchanges: Self.decodeExchanges($0["exchanges"]),
+                    tools: Self.decodeTools($0["tools"]),
                     createdAt: $0["created_at"]
                 )
             }

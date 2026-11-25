@@ -395,7 +395,11 @@ final class ChatStore {
                         toolCallsInTurn += 1
                         addTool(name: name, summary: summary, running: true, to: assistantID)
                     case .toolFinished(let callID, let name, let arguments, let summary, let output, let isError, let imagePath):
-                        finishTool(name: name, summary: summary, isError: isError, imagePath: imagePath, in: assistantID)
+                        finishTool(
+                            callID: callID, name: name, arguments: arguments,
+                            summary: summary, originalLength: output.count,
+                            isError: isError, imagePath: imagePath, in: assistantID
+                        )
                         recordExchange(
                             callID: callID,
                             name: name,
@@ -1307,20 +1311,35 @@ final class ChatStore {
         ))
     }
 
-    private func finishTool(name: String, summary: String, isError: Bool, imagePath: String?, in id: UUID) {
+    private func finishTool(
+        callID: String,
+        name: String,
+        arguments: String,
+        summary: String,
+        originalLength: Int,
+        isError: Bool,
+        imagePath: String?,
+        in id: UUID
+    ) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         if let toolIndex = messages[index].tools.lastIndex(where: { $0.isRunning && $0.name == name }) {
             messages[index].tools[toolIndex].summary = summary
             messages[index].tools[toolIndex].isError = isError
             messages[index].tools[toolIndex].isRunning = false
             messages[index].tools[toolIndex].imagePath = imagePath
+            messages[index].tools[toolIndex].callID = callID
+            messages[index].tools[toolIndex].arguments = arguments
+            messages[index].tools[toolIndex].originalLength = originalLength
         } else {
             messages[index].tools.append(ToolTrace(
                 name: name,
                 summary: summary,
                 isError: isError,
                 isRunning: false,
-                imagePath: imagePath
+                imagePath: imagePath,
+                callID: callID,
+                arguments: arguments,
+                originalLength: originalLength
             ))
         }
     }
@@ -1353,7 +1372,8 @@ final class ChatStore {
             .assistant,
             text: messages[index].text,
             reasoning: messages[index].reasoning,
-            exchanges: messages[index].exchanges
+            exchanges: messages[index].exchanges,
+            tools: messages[index].tools
         )
         messages[index].attachments = messages[index].attachments.map { $0.released() }
         return true
@@ -1521,11 +1541,13 @@ final class ChatStore {
     private static func restore(_ stored: [StoredMessage]) -> [ChatMessage] {
         stored.compactMap { entry in
             guard let role = ChatMessage.Role(rawValue: entry.role), role != .system else { return nil }
+            let tools = entry.tools.isEmpty ? Self.syntheticTraces(entry.exchanges) : entry.tools
             if let date = ISO8601DateFormatter().date(from: entry.createdAt) {
                 return ChatMessage(
                     role: role,
                     text: entry.text,
                     reasoning: entry.reasoning,
+                    tools: tools,
                     exchanges: entry.exchanges,
                     date: date
                 )
@@ -1534,7 +1556,29 @@ final class ChatStore {
                 role: role,
                 text: entry.text,
                 reasoning: entry.reasoning,
+                tools: tools,
                 exchanges: entry.exchanges
+            )
+        }
+    }
+
+    /// Rows written before `messages.tools` existed still have their exchanges: the
+    /// trace is rebuilt from the first line of the output, so a restored chat is not
+    /// blank where the work happened.
+    static func syntheticTraces(_ exchanges: [ToolExchange]) -> [ToolTrace] {
+        exchanges.map { exchange in
+            let firstLine = exchange.output
+                .split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true)
+                .first.map(String.init) ?? ""
+            let summary = firstLine.count > 120 ? String(firstLine.prefix(120)) + "…" : firstLine
+            return ToolTrace(
+                name: exchange.name,
+                summary: summary,
+                isError: exchange.isError,
+                isRunning: false,
+                callID: exchange.callID,
+                arguments: exchange.arguments,
+                originalLength: exchange.originalLength
             )
         }
     }
@@ -1548,7 +1592,8 @@ final class ChatStore {
         _ role: ChatMessage.Role,
         text: String,
         reasoning: String?,
-        exchanges: [ToolExchange] = []
+        exchanges: [ToolExchange] = [],
+        tools: [ToolTrace] = []
     ) {
         guard let services else { return }
         Task.detached(priority: .utility) {
@@ -1556,7 +1601,8 @@ final class ChatStore {
                 role: role,
                 text: text,
                 reasoning: reasoning,
-                exchanges: exchanges
+                exchanges: exchanges,
+                tools: tools
             )
         }
     }

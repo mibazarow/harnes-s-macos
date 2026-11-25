@@ -130,18 +130,37 @@ struct ChatAttachment: Identifiable, Sendable, Equatable {
 struct ToolTrace: Identifiable, Sendable, Equatable {
     let id: UUID
     var name: String
+    /// Canonical result text as the tool reported it; the UI renders from data.
     var summary: String
     var isError: Bool
     var isRunning: Bool
     var imagePath: String?
+    /// Provider call id, when known. Lets a replayed trace line up with its exchange.
+    var callID: String
+    /// Truncated JSON the model sent, when known. Not shown by default.
+    var arguments: String
+    /// Result length before the history cut, when known.
+    var originalLength: Int?
 
-    init(name: String, summary: String, isError: Bool = false, isRunning: Bool = true, imagePath: String? = nil) {
+    init(
+        name: String,
+        summary: String,
+        isError: Bool = false,
+        isRunning: Bool = true,
+        imagePath: String? = nil,
+        callID: String = "",
+        arguments: String = "",
+        originalLength: Int? = nil
+    ) {
         self.id = UUID()
         self.name = name
         self.summary = summary
         self.isError = isError
         self.isRunning = isRunning
         self.imagePath = imagePath
+        self.callID = callID
+        self.arguments = arguments
+        self.originalLength = originalLength
     }
 }
 
