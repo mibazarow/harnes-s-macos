@@ -73,3 +73,42 @@ final class SubagentBackgroundTests: XCTestCase {
         XCTAssertNil(ChatMessage(role: .system, text: "обычная заметка").subagentReportID)
     }
 }
+
+/// S8: the task trace shows the title, never the brief.
+final class TaskTraceRedactionTests: XCTestCase {
+    private let brief = "Read every file under Sources and summarise the agent loop in detail"
+
+    func testRunningTaskTraceHidesThePrompt() {
+        let trace = ToolTrace(
+            name: "task", summary: "",
+            arguments: #"{"title":"читает исходники","prompt":"Read every file under Sources and summarise the agent loop in detail"}"#
+        )
+        let line = ToolTrace.summaryText(for: trace)
+        XCTAssertEqual(line, "Подагент · читает исходники")
+        XCTAssertFalse(line.contains("Read every file"), "бриф не должен попадать в трейс")
+        XCTAssertFalse(line.contains(brief))
+    }
+
+    func testTaskTraceWithoutTitleStillHidesThePrompt() {
+        let trace = ToolTrace(
+            name: "task", summary: "",
+            arguments: #"{"prompt":"Read every file under Sources"}"#
+        )
+        XCTAssertEqual(ToolTrace.summaryText(for: trace), "Подагент")
+    }
+
+    func testInterruptTraceNamesTheTarget() {
+        let trace = ToolTrace(
+            name: "task", summary: "", arguments: #"{"interrupt":"agent-3","prompt":"x"}"#
+        )
+        XCTAssertEqual(ToolTrace.summaryText(for: trace), "Подагент · остановка agent-3")
+    }
+
+    func testFinishedTaskKeepsItsResultLine() {
+        let trace = ToolTrace(
+            name: "task", summary: "Подагент agent-4 запущен: читает",
+            isRunning: false, arguments: #"{"prompt":"secret brief"}"#
+        )
+        XCTAssertEqual(ToolTrace.summaryText(for: trace), "Подагент agent-4 запущен: читает")
+    }
+}

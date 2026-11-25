@@ -112,6 +112,9 @@ final class ChatStore {
     private(set) var isLoadingOlder = false
     /// Threshold used for compaction and for the outgoing window. Set from settings.
     var compactionThreshold: Double = 80
+    /// Where the two working-model choices live. Shared with the settings tab, so a
+    /// pick there applies to the next turn without restarting.
+    var modelDefaults: UserDefaults = .standard
     /// Last assembled system prompt, reused for the footer budget so the numbers match.
     var cachedSystemPrompt = Prompts.system
     /// Last `contextPlan` result, keyed by everything that plan depends on.
@@ -272,9 +275,10 @@ final class ChatStore {
             return
         }
 
-        let model = provider.defaultModel ?? provider.models.first ?? ""
+        let model = (try? await resolvedMain(services))?.model
+            ?? provider.defaultModel ?? provider.models.first ?? ""
         guard !model.isEmpty else {
-            finish(assistantID, notice: "У активного провайдера не выбрана модель. Открой настройки → Провайдеры.")
+            finish(assistantID, notice: "Не выбрана модель. Открой настройки → Провайдеры → Основная модель.")
             return
         }
 
@@ -659,11 +663,9 @@ final class ChatStore {
         let system = Prompts.system + "\n\n" + Prompts.subagent
 
         // S5: explicit subagent model → cheap (read-only only) → main.
-        let subagentModel = provider.resolvedSubagentModel(readOnly: readOnly, main: model)
-
         // S7.1: the child's window is the window of the model it will actually use.
         // Taking the parent's number gives gemma (8k) a 128k budget.
-        let subagentWindow = window(for: provider, model: subagentModel, scope: .subagent).window
+        let subagentWindow = window(for: provider, model: model, scope: .subagent).window
         let composer = ContextComposer()
         let schemaTokens = await registry.schemaTokenCost()
         var context = SubagentContext(prompt: prompt, baseSystem: system)
@@ -709,7 +711,7 @@ final class ChatStore {
                 guard !ids.isEmpty else { break }
                 guard let merged = await foldSubagentSummary(
                     previous: context.summary, text: context.foldText(ids: ids),
-                    provider: provider, model: subagentModel
+                    provider: provider, model: model
                 ) else { break }
                 context.applyFold(ids: ids, summary: merged)
                 Self.logLatency("subagent id=\(childID) fold=\(context.folds) "
@@ -752,7 +754,7 @@ final class ChatStore {
                     calls = []
                     for try await event in client.stream(
                         provider: provider,
-                        model: subagentModel,
+                        model: model,
                         messages: history,
                         tools: await registry.schemas(),
                         cacheKey: promptCacheKey
@@ -776,7 +778,7 @@ final class ChatStore {
                     guard !ids.isEmpty,
                           let merged = await foldSubagentSummary(
                               previous: context.summary, text: context.foldText(ids: ids),
-                              provider: provider, model: subagentModel
+                              provider: provider, model: model
                           ) else {
                         lastError = "ошибка стрима: \(error.localizedDescription)"
                         break
@@ -835,7 +837,7 @@ final class ChatStore {
             do {
                 var summary = ""
                 for try await event in client.stream(
-                    provider: provider, model: subagentModel,
+                    provider: provider, model: model,
                     messages: context.messages(included: context.contextMessages().map(\.id)),
                     tools: [],
                     cacheKey: promptCacheKey
@@ -921,9 +923,15 @@ final class ChatStore {
         trustCandidates: [TrustCandidate]
     ) async -> SubagentOutcome {
         installAbortCascade()
+        // The child may run on another provider entirely: resolve before the turn is
+        // handed to a background Task, so a later settings change cannot move it.
+        let child = await resolvedSubagent(
+            main: provider, model: model, readOnly: readOnly, services: services
+        )
         if delivery == .caller {
             return await runSubagent(
-                prompt: prompt, readOnly: readOnly, provider: provider, model: model,
+                prompt: prompt, readOnly: readOnly,
+                provider: child.provider, model: child.model,
                 services: services, trustCandidates: trustCandidates,
                 delivery: .caller, childID: childID, title: title
             )
@@ -944,7 +952,8 @@ final class ChatStore {
                 return
             }
             let outcome = await self.runSubagent(
-                prompt: prompt, readOnly: readOnly, provider: provider, model: model,
+                prompt: prompt, readOnly: readOnly,
+                provider: child.provider, model: child.model,
                 services: services, trustCandidates: trustCandidates,
                 delivery: .parent, childID: childID, title: title
             )
@@ -1095,8 +1104,35 @@ final class ChatStore {
     }
 
     func activeProvider(_ services: AppServices) async throws -> ProviderModel? {
+        try await resolvedMain(services)?.provider
+    }
+
+    /// The provider and model the next turn will use: the app-wide choice from the
+    /// Providers tab, else the first provider's default model.
+    func resolvedMain(_ services: AppServices) async throws -> (provider: ProviderModel, model: String)? {
         let providers = try await services.providers.list()
-        return providers.first(where: \.isDefault) ?? providers.first
+        return ModelSelection.resolveOrDefault(
+            modelDefaults.string(forKey: ModelSelection.mainModelKey) ?? "",
+            in: providers
+        )
+    }
+
+    /// S5 + the app-wide selector: an explicit subagent model wins, then the provider's
+    /// own subagent field, then the cheap model for read-only work, then the main model.
+    func resolvedSubagent(
+        main provider: ProviderModel,
+        model mainModel: String,
+        readOnly: Bool,
+        services: AppServices
+    ) async -> (provider: ProviderModel, model: String) {
+        let providers = (try? await services.providers.list()) ?? []
+        if let choice = ModelSelection.resolve(
+            modelDefaults.string(forKey: ModelSelection.subagentModelKey) ?? "",
+            in: providers
+        ) {
+            return choice
+        }
+        return (provider, provider.resolvedSubagentModel(readOnly: readOnly, main: mainModel))
     }
 
     func buildSystemPrompt(services: AppServices?) async -> String {

@@ -3,6 +3,7 @@ import SwiftUI
 struct ProvidersSettingsView: View {
     let services: AppServices?
     @Environment(ProviderDirectory.self) private var directory
+    @Environment(AppSettings.self) private var settings
 
     @State private var providers: [ProviderModel] = []
     @State private var loading = true
@@ -87,8 +88,13 @@ struct ProvidersSettingsView: View {
                 }
             } else {
                 List {
-                    ForEach(providers) { provider in
-                        providerRow(provider, services: services)
+                    Section("Модели") {
+                        modelPickers()
+                    }
+                    Section("Провайдеры") {
+                        ForEach(providers) { provider in
+                            providerRow(provider, services: services)
+                        }
                     }
                 }
                 .listStyle(.inset)
@@ -103,11 +109,9 @@ struct ProvidersSettingsView: View {
                         Label("Добавить", systemImage: "plus")
                     }
                     Spacer()
-                    if let defaultProvider = providers.first(where: \.isDefault) {
-                        Text("основной: \(defaultProvider.name)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("Провайдеры — только подключения. Рабочие модели выбираются выше.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(12)
                 .background(.bar)
@@ -123,18 +127,8 @@ struct ProvidersSettingsView: View {
                 .padding(.top, 5)
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(provider.name)
-                        .fontWeight(.semibold)
-                    if provider.isDefault {
-                        Text("default")
-                            .font(AppFont.mono(9, weight: .medium))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(.quaternary)
-                            .clipShape(Capsule())
-                    }
-                }
+                Text(provider.name)
+                    .fontWeight(.semibold)
 
                 Text(provider.host)
                     .font(AppFont.mono(11))
@@ -164,13 +158,75 @@ struct ProvidersSettingsView: View {
     @ViewBuilder
     private func rowActions(_ provider: ProviderModel, services: AppServices) -> some View {
         Button("Изменить") { editing = provider }
-        if !provider.isDefault {
-            Button("Сделать основным") {
-                Task { await makeDefault(provider, services: services) }
-            }
-        }
         Divider()
         Button("Удалить", role: .destructive) { deleting = provider }
+    }
+
+    /// The two app-wide choices. Both lists are built from what is saved in the
+    /// providers, so adding a connection is enough for its models to appear here.
+    @ViewBuilder
+    private func modelPickers() -> some View {
+        let choices = ModelSelection.choices(providers)
+        if choices.isEmpty {
+            Text("Сначала добавь провайдера и загрузи его модели.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            Picker("Основная модель", selection: mainModelBinding) {
+                ForEach(choices) { choice in
+                    Text(choice.label).tag(choice.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .onChange(of: settings.mainModel) { _, _ in
+                Task {
+                    await directory.reload()
+                    await reload()
+                }
+            }
+
+            Picker("Модель субагентов", selection: subagentModelBinding) {
+                Text("как основная").tag("")
+                ForEach(choices) { choice in
+                    Text(choice.label).tag(choice.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .onChange(of: settings.subagentModel) { _, _ in
+                Task { await directory.reload() }
+            }
+
+            Text("Основная — для чата и сжатия. Субагенты — для фоновых задач; пусто значит «как основная».")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// A stale or empty stored value still shows the model that will actually be used,
+    /// so the picker never renders blank while a request would succeed.
+    private var mainModelBinding: Binding<String> {
+        Binding(
+            get: {
+                if ModelSelection.resolve(settings.mainModel, in: providers) != nil {
+                    return settings.mainModel
+                }
+                guard let fallback = ModelSelection.fallback(providers) else { return "" }
+                return ModelSelection.raw(
+                    providerID: fallback.provider.id, model: fallback.model
+                )
+            },
+            set: { settings.mainModel = $0 }
+        )
+    }
+
+    private var subagentModelBinding: Binding<String> {
+        Binding(
+            get: {
+                ModelSelection.resolve(settings.subagentModel, in: providers) == nil
+                    ? "" : settings.subagentModel
+            },
+            set: { settings.subagentModel = $0 }
+        )
     }
 
     private func color(for health: String) -> Color {
@@ -195,15 +251,6 @@ struct ProvidersSettingsView: View {
             errorText = error.localizedDescription
         }
         loading = false
-    }
-
-    private func makeDefault(_ provider: ProviderModel, services: AppServices) async {
-        do {
-            try await services.providers.setDefault(id: provider.id)
-            await reload()
-        } catch {
-            errorText = error.localizedDescription
-        }
     }
 
     private func delete(_ provider: ProviderModel) async {
@@ -265,40 +312,17 @@ struct ProviderEditorView: View {
                     }
                 }
 
-                Section("Модель") {
+                Section("Подключение и модели") {
+                    // Which model is used is chosen once, on the Providers tab. Here the
+                    // row only says what this connection offers.
                     if provider.models.isEmpty {
                         TextField("Имя модели", text: modelBinding)
                             .font(AppFont.mono(13))
-                    } else {
-                        Picker("Модель", selection: modelBinding) {
-                            ForEach(provider.models, id: \.self) { model in
-                                Text(model).tag(model)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                    }
-
-                    if !provider.models.isEmpty {
-                        Picker("Дешёвая модель", selection: cheapModelBinding) {
-                            Text("как основная").tag("")
-                            ForEach(provider.models, id: \.self) { model in
-                                Text(model).tag(model)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        Text("Для подагентов только-чтение и разбора стиля: работы много, правок нет.")
+                        Text("Можно ввести вручную или загрузить список кнопкой выше.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-
-                        // S5: one model for all subagents, regardless of read-only.
-                        Picker("Модель для подагентов", selection: subagentModelBinding) {
-                            Text("как основная").tag("")
-                            ForEach(provider.models, id: \.self) { model in
-                                Text(model).tag(model)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        Text("Оптом на всех подагентов. Пусто — как основная (или дешёвая для чтения).")
+                    } else {
+                        Text("Моделей: \(provider.models.count)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -485,12 +509,13 @@ struct ProviderEditorView: View {
         )
     }
 
-    /// Empty selection means "same as the main model", stored as nil.
+    /// The model this provider's subagents actually run on: the app-wide subagent
+    /// choice when it points here, otherwise this provider's own fallback.
     private var subagentModelName: String {
-        provider.resolvedSubagentModel(
-            readOnly: true,
-            main: provider.defaultModel ?? provider.models.first ?? ""
-        )
+        if let choice = ModelSelection.resolve(settings.subagentModel, in: [provider]) {
+            return choice.model
+        }
+        return provider.defaultModel ?? provider.models.first ?? ""
     }
 
     private func subagentWindowBinding(model: String) -> Binding<Int> {
@@ -506,20 +531,6 @@ struct ProviderEditorView: View {
                     $0, providerID: provider.id, model: model, scope: .subagent
                 )
             }
-        )
-    }
-
-    private var subagentModelBinding: Binding<String> {
-        Binding(
-            get: { provider.subagentModel ?? "" },
-            set: { provider.subagentModel = $0.isEmpty ? nil : $0 }
-        )
-    }
-
-    private var cheapModelBinding: Binding<String> {
-        Binding(
-            get: { provider.cheapModel ?? "" },
-            set: { provider.cheapModel = $0.isEmpty ? nil : $0 }
         )
     }
 

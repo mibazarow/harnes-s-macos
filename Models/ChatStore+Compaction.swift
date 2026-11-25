@@ -44,9 +44,8 @@ extension ChatStore {
             // The task outlives the turn: the provider may have been switched in
             // settings while the answer was streaming. Capture is only a hint.
             let resolved: (ProviderModel, String)
-            if let fresh = try? await self.activeProvider(services),
-               let name = fresh.defaultModel ?? fresh.models.first, !name.isEmpty {
-                resolved = (fresh, name)
+            if let fresh = try? await self.resolvedMain(services) {
+                resolved = (fresh.provider, fresh.model)
             } else {
                 Self.logLatency("compaction: provider resolve failed, using caller's")
                 resolved = (provider, model)
@@ -111,8 +110,9 @@ extension ChatStore {
         compactionTask = Task { [weak self] in
             guard let self else { return }
             defer { self.compactionTask = nil }
-            guard let provider = try? await self.activeProvider(services),
-                  let model = provider.defaultModel ?? provider.models.first, !model.isEmpty else { return }
+            guard let resolved = try? await self.resolvedMain(services) else { return }
+            let provider = resolved.provider
+            let model = resolved.model
 
             // The snapshot is taken when the boundary is recorded; by the time the task
             // runs, the history may have been cleared, restored or replaced. A stale
@@ -703,16 +703,16 @@ extension ChatStore {
         guard let services else { return "**Ошибка.** База данных недоступна." }
 
         let provider: ProviderModel
+        let model: String
         do {
-            guard let resolved = try await activeProvider(services) else {
-                return "**Ошибка.** Провайдер не подключён."
+            guard let resolved = try await resolvedMain(services) else {
+                return "**Ошибка.** Провайдер не подключён или не выбрана модель."
             }
-            provider = resolved
+            provider = resolved.provider
+            model = resolved.model
         } catch {
             return "**Ошибка.** Не удалось прочитать провайдеров: \(error.localizedDescription)"
         }
-        let model = provider.defaultModel ?? provider.models.first ?? ""
-        guard !model.isEmpty else { return "**Ошибка.** У провайдера не выбрана модель." }
 
         let completed = promptMessages
         guard completed.count >= 3 else {

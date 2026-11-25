@@ -39,6 +39,15 @@ final class AppSettings {
         didSet { defaults.set(autopilot, forKey: Key.autopilot) }
     }
 
+    /// Raw "provider id + model" from the Providers tab. Empty means "not chosen yet".
+    var mainModel: String {
+        didSet { defaults.set(mainModel, forKey: ModelSelection.mainModelKey) }
+    }
+
+    var subagentModel: String {
+        didSet { defaults.set(subagentModel, forKey: ModelSelection.subagentModelKey) }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.theme = AppTheme(rawValue: defaults.string(forKey: Key.theme) ?? "") ?? .dark
@@ -57,5 +66,7 @@ final class AppSettings {
         let storedThreshold = defaults.double(forKey: Key.compactionThresholdPercent)
         self.compactionThresholdPercent = storedThreshold > 0 ? storedThreshold : 80
         self.autopilot = defaults.bool(forKey: Key.autopilot)
+        self.mainModel = defaults.string(forKey: ModelSelection.mainModelKey) ?? ""
+        self.subagentModel = defaults.string(forKey: ModelSelection.subagentModelKey) ?? ""
     }
 }
