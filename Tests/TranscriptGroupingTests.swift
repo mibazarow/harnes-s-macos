@@ -8,6 +8,25 @@ import SwiftUI
 /// sequential `bash` calls rendered as ten bubbles with one trace each and read as ten
 /// unrelated answers. Storage and the replay sent to the model must stay untouched.
 final class TranscriptGroupingTests: XCTestCase {
+    func testTraceSummaryIsPureAndNeverEmpty() {
+        let running = ToolTrace(name: "bash", summary: "", isRunning: true,
+                                arguments: #"{"command":"ls -la /tmp"}"#)
+        let first = ToolTrace.summaryText(for: running)
+        XCTAssertEqual(first, ToolTrace.summaryText(for: running))
+        XCTAssertTrue(first.contains("ls -la"), "первый кадр показывает аргументы")
+        XCTAssertFalse(first.isEmpty)
+
+        let bare = ToolTrace(name: "bash", summary: "", isRunning: true)
+        XCTAssertEqual(ToolTrace.summaryText(for: bare), "…")
+
+        let finished = ToolTrace(name: "bash", summary: "выведено 42 строки", isRunning: false)
+        XCTAssertEqual(ToolTrace.summaryText(for: finished), "выведено 42 строки")
+
+        let long = ToolTrace(name: "bash", summary: "",
+                             arguments: String(repeating: "x", count: 300))
+        XCTAssertEqual(ToolTrace.summaryText(for: long).count, 81)
+    }
+
     @MainActor
     func testThemePersistsWithDarkDefault() {
         let name = "theme-test-\(UUID().uuidString)"

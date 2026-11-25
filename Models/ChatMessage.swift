@@ -130,7 +130,9 @@ struct ChatAttachment: Identifiable, Sendable, Equatable {
 struct ToolTrace: Identifiable, Sendable, Equatable {
     let id: UUID
     var name: String
-    /// Canonical result text as the tool reported it; the UI renders from data.
+    /// Canonical result value as the tool reported it. Written once when the call
+    /// finishes; the line on screen is derived from this and `arguments`, so a live
+    /// frame and a replayed one render identically.
     var summary: String
     var isError: Bool
     var isRunning: Bool
@@ -161,6 +163,23 @@ struct ToolTrace: Identifiable, Sendable, Equatable {
         self.callID = callID
         self.arguments = arguments
         self.originalLength = originalLength
+    }
+
+    /// Pure: depends only on the trace data, never on store state or wall-clock.
+    static func summaryText(for trace: ToolTrace) -> String {
+        let value = trace.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !value.isEmpty { return value }
+        let call = preview(of: trace.arguments)
+        return call.isEmpty ? "…" : call
+    }
+
+    /// One short line of the arguments, for the frame before the result arrives.
+    static func preview(of arguments: String) -> String {
+        let flat = arguments
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !flat.isEmpty, flat != "{}" else { return "" }
+        return flat.count > 80 ? String(flat.prefix(80)) + "…" : flat
     }
 }
 

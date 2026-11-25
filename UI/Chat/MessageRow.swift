@@ -267,7 +267,7 @@ struct ToolTraceList: View {
                     Text(trace.name)
                         .foregroundStyle(palette.dim)
 
-                    Text(trace.summary)
+                    Text(ToolTrace.summaryText(for: trace))
                         .foregroundStyle(palette.faint)
                         .lineLimit(2)
                         .truncationMode(.middle)
