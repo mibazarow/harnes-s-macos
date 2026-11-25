@@ -12,6 +12,20 @@ enum SubagentDelivery: String, Sendable {
     case caller
 }
 
+/// S4: what the header pill needs. A value snapshot, because SwiftUI cannot observe an
+/// actor and a `ForEach` over an awaited result would never redraw.
+struct SubagentInfo: Identifiable, Equatable, Sendable {
+    let id: String
+    let title: String
+    let startedAt: Date
+
+    init(_ child: SubagentRegistry.Child) {
+        self.id = child.id
+        self.title = child.title
+        self.startedAt = child.startedAt
+    }
+}
+
 actor SubagentRegistry {
     struct Ticket: Sendable, Equatable {
         let id: String
@@ -22,6 +36,10 @@ actor SubagentRegistry {
         let id: String
         let parent: String?
         let depth: Int
+        /// S0.5: a short Russian label for the pill; never the English prompt.
+        var title: String
+        /// S2: when the child was reserved, for "работает 1:47".
+        let startedAt: Date
         var cancelled: Bool
         var reason: String?
     }
@@ -42,7 +60,7 @@ actor SubagentRegistry {
 
     /// Reserve a name before the work starts. The name is what an interrupt and a log
     /// line refer to; allocating it later would make both racy.
-    func begin(parent: String?) throws -> Ticket {
+    func begin(parent: String?, title: String = "") throws -> Ticket {
         guard children.count < limit else {
             throw ConfigurationError.invalidArguments(
                 "Лимит одновременных подагентов: \(limit). Дождись завершения одного."
@@ -56,7 +74,10 @@ actor SubagentRegistry {
         }
         let id = "agent-\(nextIndex)"
         nextIndex += 1
-        children[id] = Child(id: id, parent: parent, depth: depth, cancelled: false, reason: nil)
+        children[id] = Child(
+            id: id, parent: parent, depth: depth, title: title,
+            startedAt: Date(), cancelled: false, reason: nil
+        )
         return Ticket(id: id, depth: depth)
     }
 

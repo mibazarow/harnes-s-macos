@@ -11,6 +11,9 @@ struct SubagentOutcome: Sendable {
     var calls: Int = 0
     /// The hard call budget stopped the run; the text is what it had at that point.
     var truncated: Bool = false
+    /// S1: the child was started in the background; `text` is the launch line, and the
+    /// result will arrive in the transcript later.
+    var launched: Bool = false
 
     var isEmpty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 }
@@ -36,22 +39,31 @@ extension ToolRegistry {
         }
 
         let delivery = SubagentDelivery(rawValue: (args["delivery"] as? String) ?? "parent") ?? .parent
+        // S0.5: the pill label is Russian and short; the prompt stays English.
+        let title = (args["title"] as? String)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : String($0.prefix(40)) }
+            ?? String(prompt.replacingOccurrences(of: "\n", with: " ").prefix(40))
         // A registry without a tree (unit tests, an embedded caller) still runs the
         // child; it just has no name to interrupt.
         var childID = callerID
         if let subagents {
             do {
                 childID = try await subagents.begin(
-                    parent: isSubagent ? callerID : SubagentRegistry.root
+                    parent: isSubagent ? callerID : SubagentRegistry.root,
+                    title: title
                 ).id
             } catch {
                 return .fail(error.localizedDescription)
             }
         }
+        // S1: a background child ends itself inside its own Task, after the report. A
+        // synchronous child is removed here, awaited, so a status query right after the
+        // call never sees a ghost.
         let reserved = childID
-        defer {
+        func finishChild() async {
             if let subagents, reserved != callerID {
-                Task { await subagents.end(reserved) }
+                await subagents.end(reserved)
             }
         }
 
@@ -79,7 +91,11 @@ extension ToolRegistry {
             context += "\n\n## Уже найденные файлы (не искать заново)\n" + blocks.joined(separator: "\n\n")
         }
 
-        let outcome = await subagent(context, readOnly, delivery, childID)
+        let outcome = await subagent(context, readOnly, delivery, childID, title)
+        if outcome.launched {
+            return .ok(outcome.text)
+        }
+        await finishChild()
         if outcome.isEmpty {
             // An empty answer is a failure, not a result. Name the likely cause so the
             // parent can retry with a narrower prompt instead of pretending it worked.

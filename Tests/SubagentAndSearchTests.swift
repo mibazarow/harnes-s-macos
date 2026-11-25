@@ -27,7 +27,7 @@ final class SubagentContextTests: XCTestCase {
             secrets: nil,
             skills: nil,
             mcp: nil,
-            subagent: { prompt, _, _, _ in
+            subagent: { prompt, _, _, _, _ in
                 await box.set(prompt)
                 return SubagentOutcome(text: "готово")
             }
@@ -57,7 +57,7 @@ final class SubagentContextTests: XCTestCase {
             secrets: nil,
             skills: nil,
             mcp: nil,
-            subagent: { _, _, _, _ in SubagentOutcome(text: "", error: "лимит шагов", steps: 12, calls: 9) }
+            subagent: { _, _, _, _, _ in SubagentOutcome(text: "", error: "лимит шагов", steps: 12, calls: 9) }
         )
 
         let result = await tools.execute(ToolCall(
@@ -87,7 +87,7 @@ final class SubagentContextTests: XCTestCase {
             secrets: nil,
             skills: nil,
             mcp: nil,
-            subagent: { prompt, _, _, _ in
+            subagent: { prompt, _, _, _, _ in
                 await box.set(prompt)
                 return SubagentOutcome(text: "ok")
             }
@@ -115,7 +115,7 @@ final class SubagentContextTests: XCTestCase {
             secrets: nil,
             skills: nil,
             mcp: nil,
-            subagent: { prompt, _, _, _ in
+            subagent: { prompt, _, _, _, _ in
                 await box.set(prompt)
                 return SubagentOutcome(text: "ok")
             }

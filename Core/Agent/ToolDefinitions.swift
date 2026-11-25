@@ -566,12 +566,13 @@ extension ToolRegistry {
         ToolDefinition(
             name: "task",
             exposure: .core,
-            description: "Delegate a self-contained job to a fresh subagent. Returns only its final answer; pass known paths so it does not search again.",
+            description: "Delegate a self-contained job to a fresh subagent; pass known paths so it does not search again. prompt: write in English, the subagent answers in English. parent runs in the background and reports later; caller waits for the answer.",
             parameters: schema([
                 "prompt": ["type": "string", "description": "Full self-contained instruction"],
                 "read_only": ["type": "boolean", "description": "true = investigation only, no edits"],
                 "paths": ["type": "array", "items": ["type": "string"], "description": "Files or folders to include verbatim so the subagent does not search again"],
-                "delivery": ["type": "string", "enum": ["parent", "caller"], "description": "parent (default) also announces the child in the transcript; caller returns the result only"],
+                "title": ["type": "string", "description": "Short Russian label for the UI pill, up to 40 chars"],
+                "delivery": ["type": "string", "enum": ["parent", "caller"], "description": "parent (default) runs in the background and reports later; caller waits and returns the result in this step"],
                 "interrupt": ["type": "string", "description": "Name of a running child (agent-N) to stop instead of starting a new one"],
                 "reason": ["type": "string", "description": "Why the child is stopped"]
             ], required: ["prompt"])

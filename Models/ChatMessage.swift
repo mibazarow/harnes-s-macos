@@ -366,6 +366,20 @@ extension ChatMessage {
             && text.hasPrefix("Результаты инструментов убраны из запроса:")
     }
 
+    /// S1: a background child's report is a `.system` row that starts with this marker.
+    /// `.system` never reaches the provider, so the report cannot leak into the parent's
+    /// context; the model reads it through `subagent_status`.
+    static func subagentReportMarker(_ id: String) -> String {
+        "subagentReport(\(id))"
+    }
+
+    var subagentReportID: String? {
+        guard role == .system, text.hasPrefix("subagentReport("),
+              let close = text.firstIndex(of: ")") else { return nil }
+        let start = text.index(text.startIndex, offsetBy: "subagentReport(".count)
+        return String(text[start..<close])
+    }
+
     /// Collapses runs of tool-only steps into one message for display.
     ///
     /// Every model step gets its own message, so ten sequential `bash` calls arrived as

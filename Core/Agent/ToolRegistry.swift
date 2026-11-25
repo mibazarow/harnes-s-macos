@@ -148,7 +148,7 @@ struct ToolRegistry: Sendable {
     let todos: TodoStore?
     let processes: BackgroundProcessService?
     let readOnly: Bool
-    let subagent: (@Sendable (String, Bool, SubagentDelivery, String) async -> SubagentOutcome)?
+    let subagent: (@Sendable (String, Bool, SubagentDelivery, String, String) async -> SubagentOutcome)?
     /// Session-scoped read state. Shared across turns so "read it first" survives the
     /// step boundary; a subagent gets its own because it has its own context.
     let ledger: FileReadingLedger
@@ -190,7 +190,7 @@ struct ToolRegistry: Sendable {
         fileSafety: FileSafetyService? = nil,
         todos: TodoStore? = nil,
         readOnly: Bool = false,
-        subagent: (@Sendable (String, Bool, SubagentDelivery, String) async -> SubagentOutcome)? = nil,
+        subagent: (@Sendable (String, Bool, SubagentDelivery, String, String) async -> SubagentOutcome)? = nil,
         ledger: FileReadingLedger? = nil,
         skillScope: ActiveSkillScope? = nil,
         interceptors: ToolInterceptorChain = ToolInterceptorChain(),

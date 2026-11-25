@@ -56,6 +56,11 @@ final class ChatStore {
     /// D8: named, bounded children of this store. Shared by the parent and any child
     /// registry so depth and interrupts see the same tree.
     let subagents = SubagentRegistry()
+    /// S1: background children, so the parent turn can return at once.
+    let subagentRunner = SubagentRunner()
+    /// S2/S4: what the header shows. The registry is an actor SwiftUI cannot observe, so
+    /// this snapshot is refreshed on start and on finish.
+    private(set) var runningSubagents: [SubagentInfo] = []
     /// Scale applied to every "does it fit" decision, refreshed from `calibration`.
     var estimateScale: Double = 1
     /// What the composer shows about the context window. Snapshotted once per request
@@ -591,7 +596,8 @@ final class ChatStore {
         services: AppServices,
         trustCandidates: [TrustCandidate],
         delivery: SubagentDelivery,
-        childID: String
+        childID: String,
+        title: String
     ) async -> SubagentOutcome {
         // A subagent is its own turn for the GUI budget, but shares the abort flag: the
         // stop hotkey must kill a runaway child too.
@@ -681,6 +687,13 @@ final class ChatStore {
                 lastError = "подагент остановлен родителем"
                 break loop
             }
+            // S0.7: Esc must stop a background child too; the child loop used to check
+            // only the registry, so a stop left it running in the background.
+            if let reason = AgentAbortSignal.shared.current {
+                truncated = true
+                lastError = "аварийный стоп: \(reason)"
+                break loop
+            }
             steps += 1
             var streamed = ""
             var calls: [ToolCall] = []
@@ -766,15 +779,68 @@ final class ChatStore {
 
         Self.logLatency("subagent id=\(childID) steps=\(steps) calls=\(callsUsed) "
             + "truncated=\(truncated) empty=\(findings.isEmpty) error=\(lastError ?? "-")")
-        // D8: `parent` announces the child in the transcript; `caller` returns the
-        // result only, leaving the parent to decide what the user sees.
-        if delivery == .parent, !findings.isEmpty {
-            let firstLine = findings.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
-            notice("Подагент \(childID): " + (firstLine.count > 160 ? String(firstLine.prefix(160)) + "…" : firstLine))
-        }
         return SubagentOutcome(
             text: findings, error: lastError, steps: steps, calls: callsUsed, truncated: truncated
         )
+    }
+
+    /// S1: `caller` keeps the old synchronous shape; `parent` starts the child in the
+    /// background and returns a launch line at once. Provider, model and services are
+    /// captured by value, so a settings switch does not change a running child.
+    private func handleSubagent(
+        prompt: String,
+        readOnly: Bool,
+        delivery: SubagentDelivery,
+        childID: String,
+        title: String,
+        provider: ProviderModel,
+        model: String,
+        services: AppServices,
+        trustCandidates: [TrustCandidate]
+    ) async -> SubagentOutcome {
+        if delivery == .caller {
+            return await runSubagent(
+                prompt: prompt, readOnly: readOnly, provider: provider, model: model,
+                services: services, trustCandidates: trustCandidates,
+                delivery: .caller, childID: childID, title: title
+            )
+        }
+
+        let runner = subagentRunner
+        await runner.start(id: childID) { [weak self] in
+            guard let self else {
+                ChatStore.logLatency("subagent id=\(childID) report dropped: store released")
+                return
+            }
+            let outcome = await self.runSubagent(
+                prompt: prompt, readOnly: readOnly, provider: provider, model: model,
+                services: services, trustCandidates: trustCandidates,
+                delivery: .parent, childID: childID, title: title
+            )
+            await self.subagents.end(childID)
+            await self.publishSubagentReport(childID: childID, title: title, outcome: outcome)
+            await runner.finished(childID)
+        }
+        await refreshRunningSubagents()
+        return SubagentOutcome(
+            text: "Подагент \(childID) запущен: \(title). Отчёт придёт в чат; статус — subagent_status.",
+            launched: true
+        )
+    }
+
+    /// S6: the report is a `.system` row with a marker. `.system` is filtered out of
+    /// `promptMessages`, so ten reports never leak into the parent's context; the model
+    /// reads them through `subagent_status`.
+    func publishSubagentReport(childID: String, title: String, outcome: SubagentOutcome) async {
+        let body = outcome.text.isEmpty ? (outcome.error ?? "нет результата") : outcome.text
+        let head = ChatMessage.subagentReportMarker(childID) + (title.isEmpty ? "" : " · " + title)
+        notice(head + "\n" + SubagentOutput.findings(body))
+        await refreshRunningSubagents()
+    }
+
+    /// S4: refreshed on start and on finish; the header renders this, never the actor.
+    func refreshRunningSubagents() async {
+        runningSubagents = await subagents.snapshot().map(SubagentInfo.init)
     }
 
     /// R34.2: the window actually used for budgets. A known model name wins over the
@@ -1212,11 +1278,12 @@ final class ChatStore {
             fileSafety: services.fileSafety,
             todos: services.todos,
             readOnly: planMode,
-            subagent: { [weak self] prompt, readOnly, delivery, childID in
-                await self?.runSubagent(
-                    prompt: prompt, readOnly: readOnly, provider: provider,
-                    model: model, services: services, trustCandidates: trustCandidates,
-                    delivery: delivery, childID: childID
+            subagent: { [weak self] prompt, readOnly, delivery, childID, title in
+                await self?.handleSubagent(
+                    prompt: prompt, readOnly: readOnly, delivery: delivery,
+                    childID: childID, title: title,
+                    provider: provider, model: model, services: services,
+                    trustCandidates: trustCandidates
                 ) ?? SubagentOutcome(text: "", error: "сессия закрыта")
             },
             ledger: services.fileLedger,
