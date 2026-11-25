@@ -210,3 +210,26 @@ final class ToolDescriptionTests: XCTestCase {
         XCTAssertNotNil(parameters?["paths"])
     }
 }
+
+/// S3: the child's prompt is English, while the UI stays Russian.
+final class SubagentPromptLanguageTests: XCTestCase {
+    private func hasCyrillic(_ text: String) -> Bool {
+        text.unicodeScalars.contains { (0x0400...0x04FF).contains($0.value) }
+    }
+
+    func testSubagentPromptIsEnglish() {
+        XCTAssertFalse(hasCyrillic(Prompts.subagent), "промпт подагента не должен быть русским")
+        XCTAssertTrue(Prompts.subagent.contains("English"))
+    }
+
+    func testTaskDescriptionAsksForEnglishPrompt() throws {
+        let definition = try XCTUnwrap(ToolRegistry.definitions.first { $0.name == "task" })
+        XCTAssertTrue(definition.description.contains("English"), definition.description)
+        let properties = definition.parameters["properties"]?.value as? [String: Any]
+        XCTAssertNotNil(properties?["title"], "title нужен для русской подписи пилюли")
+    }
+
+    func testFoldPromptIsEnglish() {
+        XCTAssertFalse(hasCyrillic(Prompts.subagentFold))
+    }
+}

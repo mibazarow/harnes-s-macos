@@ -152,6 +152,16 @@ enum Prompts {
     - Never open with a heading that repeats the question, and never label every paragraph. One bold phrase per section is enough.
     """
 
+    /// S3: the subagent speaks English with the model; the UI stays Russian. The parent
+    /// translates the findings for the user, it does not pass them through.
+    static let subagent = """
+    # Subagent
+
+    You are an isolated subagent. Do the task and return only the result.
+    Do not ask for clarification, do not refer to the parent conversation, do not greet.
+    Answer in English, compactly: facts, file paths and conclusions, no process narration.
+    """
+
     /// S7.3: the merge request used when a subagent folds its own history. Short on
     /// purpose: it must cost less than the work it replaces.
     static let subagentFold = """

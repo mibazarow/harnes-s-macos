@@ -653,14 +653,8 @@ final class ChatStore {
             callerID: childID
         )
 
-        let system = Prompts.system + """
-
-        # Subagent
-
-        Ты — изолированный подагент. Выполни задачу и верни только результат.
-        Не спрашивай уточнений, не ссылайся на родительский диалог, не здоровайся.
-        Ответ — сжатый, факты и пути, без рассуждений.
-        """
+        // S3: the child works in English; the interface and the pill title stay Russian.
+        let system = Prompts.system + "\n\n" + Prompts.subagent
 
         let subagentModel = readOnly ? (provider.cheapModel ?? model) : model
 
@@ -833,7 +827,7 @@ final class ChatStore {
         if text.isEmpty {
             context.append(ChatMessage(
                 role: .user,
-                text: "Сформулируй итог по уже выполненному: факты и пути, без новых вызовов."
+                text: "Summarize what you already did: facts and paths, no new tool calls."
             ))
             do {
                 var summary = ""
