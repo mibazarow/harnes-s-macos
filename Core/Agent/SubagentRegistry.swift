@@ -60,8 +60,8 @@ actor SubagentRegistry {
     let maxDepth: Int
     /// S2: completed children leave `children` but stay readable for a while. Without
     /// this, `subagent_status(agent-2)` right after the report said "not found".
-    static let archiveLimit = 8
-    static let archiveTTL: TimeInterval = 30 * 60
+    static var archiveLimit: Int { Tuning.subagentArchiveLimit }
+    static var archiveTTL: TimeInterval { Tuning.subagentArchiveTTL }
     private var children: [String: Child] = [:]
     private var finished: [Child] = []
     private var nextIndex = 1

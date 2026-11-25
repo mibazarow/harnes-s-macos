@@ -72,4 +72,9 @@ enum Tuning {
     /// S6: a hard wall-clock ceiling per child. The timer lives in `SubagentRunner`, not
     /// in the child loop: a loop parked in a long tool would never notice.
     static let subagentTimeoutSeconds = 600
+
+    /// S0.8: archive of finished children, so a status query after the report still
+    /// finds them. Bounded by count and by age.
+    static let subagentArchiveLimit = 8
+    static let subagentArchiveTTL: TimeInterval = 30 * 60
 }
