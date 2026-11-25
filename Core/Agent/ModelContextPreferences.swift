@@ -60,9 +60,46 @@ enum ModelContextPreferences {
         return known.first { lower.contains($0.needle) }?.window
     }
 
-    /// Manual overrides live in UserDefaults: a per-provider flag is enough, and it
-    /// avoids a migration for a setting the person can flip back.
+    /// S7.2: main and subagent windows are separate. A subagent usually runs on a
+    /// different model, and one number per provider meant switching the model kept the
+    /// old window. No database migration: this lives in UserDefaults like the old flag.
+    enum Scope: String, Sendable {
+        case main
+        case subagent
+    }
+
+    /// Legacy per-provider flag. Still read for `.main`, so a number the person already
+    /// typed is not lost.
     private static let manualPrefix = "contextWindow.manual."
+
+    private static func manualKey(providerID: String, model: String, scope: Scope) -> String {
+        "contextWindow.\(scope.rawValue).\(providerID).\(model)"
+    }
+
+    static func manualWindow(
+        providerID: String,
+        model: String,
+        scope: Scope,
+        defaults: UserDefaults = .standard
+    ) -> Int? {
+        let value = defaults.integer(forKey: manualKey(providerID: providerID, model: model, scope: scope))
+        return value > 0 ? value : nil
+    }
+
+    static func setManualWindow(
+        _ value: Int?,
+        providerID: String,
+        model: String,
+        scope: Scope,
+        defaults: UserDefaults = .standard
+    ) {
+        let key = manualKey(providerID: providerID, model: model, scope: scope)
+        if let value, value > 0 {
+            defaults.set(value, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
 
     static func isManual(providerID: String, defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: manualPrefix + providerID)
@@ -76,9 +113,16 @@ enum ModelContextPreferences {
         providerID: String,
         model: String,
         providerWindow: Int,
+        scope: Scope = .main,
         defaults: UserDefaults = .standard
     ) -> ContextWindowResolution {
-        if isManual(providerID: providerID, defaults: defaults) {
+        if let manual = manualWindow(
+            providerID: providerID, model: model, scope: scope, defaults: defaults
+        ) {
+            return ContextWindowResolution(window: max(manual, 1_000), source: .manual)
+        }
+        // Legacy flag applies to the main window only.
+        if scope == .main, isManual(providerID: providerID, defaults: defaults) {
             return ContextWindowResolution(window: max(providerWindow, 1_000), source: .manual)
         }
         if let known = knownWindow(for: model) {

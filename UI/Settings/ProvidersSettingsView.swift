@@ -335,6 +335,48 @@ struct ProviderEditorView: View {
                         .font(.caption)
                     }
 
+                    // S7.2: the subagent window is its own number. A child usually runs
+                    // on a different model, so the main window would be the wrong budget.
+                    let subagentName = subagentModelName
+                    let subagentResolution = ModelContextPreferences.resolve(
+                        providerID: provider.id,
+                        model: subagentName,
+                        providerWindow: provider.contextWindow,
+                        scope: .subagent
+                    )
+                    let subagentBudget = ContextComposer().budget(
+                        for: subagentResolution.window,
+                        thresholdPercent: settings.compactionThresholdPercent
+                    )
+                    HStack(spacing: 10) {
+                        Text("Окно контекста подагентов")
+                        TextField("", value: subagentWindowBinding(model: subagentName), format: .number)
+                            .frame(width: 110)
+                            .multilineTextAlignment(.trailing)
+                            .font(AppFont.mono(13))
+                        Stepper("", value: subagentWindowBinding(model: subagentName),
+                                in: 2_000...4_000_000, step: 8_000)
+                            .labelsHidden()
+                        Text("токенов")
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Подагенты: \(subagentResolution.window.formatted()) · бюджет "
+                        + "\(subagentBudget.usable.formatted()) (источник: "
+                        + "\(subagentResolution.source.label)) · сжатие на "
+                        + "\(subagentBudget.thresholdTokens.formatted())")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if ModelContextPreferences.manualWindow(
+                        providerID: provider.id, model: subagentName, scope: .subagent
+                    ) != nil {
+                        Button("Сбросить окно подагентов") {
+                            ModelContextPreferences.setManualWindow(
+                                nil, providerID: provider.id, model: subagentName, scope: .subagent
+                            )
+                        }
+                        .font(.caption)
+                    }
+
                     if provider.contextWindow > 300_000 {
                         Label(
                             "Такое окно есть у считанных моделей. Если оно завышено, компактация не включится никогда: она ждёт \(Int(settings.compactionThresholdPercent))% от этого числа. Типичные значения: 128 000 у DeepSeek и большинства Qwen, 200 000 у Claude, 1 000 000 у Gemini.",
@@ -432,6 +474,30 @@ struct ProviderEditorView: View {
     }
 
     /// Empty selection means "same as the main model", stored as nil.
+    /// S5 changes this one place: an explicit subagent model will win over the cheap one.
+    private var subagentModelName: String {
+        provider.cheapModel
+            ?? provider.defaultModel
+            ?? provider.models.first
+            ?? ""
+    }
+
+    private func subagentWindowBinding(model: String) -> Binding<Int> {
+        Binding(
+            get: {
+                ModelContextPreferences.resolve(
+                    providerID: provider.id, model: model,
+                    providerWindow: provider.contextWindow, scope: .subagent
+                ).window
+            },
+            set: {
+                ModelContextPreferences.setManualWindow(
+                    $0, providerID: provider.id, model: model, scope: .subagent
+                )
+            }
+        )
+    }
+
     private var cheapModelBinding: Binding<String> {
         Binding(
             get: { provider.cheapModel ?? "" },

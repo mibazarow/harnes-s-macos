@@ -151,4 +151,12 @@ enum Prompts {
     - No headings in a normal answer. Headings exist for long documents, not for chat. Numbered steps, lists and bold lead-ins carry structure on their own. If the answer fits on one screen, it has no `#`, `##` or `###` in it.
     - Never open with a heading that repeats the question, and never label every paragraph. One bold phrase per section is enough.
     """
+
+    /// S7.3: the merge request used when a subagent folds its own history. Short on
+    /// purpose: it must cost less than the work it replaces.
+    static let subagentFold = """
+    Merge the earlier summary and the new work into one compact summary.
+    Keep concrete facts, file paths, decisions and open questions. Drop process narration.
+    Answer with the summary only, no preamble.
+    """
 }

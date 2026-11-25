@@ -662,14 +662,14 @@ final class ChatStore {
         Ответ — сжатый, факты и пути, без рассуждений.
         """
 
-        var history: [ProviderMessage] = [
-            ProviderMessage(role: .system, content: system),
-            ProviderMessage(role: .user, content: prompt)
-        ]
-
-        // Read-only investigation is exactly the work a cheap model can do: no edits to
-        // get wrong, and the parent only sees the summary.
         let subagentModel = readOnly ? (provider.cheapModel ?? model) : model
+
+        // S7.1: the child's window is the window of the model it will actually use.
+        // Taking the parent's number gives gemma (8k) a 128k budget.
+        let subagentWindow = window(for: provider, model: subagentModel, scope: .subagent).window
+        let composer = ContextComposer()
+        let schemaTokens = await registry.schemaTokenCost()
+        var context = SubagentContext(prompt: prompt, baseSystem: system)
 
         var answer = ""
         var lastError: String?
@@ -677,8 +677,56 @@ final class ChatStore {
         var callsUsed = 0
         var budget = SubagentBudget()
         var truncated = false
-        // 12 rounds instead of 8: real investigations need a few reads, and the old cap
-        // was silently hit, which is exactly how the subagent came back empty.
+
+        /// S7.3: prune, then fold, then check. Pruning is free; a fold costs a request,
+        /// so it only runs when the cheaper pass did not buy enough room.
+        func prepare() async -> [ProviderMessage]? {
+            func makePlan() -> ContextPlan {
+                composer.plan(
+                    systemPrompt: context.system,
+                    messages: context.contextMessages(),
+                    contextWindow: subagentWindow,
+                    thresholdPercent: compactionThreshold,
+                    summaryTokens: TokenEstimator.tokens(in: context.summary),
+                    toolTokens: schemaTokens
+                )
+            }
+            var plan = makePlan()
+            if plan.isOverThreshold {
+                let prune = ToolOutputPruner.plan(
+                    messages: context.journal,
+                    mode: .always,
+                    compactionHappened: true,
+                    threshold: Tuning.toolOutputPruneBatchTokens,
+                    protectedSteps: SubagentContext.protectedSteps
+                )
+                if !prune.isEmpty {
+                    context.applyPrune(prune.replacements)
+                    Self.logLatency("subagent id=\(childID) prune results=\(prune.replacements.count) "
+                        + "chars=\(prune.cutChars)")
+                    plan = makePlan()
+                }
+            }
+            while plan.isOverThreshold, context.folds < SubagentContext.maxFolds {
+                let ids = Set(plan.compacted.map(\.id)).filter { $0 > 0 }
+                guard !ids.isEmpty else { break }
+                guard let merged = await foldSubagentSummary(
+                    previous: context.summary, text: context.foldText(ids: ids),
+                    provider: provider, model: subagentModel
+                ) else { break }
+                context.applyFold(ids: ids, summary: merged)
+                Self.logLatency("subagent id=\(childID) fold=\(context.folds) "
+                    + "window=\(subagentWindow) summary_chars=\(merged.count)")
+                plan = makePlan()
+            }
+            guard !plan.isOverThreshold else {
+                truncated = true
+                lastError = "контекст кончился: окно \(subagentWindow), свёрток \(context.folds)"
+                return nil
+            }
+            return context.messages(included: plan.included.map(\.id))
+        }
+
         loop: for _ in 0..<Tuning.subagentSteps {
             // D8: an interrupt from the parent (or the user) stops before the next
             // round instead of after the child's own budget runs out.
@@ -696,33 +744,58 @@ final class ChatStore {
             }
             steps += 1
             await subagents.update(childID, step: steps, maxSteps: Tuning.subagentSteps)
+            guard var history = await prepare() else { break loop }
             var streamed = ""
             var calls: [ToolCall] = []
+            var attempt = 0
 
-            let stream = client.stream(
-                provider: provider,
-                model: subagentModel,
-                messages: history,
-                tools: await registry.schemas(),
-                cacheKey: promptCacheKey
-            )
-
-            do {
-                for try await event in stream {
-                    switch event {
-                    case .delta(let chunk):
-                        streamed += chunk
-                    case .toolCall(let call):
-                        calls.append(call)
-                    default:
+            while true {
+                do {
+                    streamed = ""
+                    calls = []
+                    for try await event in client.stream(
+                        provider: provider,
+                        model: subagentModel,
+                        messages: history,
+                        tools: await registry.schemas(),
+                        cacheKey: promptCacheKey
+                    ) {
+                        switch event {
+                        case .delta(let chunk):
+                            streamed += chunk
+                        case .toolCall(let call):
+                            calls.append(call)
+                        default:
+                            break
+                        }
+                    }
+                    break
+                } catch let error as ProviderError where error.isContextOverflow
+                    && attempt < Self.overflowShrinkSteps.count {
+                    // S7.4: same ladder as the parent. One 400 used to end the run.
+                    let fraction = Self.overflowShrinkSteps[attempt]
+                    attempt += 1
+                    let ids = context.shrinkIDs(fraction: fraction, window: subagentWindow)
+                    guard !ids.isEmpty,
+                          let merged = await foldSubagentSummary(
+                              previous: context.summary, text: context.foldText(ids: ids),
+                              provider: provider, model: subagentModel
+                          ) else {
+                        lastError = "ошибка стрима: \(error.localizedDescription)"
                         break
                     }
+                    context.applyFold(ids: ids, summary: merged)
+                    Self.logLatency("subagent id=\(childID) overflow_retry fraction=\(fraction) "
+                        + "folds=\(context.folds)")
+                    guard let rebuilt = await prepare() else { break }
+                    history = rebuilt
+                } catch {
+                    lastError = "ошибка стрима: \(error.localizedDescription)"
+                    answer += streamed
+                    break loop
                 }
-            } catch {
-                lastError = "ошибка стрима: \(error.localizedDescription)"
-                answer += streamed
-                break
             }
+            if lastError != nil { break loop }
 
             answer += streamed
 
@@ -733,36 +806,41 @@ final class ChatStore {
                 truncated = true
                 break loop
             case .wrapUp:
-                history.append(ProviderMessage(role: .system, content: budget.wrapUpInstruction))
+                context.append(ChatMessage(role: .user, text: budget.wrapUpInstruction))
             case .proceed:
                 break
             }
 
-            history.append(ProviderMessage(role: .assistant, content: streamed, toolCalls: calls))
             callsUsed += calls.count
+            var exchanges: [ToolExchange] = []
             for call in calls {
                 await subagents.update(childID, calls: callsUsed, lastTool: call.name)
                 let result = await registry.execute(call)
-                history.append(ProviderMessage(
-                    role: .tool,
-                    content: String(result.output.prefix(10_000)),
-                    toolCallID: call.id
+                exchanges.append(ToolExchange(
+                    callID: call.id,
+                    name: call.name,
+                    arguments: call.arguments,
+                    output: String(result.output.prefix(10_000)),
+                    isError: result.isError
                 ))
             }
+            context.append(ChatMessage(role: .assistant, text: streamed, exchanges: exchanges))
         }
 
         // Models often end on a tool call and never say anything. One request without
         // tools forces a textual summary from what was already gathered.
         var text = answer.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
-            history.append(ProviderMessage(
+            context.append(ChatMessage(
                 role: .user,
-                content: "Сформулируй итог по уже выполненному: факты и пути, без новых вызовов."
+                text: "Сформулируй итог по уже выполненному: факты и пути, без новых вызовов."
             ))
             do {
                 var summary = ""
                 for try await event in client.stream(
-                    provider: provider, model: subagentModel, messages: history, tools: [],
+                    provider: provider, model: subagentModel,
+                    messages: context.messages(included: context.contextMessages().map(\.id)),
+                    tools: [],
                     cacheKey: promptCacheKey
                 ) {
                     if case .delta(let chunk) = event { summary += chunk }
@@ -778,12 +856,46 @@ final class ChatStore {
         if truncated, findings.count == text.count {
             findings += "\n…[обрезано по бюджету: остановлен после \(callsUsed) вызовов]"
         }
+        if truncated, let lastError, findings.isEmpty {
+            findings = lastError
+        }
 
         Self.logLatency("subagent id=\(childID) steps=\(steps) calls=\(callsUsed) "
-            + "truncated=\(truncated) empty=\(findings.isEmpty) error=\(lastError ?? "-")")
+            + "truncated=\(truncated) folds=\(context.folds) empty=\(findings.isEmpty) "
+            + "error=\(lastError ?? "-")")
         return SubagentOutcome(
             text: findings, error: lastError, steps: steps, calls: callsUsed, truncated: truncated
         )
+    }
+
+    /// S7.3: merges new work into the existing summary instead of replacing it, so a
+    /// second fold never loses the first half of the task.
+    private func foldSubagentSummary(
+        previous: String,
+        text: String,
+        provider: ProviderModel,
+        model: String
+    ) async -> String? {
+        guard !text.isEmpty else { return previous.isEmpty ? nil : previous }
+        let body = SubagentContext.mergeBody(previous: previous, text: text)
+        let history = [
+            ProviderMessage(role: .system, content: Prompts.subagentFold),
+            ProviderMessage(role: .user, content: body)
+        ]
+        do {
+            var out = ""
+            for try await event in client.stream(
+                provider: provider, model: model, messages: history, tools: [],
+                cacheKey: promptCacheKey
+            ) {
+                if case .delta(let chunk) = event { out += chunk }
+            }
+            let trimmed = out.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? (previous.isEmpty ? nil : previous) : trimmed
+        } catch {
+            Self.logLatency("subagent fold failed: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// S1: `caller` keeps the old synchronous shape; `parent` starts the child in the
@@ -854,9 +966,14 @@ final class ChatStore {
 
     /// R34.2: the window actually used for budgets. A known model name wins over the
     /// stored number unless the person set the number explicitly.
-    func window(for provider: ProviderModel, model: String) -> ContextWindowResolution {
+    func window(
+        for provider: ProviderModel,
+        model: String,
+        scope: ModelContextPreferences.Scope = .main
+    ) -> ContextWindowResolution {
         ModelContextPreferences.resolve(
-            providerID: provider.id, model: model, providerWindow: provider.contextWindow
+            providerID: provider.id, model: model, providerWindow: provider.contextWindow,
+            scope: scope
         )
     }
 
