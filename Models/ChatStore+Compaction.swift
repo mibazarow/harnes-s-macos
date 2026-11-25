@@ -226,7 +226,9 @@ extension ChatStore {
     /// converged scales the default with the real ratio; an unproven one keeps it.
     func pruneThreshold(provider: ProviderModel, model: String) async -> Int {
         let base = Tuning.toolOutputPruneBatchTokens
-        guard let drift = await calibration.drift(providerID: provider.id, model: model),
+        guard let drift = await calibration.drift(
+            providerID: provider.id, model: model, envelopeHash: prefixHash
+        ),
               drift.withinTolerance else { return base }
         let scaled = Int(Double(base) * drift.ratio)
         return min(max(scaled, base / 2), base * 2)
@@ -368,7 +370,7 @@ extension ChatStore {
     }
 
     func compactIfNeeded(provider: ProviderModel, model: String, services: AppServices) async {
-        let scale = await calibration.scale(providerID: provider.id, model: model)
+        let scale = await calibration.scale(providerID: provider.id, model: model, envelopeHash: prefixHash)
         let plan = contextPlan(
             contextWindow: window(for: provider, model: model).window,
             thresholdPercent: compactionThreshold,
@@ -420,7 +422,9 @@ extension ChatStore {
         model: String,
         services: AppServices
     ) async {
-        guard let sample = await calibration.lastSample(providerID: provider.id, model: model) else { return }
+        guard let sample = await calibration.lastSample(
+            providerID: provider.id, model: model, envelopeHash: prefixHash
+        ) else { return }
         let usable = composer.budget(
             for: window(for: provider, model: model).window,
             thresholdPercent: compactionThreshold
@@ -725,7 +729,7 @@ extension ChatStore {
             + completed.reduce(0) { $0 + $1.tokens }
 
         if await compact(completed, provider: provider, model: model, services: services) {
-            let measured = await calibration.lastMeasured(providerID: provider.id, model: model)
+            let measured = await calibration.lastMeasured(providerID: provider.id, model: model, envelopeHash: prefixHash)
             let providerNote = measured.map { " Провайдер в прошлый раз сообщил prompt_tokens=\($0)." } ?? ""
             return "История сжата: \(completed.count) сообщений свёрнуты в саммари. "
                 + "Локальная оценка до сжатия — \(localEstimate) токенов.\(providerNote) "

@@ -322,16 +322,25 @@ final class ChatStore {
             registry: registry,
             cacheKey: promptCacheKey
         )
+        let envelope = prefixHash
         loop.onUsage = { measured, estimated in
             await calibration.record(
-                providerID: provider.id, model: model, measured: measured, estimated: estimated
+                providerID: provider.id, model: model, measured: measured,
+                estimated: estimated, envelopeHash: envelope
             )
             // R31.4: the estimate is what the window and the compaction trigger are
             // built from, so a silent drift is a budget bug nobody sees. One line per
             // request, with the twenty-request average next to it.
-            let drift = await calibration.drift(providerID: provider.id, model: model)
+            let drift = await calibration.drift(
+                providerID: provider.id, model: model, envelopeHash: envelope
+            )
+            // D7: say whether this request's ratio is usable for scaling or only an
+            // estimate: a mismatched envelope never becomes a factor.
+            let basis = await calibration.scale(
+                providerID: provider.id, model: model, envelopeHash: envelope
+            ) == 1 ? "estimated" : "usage"
             Self.logLatency(TokenCalibration.logLine(
-                measured: measured, estimated: estimated, drift: drift
+                measured: measured, estimated: estimated, drift: drift, basis: basis
             ))
         }
 
@@ -435,7 +444,7 @@ final class ChatStore {
                             + "prompt_tokens=\(promptTokens) completion_tokens=\(completionTokens) "
                             + "cache_ratio=\(ratio)% prefix_hash=\(prefixHash)"
                         )
-                        estimateScale = await calibration.scale(providerID: provider.id, model: model)
+                        estimateScale = await calibration.scale(providerID: provider.id, model: model, envelopeHash: prefixHash)
                         do {
                             let cost = UsageService.cost(
                                 promptTokens: promptTokens,
@@ -1041,7 +1050,7 @@ final class ChatStore {
         compactedInWindow = false
 
         var system = await buildSystemPrompt(services: services)
-        let scale = await calibration.scale(providerID: provider.id, model: model)
+        let scale = await calibration.scale(providerID: provider.id, model: model, envelopeHash: prefixHash)
         estimateScale = scale
 
         // Measured before pruning, on purpose: the line after it describes a smaller
@@ -1092,7 +1101,7 @@ final class ChatStore {
         // reported a prompt above the threshold. Then the measurement wins.
         if let services {
             let budget = composer.budget(for: contextWindow, thresholdPercent: compactionThreshold)
-            let sample = await calibration.lastSample(providerID: provider.id, model: model)
+            let sample = await calibration.lastSample(providerID: provider.id, model: model, envelopeHash: prefixHash)
             let decision = PromptPressure.decide(
                 estimated: plan.usedTokens,
                 measured: sample?.measured,

@@ -61,3 +61,42 @@ final class TokenDriftTests: XCTestCase {
         )
     }
 }
+
+/// D7: a sample from a different request envelope is a different experiment.
+final class EnvelopeCalibrationTests: XCTestCase {
+    func testSamplesFromDifferentEnvelopesDoNotMix() async {
+        let calibration = TokenCalibration(database: nil)
+        await calibration.record(providerID: "p", model: "m", measured: 2_000,
+                                 estimated: 1_000, envelopeHash: "A")
+        await calibration.record(providerID: "p", model: "m", measured: 1_000,
+                                 estimated: 1_000, envelopeHash: "B")
+
+        let a = await calibration.scale(providerID: "p", model: "m", envelopeHash: "A")
+        let b = await calibration.scale(providerID: "p", model: "m", envelopeHash: "B")
+        let unknown = await calibration.scale(providerID: "p", model: "m", envelopeHash: "C")
+
+        XCTAssertEqual(a, 1.6, accuracy: 0.001, "A масштабируется только своим замером")
+        XCTAssertEqual(b, 1.0, accuracy: 0.001)
+        XCTAssertEqual(unknown, 1.0, "без своего замера — только оценка")
+    }
+
+    func testDriftIgnoresOtherEnvelopes() async {
+        let calibration = TokenCalibration(database: nil)
+        for _ in 0..<3 {
+            await calibration.record(providerID: "p", model: "m", measured: 1_500,
+                                     estimated: 1_000, envelopeHash: "A")
+        }
+        await calibration.record(providerID: "p", model: "m", measured: 1_000,
+                                 estimated: 1_000, envelopeHash: "B")
+
+        let driftA = await calibration.drift(providerID: "p", model: "m", envelopeHash: "A")
+        XCTAssertEqual(driftA?.samples, 3)
+        XCTAssertEqual(driftA?.ratio ?? 0, 1.5, accuracy: 0.001)
+    }
+
+    func testLogLineNamesTheBasis() {
+        let line = TokenCalibration.logLine(measured: 900, estimated: 1_000, drift: nil,
+                                            basis: "estimated")
+        XCTAssertTrue(line.contains("basis=estimated"), line)
+    }
+}

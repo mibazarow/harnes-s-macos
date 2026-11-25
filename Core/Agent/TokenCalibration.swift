@@ -12,6 +12,11 @@ actor TokenCalibration {
         var measured: Int
         var estimated: Int
         var at: String
+        /// D7: hash of the canonical request envelope (provider, model, system blocks,
+        /// tool schemas). A ratio measured against a different envelope is a different
+        /// experiment and must not move this one. Optional: samples written before the
+        /// field existed decode as `nil`.
+        var envelopeHash: String?
 
         var ratio: Double {
             guard estimated > 0 else { return 1 }
@@ -39,11 +44,20 @@ actor TokenCalibration {
         self.database = database
     }
 
-    func record(providerID: String, model: String, measured: Int, estimated: Int) {
+    func record(
+        providerID: String,
+        model: String,
+        measured: Int,
+        estimated: Int,
+        envelopeHash: String = ""
+    ) {
         guard measured > 0, estimated > 0 else { return }
         let key = Self.key(providerID, model)
-        let sample = Sample(measured: measured, estimated: estimated, at: Timestamps.now())
-        cache[key] = sample
+        let sample = Sample(
+            measured: measured, estimated: estimated, at: Timestamps.now(),
+            envelopeHash: envelopeHash
+        )
+        cache[Self.cacheKey(key, envelopeHash)] = sample
 
         var window = recent[key] ?? []
         window.append(sample)
@@ -72,8 +86,10 @@ actor TokenCalibration {
 
     /// R31.4: how far the local estimate sits from what the provider billed, averaged
     /// over the last `driftWindow` requests for this model.
-    func drift(providerID: String, model: String) -> Drift? {
-        let window = recent[Self.key(providerID, model)] ?? []
+    func drift(providerID: String, model: String, envelopeHash: String = "") -> Drift? {
+        let window = (recent[Self.key(providerID, model)] ?? []).filter {
+            ($0.envelopeHash ?? "") == envelopeHash
+        }
         guard !window.isEmpty else { return nil }
         let ratios = window.map(\.ratio)
         let average = ratios.reduce(0, +) / Double(ratios.count)
@@ -88,11 +104,12 @@ actor TokenCalibration {
     static func logLine(
         measured: Int,
         estimated: Int,
-        drift: Drift?
+        drift: Drift?,
+        basis: String = "usage"
     ) -> String {
         let ratio = estimated > 0 ? Double(measured) / Double(estimated) : 0
         var line = "token_estimate est=\(estimated) actual=\(measured) "
-            + String(format: "ratio=%.2f", ratio)
+            + String(format: "ratio=%.2f", ratio) + " basis=\(basis)"
         if let drift {
             line += String(
                 format: " avg%d=%.2f dev=%.0f%%",
@@ -104,24 +121,30 @@ actor TokenCalibration {
     }
 
     /// Multiplier for local estimates. 1 when nothing has been measured yet.
-    func scale(providerID: String, model: String) -> Double {
-        guard let sample = sample(providerID: providerID, model: model) else { return 1 }
+    func scale(providerID: String, model: String, envelopeHash: String = "") -> Double {
+        guard let sample = sample(providerID: providerID, model: model, envelopeHash: envelopeHash)
+        else { return 1 }
         return Self.clamp(sample.ratio)
     }
 
-    func lastMeasured(providerID: String, model: String) -> Int? {
-        sample(providerID: providerID, model: model)?.measured
+    func lastMeasured(providerID: String, model: String, envelopeHash: String = "") -> Int? {
+        sample(providerID: providerID, model: model, envelopeHash: envelopeHash)?.measured
     }
 
     /// The estimate behind `lastMeasured`. Without it the measured number cannot be
     /// scaled to a prompt whose history has changed since (R15.8).
-    func lastSample(providerID: String, model: String) -> (measured: Int, estimated: Int)? {
-        sample(providerID: providerID, model: model).map { ($0.measured, $0.estimated) }
+    func lastSample(
+        providerID: String,
+        model: String,
+        envelopeHash: String = ""
+    ) -> (measured: Int, estimated: Int)? {
+        sample(providerID: providerID, model: model, envelopeHash: envelopeHash)
+            .map { ($0.measured, $0.estimated) }
     }
 
     func reset(providerID: String, model: String) {
         let key = Self.key(providerID, model)
-        cache[key] = nil
+        cache = cache.filter { !$0.key.hasPrefix(key + "#") }
         recent[key] = nil
         guard let database else { return }
         try? database.queue.write { db in
@@ -133,18 +156,25 @@ actor TokenCalibration {
         min(max(ratio, minScale), maxScale)
     }
 
-    private func sample(providerID: String, model: String) -> Sample? {
+    /// Only a sample measured against the same envelope counts. Anything else is a
+    /// different experiment: the estimate would be scaled by an unrelated request.
+    private func sample(providerID: String, model: String, envelopeHash: String) -> Sample? {
         let key = Self.key(providerID, model)
-        if let sample = cache[key] { return sample }
-        guard let database else { return nil }
+        if let cached = cache[Self.cacheKey(key, envelopeHash)] { return cached }
+        // On disk only the last sample survives; it counts only for its own envelope.
+        guard let database,
+              let raw = try? database.queue.read({ db in
+                  try AppStateStore.read(db, key: key)
+              }),
+              let data = raw.data(using: .utf8),
+              let stored = try? JSONDecoder().decode(Sample.self, from: data),
+              (stored.envelopeHash ?? "") == envelopeHash else { return nil }
+        cache[Self.cacheKey(key, envelopeHash)] = stored
+        return stored
+    }
 
-        let raw: String? = try? database.queue.read { db in
-            try AppStateStore.read(db, key: key)
-        }
-        guard let raw, let data = raw.data(using: .utf8),
-              let sample = try? JSONDecoder().decode(Sample.self, from: data) else { return nil }
-        cache[key] = sample
-        return sample
+    private static func cacheKey(_ key: String, _ envelopeHash: String) -> String {
+        key + "#" + envelopeHash
     }
 
     private static func key(_ providerID: String, _ model: String) -> String {
