@@ -53,6 +53,9 @@ final class ChatStore {
     var compactionCooldownUntil: Date?
     /// Calibration of the local token estimate against provider-reported usage.
     let calibration: TokenCalibration
+    /// D8: named, bounded children of this store. Shared by the parent and any child
+    /// registry so depth and interrupts see the same tree.
+    let subagents = SubagentRegistry()
     /// Scale applied to every "does it fit" decision, refreshed from `calibration`.
     var estimateScale: Double = 1
     /// What the composer shows about the context window. Snapshotted once per request
@@ -577,7 +580,9 @@ final class ChatStore {
         provider: ProviderModel,
         model: String,
         services: AppServices,
-        trustCandidates: [TrustCandidate]
+        trustCandidates: [TrustCandidate],
+        delivery: SubagentDelivery,
+        childID: String
     ) async -> SubagentOutcome {
         // A subagent is its own turn for the GUI budget, but shares the abort flag: the
         // stop hotkey must kill a runaway child too.
@@ -628,7 +633,9 @@ final class ChatStore {
                 log: { line in ChatStore.logLatency(line) }
             ),
             catalog: toolCatalog,
-            processes: backgroundProcesses
+            processes: backgroundProcesses,
+            subagents: subagents,
+            callerID: childID
         )
 
         let system = Prompts.system + """
@@ -658,6 +665,13 @@ final class ChatStore {
         // 12 rounds instead of 8: real investigations need a few reads, and the old cap
         // was silently hit, which is exactly how the subagent came back empty.
         loop: for _ in 0..<12 {
+            // D8: an interrupt from the parent (or the user) stops before the next
+            // round instead of after the child's own budget runs out.
+            if await subagents.isCancelled(childID) {
+                truncated = true
+                lastError = "подагент остановлен родителем"
+                break loop
+            }
             steps += 1
             var streamed = ""
             var calls: [ToolCall] = []
@@ -741,8 +755,14 @@ final class ChatStore {
             findings += "\n…[обрезано по бюджету: остановлен после \(callsUsed) вызовов]"
         }
 
-        Self.logLatency("subagent steps=\(steps) calls=\(callsUsed) truncated=\(truncated) "
-            + "empty=\(findings.isEmpty) error=\(lastError ?? "-")")
+        Self.logLatency("subagent id=\(childID) steps=\(steps) calls=\(callsUsed) "
+            + "truncated=\(truncated) empty=\(findings.isEmpty) error=\(lastError ?? "-")")
+        // D8: `parent` announces the child in the transcript; `caller` returns the
+        // result only, leaving the parent to decide what the user sees.
+        if delivery == .parent, !findings.isEmpty {
+            let firstLine = findings.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
+            notice("Подагент \(childID): " + (firstLine.count > 160 ? String(firstLine.prefix(160)) + "…" : firstLine))
+        }
         return SubagentOutcome(
             text: findings, error: lastError, steps: steps, calls: callsUsed, truncated: truncated
         )
@@ -1183,10 +1203,11 @@ final class ChatStore {
             fileSafety: services.fileSafety,
             todos: services.todos,
             readOnly: planMode,
-            subagent: { [weak self] prompt, readOnly in
+            subagent: { [weak self] prompt, readOnly, delivery, childID in
                 await self?.runSubagent(
                     prompt: prompt, readOnly: readOnly, provider: provider,
-                    model: model, services: services, trustCandidates: trustCandidates
+                    model: model, services: services, trustCandidates: trustCandidates,
+                    delivery: delivery, childID: childID
                 ) ?? SubagentOutcome(text: "", error: "сессия закрыта")
             },
             ledger: services.fileLedger,
@@ -1207,7 +1228,9 @@ final class ChatStore {
             ),
             catalog: toolCatalog,
             processes: backgroundProcesses,
-            memoryUsage: memoryUsage
+            memoryUsage: memoryUsage,
+            subagents: subagents,
+            callerID: SubagentRegistry.root
         )
     }
 

@@ -557,7 +557,10 @@ extension ToolRegistry {
             parameters: schema([
                 "prompt": ["type": "string", "description": "Full self-contained instruction"],
                 "read_only": ["type": "boolean", "description": "true = investigation only, no edits"],
-                "paths": ["type": "array", "items": ["type": "string"], "description": "Files or folders to include verbatim so the subagent does not search again"]
+                "paths": ["type": "array", "items": ["type": "string"], "description": "Files or folders to include verbatim so the subagent does not search again"],
+                "delivery": ["type": "string", "enum": ["parent", "caller"], "description": "parent (default) also announces the child in the transcript; caller returns the result only"],
+                "interrupt": ["type": "string", "description": "Name of a running child (agent-N) to stop instead of starting a new one"],
+                "reason": ["type": "string", "description": "Why the child is stopped"]
             ], required: ["prompt"])
         ),
         ToolDefinition(

@@ -24,6 +24,37 @@ extension ToolRegistry {
         }
         let readOnly = Self.bool(args, "read_only") ?? true
 
+        // D8: interrupting is an action of `task`, not a second tool: the catalog is a
+        // permanent context cost, and the parent already has this one loaded.
+        if let target = args["interrupt"] as? String, !target.isEmpty {
+            guard let subagents else { return .fail("Подагенты недоступны") }
+            let reason = (args["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let line = await subagents.interrupt(
+                target: target, by: callerID, reason: reason?.isEmpty == false ? reason! : "остановлен родителем"
+            )
+            return line.hasPrefix("Подагент ") ? .ok(line) : .fail(line)
+        }
+
+        let delivery = SubagentDelivery(rawValue: (args["delivery"] as? String) ?? "parent") ?? .parent
+        // A registry without a tree (unit tests, an embedded caller) still runs the
+        // child; it just has no name to interrupt.
+        var childID = callerID
+        if let subagents {
+            do {
+                childID = try await subagents.begin(
+                    parent: isSubagent ? callerID : SubagentRegistry.root
+                ).id
+            } catch {
+                return .fail(error.localizedDescription)
+            }
+        }
+        let reserved = childID
+        defer {
+            if let subagents, reserved != callerID {
+                Task { await subagents.end(reserved) }
+            }
+        }
+
         // Paths the caller already found are passed along verbatim. Without this the
         // subagent starts from zero and re-searches the whole workspace.
         var context = prompt
@@ -48,7 +79,7 @@ extension ToolRegistry {
             context += "\n\n## Уже найденные файлы (не искать заново)\n" + blocks.joined(separator: "\n\n")
         }
 
-        let outcome = await subagent(context, readOnly)
+        let outcome = await subagent(context, readOnly, delivery, childID)
         if outcome.isEmpty {
             // An empty answer is a failure, not a result. Name the likely cause so the
             // parent can retry with a narrower prompt instead of pretending it worked.

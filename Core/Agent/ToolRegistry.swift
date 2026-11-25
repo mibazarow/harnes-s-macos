@@ -112,7 +112,7 @@ struct ToolRegistry: Sendable {
     let todos: TodoStore?
     let processes: BackgroundProcessService?
     let readOnly: Bool
-    let subagent: (@Sendable (String, Bool) async -> SubagentOutcome)?
+    let subagent: (@Sendable (String, Bool, SubagentDelivery, String) async -> SubagentOutcome)?
     /// Session-scoped read state. Shared across turns so "read it first" survives the
     /// step boundary; a subagent gets its own because it has its own context.
     let ledger: FileReadingLedger
@@ -130,6 +130,10 @@ struct ToolRegistry: Sendable {
     let cancel: AgentAbortSignal
     /// R32.3: per-turn count of memory lookups, logged once at the end of the turn.
     let memoryUsage: MemoryUsageCounter?
+    /// D8: children of this registry. Nil for a registry that cannot spawn.
+    let subagents: SubagentRegistry?
+    /// Name of the agent owning this registry: `lead` or `agent-N`.
+    let callerID: String
 
     init(
         workspace: URL,
@@ -150,7 +154,7 @@ struct ToolRegistry: Sendable {
         fileSafety: FileSafetyService? = nil,
         todos: TodoStore? = nil,
         readOnly: Bool = false,
-        subagent: (@Sendable (String, Bool) async -> SubagentOutcome)? = nil,
+        subagent: (@Sendable (String, Bool, SubagentDelivery, String) async -> SubagentOutcome)? = nil,
         ledger: FileReadingLedger? = nil,
         skillScope: ActiveSkillScope? = nil,
         interceptors: ToolInterceptorChain = ToolInterceptorChain(),
@@ -158,7 +162,9 @@ struct ToolRegistry: Sendable {
         processes: BackgroundProcessService? = nil,
         repeatGuard: ToolRepeatGuard = ToolRepeatGuard(),
         cancel: AgentAbortSignal = .shared,
-        memoryUsage: MemoryUsageCounter? = nil
+        memoryUsage: MemoryUsageCounter? = nil,
+        subagents: SubagentRegistry? = nil,
+        callerID: String = SubagentRegistry.root
     ) {
         self.workspaceState = workspaceState ?? WorkspaceState(workspace)
         self.currentUserMessage = currentUserMessage
@@ -186,6 +192,8 @@ struct ToolRegistry: Sendable {
         self.repeatGuard = repeatGuard
         self.cancel = cancel
         self.memoryUsage = memoryUsage
+        self.subagents = subagents
+        self.callerID = callerID
     }
 
     static let mutatingTools: Set<String> = [
