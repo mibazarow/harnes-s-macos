@@ -40,15 +40,30 @@ actor SubagentRegistry {
         var title: String
         /// S2: when the child was reserved, for "работает 1:47".
         let startedAt: Date
+        var step: Int
+        var maxSteps: Int
+        var calls: Int
+        var lastTool: String?
+        var lastToolAt: Date?
         var cancelled: Bool
         var reason: String?
+        /// S2: set when the child moved to the archive.
+        var finishedAt: Date?
+        var outcome: String?
+
+        var isFinished: Bool { finishedAt != nil }
     }
 
     static let root = "lead"
 
     let limit: Int
     let maxDepth: Int
+    /// S2: completed children leave `children` but stay readable for a while. Without
+    /// this, `subagent_status(agent-2)` right after the report said "not found".
+    static let archiveLimit = 8
+    static let archiveTTL: TimeInterval = 30 * 60
     private var children: [String: Child] = [:]
+    private var finished: [Child] = []
     private var nextIndex = 1
 
     init(limit: Int = 4, maxDepth: Int = 2) {
@@ -75,14 +90,52 @@ actor SubagentRegistry {
         let id = "agent-\(nextIndex)"
         nextIndex += 1
         children[id] = Child(
-            id: id, parent: parent, depth: depth, title: title,
-            startedAt: Date(), cancelled: false, reason: nil
+            id: id, parent: parent, depth: depth, title: title, startedAt: Date(),
+            step: 0, maxSteps: Tuning.subagentSteps, calls: 0,
+            lastTool: nil, lastToolAt: nil, cancelled: false, reason: nil,
+            finishedAt: nil, outcome: nil
         )
         return Ticket(id: id, depth: depth)
     }
 
-    func end(_ id: String) {
-        children.removeValue(forKey: id)
+    /// Moves a live child to the archive. `outcome` is the short line the status shows.
+    func end(_ id: String, outcome: String? = nil) {
+        guard var child = children.removeValue(forKey: id) else { return }
+        child.finishedAt = Date()
+        child.outcome = outcome
+        finished.append(child)
+        trimArchive()
+    }
+
+    private func trimArchive() {
+        let cutoff = Date().addingTimeInterval(-Self.archiveTTL)
+        finished.removeAll { ($0.finishedAt ?? .distantPast) < cutoff }
+        if finished.count > Self.archiveLimit {
+            finished.removeFirst(finished.count - Self.archiveLimit)
+        }
+    }
+
+    /// S2: progress written from the child's loop. Cheap in-memory update, no database.
+    func update(
+        _ id: String,
+        step: Int? = nil,
+        maxSteps: Int? = nil,
+        calls: Int? = nil,
+        lastTool: String? = nil
+    ) {
+        guard var child = children[id] else { return }
+        if let step { child.step = step }
+        if let maxSteps { child.maxSteps = maxSteps }
+        if let calls { child.calls = calls }
+        if let lastTool {
+            child.lastTool = lastTool
+            child.lastToolAt = Date()
+        }
+        children[id] = child
+    }
+
+    func child(_ id: String) -> Child? {
+        children[id] ?? finished.last { $0.id == id }
     }
 
     func isCancelled(_ id: String) -> Bool {
@@ -111,8 +164,15 @@ actor SubagentRegistry {
         return "Подагент \(target) прерван: \(reason)."
     }
 
+    /// Live children only: the header shows what is running now.
     func snapshot() -> [Child] {
         children.values.sorted { $0.id < $1.id }
+    }
+
+    /// S2: live plus the archive, for `subagent_status`.
+    func snapshot(includingFinished: Bool) -> [Child] {
+        guard includingFinished else { return snapshot() }
+        return (Array(children.values) + finished).sorted { $0.id < $1.id }
     }
 
     private func isDescendant(_ id: String, of ancestor: String) -> Bool {

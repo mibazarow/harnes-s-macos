@@ -64,4 +64,8 @@ enum Tuning {
     /// and calls are what the log already measures.
     static let subagentSoftCalls = 200
     static let subagentHardCalls = 300
+
+    /// S0.8/S6: rounds a subagent may take before it has to report. It used to be a
+    /// literal 12 in the loop, invisible to the status line.
+    static let subagentSteps = 12
 }

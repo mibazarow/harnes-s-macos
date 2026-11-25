@@ -61,9 +61,9 @@ extension ToolRegistry {
         // synchronous child is removed here, awaited, so a status query right after the
         // call never sees a ghost.
         let reserved = childID
-        func finishChild() async {
+        func finishChild(_ outcome: SubagentOutcome?) async {
             if let subagents, reserved != callerID {
-                await subagents.end(reserved)
+                await subagents.end(reserved, outcome: outcome.map(ChatStore.subagentSummary))
             }
         }
 
@@ -95,7 +95,7 @@ extension ToolRegistry {
         if outcome.launched {
             return .ok(outcome.text)
         }
-        await finishChild()
+        await finishChild(outcome)
         if outcome.isEmpty {
             // An empty answer is a failure, not a result. Name the likely cause so the
             // parent can retry with a narrower prompt instead of pretending it worked.
@@ -104,6 +104,22 @@ extension ToolRegistry {
             return .fail("Подагент: \(reason). Уточни задачу или сузь paths.")
         }
         return .ok(String(outcome.text.prefix(20_000)))
+    }
+
+    /// S2: read-only. Interrupting stays in `task(interrupt:)` — one action, one path.
+    func subagentStatus(_ args: [String: Any]) async -> ToolResult {
+        guard let subagents else { return .fail("Подагенты недоступны") }
+        let includeFinished = Self.bool(args, "include_finished") ?? false
+        if let raw = args["id"] as? String,
+           !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let id = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let child = await subagents.child(id) else {
+                return .fail("Подагент \(id) не найден.")
+            }
+            return .ok(SubagentStatus.detail(child))
+        }
+        let list = await subagents.snapshot(includingFinished: includeFinished)
+        return .ok(SubagentStatus.list(list))
     }
 
     func todoWrite(_ args: [String: Any]) -> ToolResult {

@@ -679,7 +679,7 @@ final class ChatStore {
         var truncated = false
         // 12 rounds instead of 8: real investigations need a few reads, and the old cap
         // was silently hit, which is exactly how the subagent came back empty.
-        loop: for _ in 0..<12 {
+        loop: for _ in 0..<Tuning.subagentSteps {
             // D8: an interrupt from the parent (or the user) stops before the next
             // round instead of after the child's own budget runs out.
             if await subagents.isCancelled(childID) {
@@ -695,6 +695,7 @@ final class ChatStore {
                 break loop
             }
             steps += 1
+            await subagents.update(childID, step: steps, maxSteps: Tuning.subagentSteps)
             var streamed = ""
             var calls: [ToolCall] = []
 
@@ -740,6 +741,7 @@ final class ChatStore {
             history.append(ProviderMessage(role: .assistant, content: streamed, toolCalls: calls))
             callsUsed += calls.count
             for call in calls {
+                await subagents.update(childID, calls: callsUsed, lastTool: call.name)
                 let result = await registry.execute(call)
                 history.append(ProviderMessage(
                     role: .tool,
@@ -817,7 +819,7 @@ final class ChatStore {
                 services: services, trustCandidates: trustCandidates,
                 delivery: .parent, childID: childID, title: title
             )
-            await self.subagents.end(childID)
+            await self.subagents.end(childID, outcome: ChatStore.subagentSummary(outcome))
             await self.publishSubagentReport(childID: childID, title: title, outcome: outcome)
             await runner.finished(childID)
         }
@@ -826,6 +828,13 @@ final class ChatStore {
             text: "Подагент \(childID) запущен: \(title). Отчёт придёт в чат; статус — subagent_status.",
             launched: true
         )
+    }
+
+    /// S2: the one line the archive keeps. The full text lives in the transcript.
+    nonisolated static func subagentSummary(_ outcome: SubagentOutcome) -> String {
+        let source = outcome.text.isEmpty ? (outcome.error ?? "") : outcome.text
+        let first = source.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
+        return first.count > 200 ? String(first.prefix(200)) + "…" : first
     }
 
     /// S6: the report is a `.system` row with a marker. `.system` is filtered out of

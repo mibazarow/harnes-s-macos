@@ -578,6 +578,15 @@ extension ToolRegistry {
             ], required: ["prompt"])
         ),
         ToolDefinition(
+            name: "subagent_status",
+            exposure: .core,
+            description: "Status of subagents: step, last tool, elapsed. id = one agent; include_finished adds recent finished ones.",
+            parameters: schema([
+                "id": ["type": "string", "description": "agent-N; omit for all"],
+                "include_finished": ["type": "boolean", "description": "include recently finished agents"]
+            ], required: [])
+        ),
+        ToolDefinition(
             name: "todowrite",
             exposure: .core,
             description: "Publish, update or complete the visible plan: items replaces, update patches, complete ticks. 1-based.",

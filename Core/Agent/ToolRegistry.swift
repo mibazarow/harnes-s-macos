@@ -479,6 +479,7 @@ struct ToolRegistry: Sendable {
             case "file_versions": return try await fileVersions(args)
             case "restore_version": return try await restoreVersion(args)
             case "task": return await runSubagent(args)
+            case "subagent_status": return await subagentStatus(args)
             case "todowrite": return todoWrite(args)
             case "todo_read": return todoRead()
             case "git": return await gitTool(args)
