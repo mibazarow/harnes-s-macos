@@ -83,6 +83,39 @@ final class ToolCatalogState: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return Set(used)
     }
+
+    /// D11: one override layer over the built-in catalog. A name in `disabled` is not
+    /// offered to the model at all; a name in `replaced` is offered with that definition
+    /// instead. Nothing here touches the source of truth, so the rest of the catalog is
+    /// untouched by construction.
+    private var disabled: Set<String> = []
+    private var replaced: [String: ToolDefinition] = [:]
+
+    func disable(_ names: [String]) {
+        lock.lock(); defer { lock.unlock() }
+        disabled.formUnion(names)
+    }
+
+    func replace(_ definition: ToolDefinition) {
+        lock.lock(); defer { lock.unlock() }
+        replaced[definition.name] = definition
+        disabled.remove(definition.name)
+    }
+
+    func clearOverrides() {
+        lock.lock(); defer { lock.unlock() }
+        disabled.removeAll()
+        replaced.removeAll()
+    }
+
+    /// The catalog as the model will see it.
+    func applyOverrides(_ base: [ToolDefinition]) -> [ToolDefinition] {
+        lock.lock(); defer { lock.unlock() }
+        return base.compactMap { definition in
+            if disabled.contains(definition.name) { return nil }
+            return replaced[definition.name] ?? definition
+        }
+    }
 }
 
 /// Stateless dispatcher: every dependency is an injected actor or a value.
@@ -241,7 +274,7 @@ struct ToolRegistry: Sendable {
 // MARK: - Catalog and dispatch
     func schemas() async -> [ProviderToolSchema] {
         var allowed: [ToolDefinition] = []
-        for definition in Self.definitions {
+        for definition in catalog.applyOverrides(Self.definitions) {
             if readOnly, await isMutating(definition.name) { continue }
             if let skillScope, !(await skillScope.allows(definition.name)) { continue }
             allowed.append(definition)

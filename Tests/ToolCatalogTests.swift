@@ -64,3 +64,54 @@ final class ToolCatalogTests: XCTestCase {
         XCTAssertLessThanOrEqual(compact, Tuning.schemaTokenBudget, "compact=\(compact)")
     }
 }
+
+/// D11: one override layer over the built-in catalog.
+final class ToolOverridesTests: XCTestCase {
+    private func registry(_ catalog: ToolCatalogState) -> ToolRegistry {
+        ToolRegistry(
+            workspace: URL(fileURLWithPath: NSTemporaryDirectory()),
+            memory: nil, embeddings: nil, secrets: nil, skills: nil, mcp: nil,
+            catalog: catalog
+        )
+    }
+
+    func testDisablingOneToolLeavesTheRest() async {
+        let catalog = ToolCatalogState()
+        catalog.disable(["fs_read"])
+        let schemas = await registry(catalog).schemas()
+        XCTAssertFalse(schemas.contains { $0.name == "fs_read" })
+        XCTAssertTrue(schemas.contains { $0.name == "fs_list" })
+        XCTAssertTrue(schemas.contains { $0.name == "memory_search" })
+    }
+
+    func testReplacementChangesTheDefinition() async {
+        let catalog = ToolCatalogState()
+        var replacement = ToolRegistry.definitions.first { $0.name == "memory_search" }!
+        replacement = ToolDefinition(
+            name: replacement.name, exposure: .core,
+            description: "Подменённое описание", parameters: replacement.parameters
+        )
+        catalog.replace(replacement)
+        let schemas = await registry(catalog).schemas()
+        let tool = schemas.first { $0.name == "memory_search" }
+        XCTAssertEqual(tool?.description, "Подменённое описание")
+    }
+
+    func testDisableThenReplaceRestoresTheTool() async {
+        let catalog = ToolCatalogState()
+        let base = ToolRegistry.definitions.first { $0.name == "fs_read" }!
+        catalog.disable(["fs_read"])
+        catalog.replace(base)
+        let names = await registry(catalog).schemas().map(\.name)
+        XCTAssertTrue(names.contains("fs_read"))
+    }
+
+    func testClearingOverridesRestoresEverything() async {
+        let catalog = ToolCatalogState()
+        catalog.disable(["fs_read", "fs_list"])
+        catalog.clearOverrides()
+        let names = await registry(catalog).schemas().map(\.name)
+        XCTAssertTrue(names.contains("fs_read"))
+        XCTAssertTrue(names.contains("fs_list"))
+    }
+}
