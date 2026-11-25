@@ -5,9 +5,25 @@ import AppKit
 struct ToolResult: Sendable {
     let output: String
     let isError: Bool
+    /// D3: the canonical value behind `output`, present only when the tool declared an
+    /// output schema. `nil` on a tool that declares one is a developer error, not a
+    /// silent pass-through.
+    let canonicalValue: AnySendable?
+
+    init(output: String, isError: Bool, canonicalValue: AnySendable? = nil) {
+        self.output = output
+        self.isError = isError
+        self.canonicalValue = canonicalValue
+    }
 
     static func ok(_ text: String) -> ToolResult { ToolResult(output: text, isError: false) }
     static func fail(_ text: String) -> ToolResult { ToolResult(output: text, isError: true) }
+
+    /// A result whose value is checked against the tool's declared shape. `text` is the
+    /// rendering the model reads; `value` is what a replay or a caller can rely on.
+    static func canonical(_ value: [String: Any], text: String) -> ToolResult {
+        ToolResult(output: text, isError: false, canonicalValue: AnySendable(value))
+    }
 }
 
 /// How a definition travels in the catalog. `deferred` tools keep their name and one
@@ -24,6 +40,9 @@ struct ToolDefinition: Sendable {
     var exposure: ToolExposure = .normal
     let description: String
     let parameters: [String: AnySendable]
+    /// D3: declared shape of the result. When set, a successful result must come from
+    /// `ToolResult.canonical` and pass `ToolOutputContract`.
+    var outputSchema: [String: AnySendable]?
 }
 
 /// Session-scoped set of schemas the model asked to see in full.
@@ -336,10 +355,38 @@ struct ToolRegistry: Sendable {
                 // line only tells the person where the checkbox is.
                 result = .fail(result.output + "\n\n" + hint)
             }
+            if let problem = Self.outputProblem(tool: allowed.name, result: result) {
+                ChatStore.logLatency("tool_output_contract name=\(allowed.name) \(problem)")
+                result = .fail("Инструмент \(allowed.name) вернул значение, не проходящее "
+                    + "объявленную схему: \(problem). Это ошибка реализации инструмента, "
+                    + "а не аргументов.")
+            }
             repeatGuard.record(name: allowed.name, arguments: allowed.arguments, output: result.output)
             catalog.recordUse(allowed.name)
             return await interceptors.after(allowed, result: result, context: context)
         }
+    }
+
+    /// D3: `process` and `network` keep their human text; the canonical value is the
+    /// stable envelope a caller can read without parsing prose.
+    static func canonicalEnvelope(_ result: ToolResult, action: String) -> ToolResult {
+        guard !result.isError else { return result }
+        return .canonical(
+            ["action": action, "ok": true, "output": result.output],
+            text: result.output
+        )
+    }
+
+    /// `nil` when the tool declares no schema or the result is an error (errors are
+    /// free-form by design: they explain what went wrong).
+    static func outputProblem(tool: String, result: ToolResult) -> String? {
+        guard !result.isError,
+              let definition = ToolRegistry.definitions.first(where: { $0.name == tool }),
+              let schema = definition.outputSchema else { return nil }
+        guard let value = result.canonicalValue else {
+            return "каноническое значение отсутствует"
+        }
+        return ToolOutputContract.problem(value: value.value, schema: schema)
     }
 
     private func executeAllowed(_ call: ToolCall) async -> ToolResult {
@@ -434,8 +481,14 @@ struct ToolRegistry: Sendable {
             case "mouse": return mouseTool(args)
             case "clipboard": return clipboardTool(args)
             case "keyboard": return keyboardTool(args)
-            case "process": return await processTool(args)
-            case "network": return await networkTool(args)
+            case "process":
+                return Self.canonicalEnvelope(
+                    await processTool(args), action: args["action"] as? String ?? ""
+                )
+            case "network":
+                return Self.canonicalEnvelope(
+                    await networkTool(args), action: args["action"] as? String ?? ""
+                )
             case "watch": return watchTool(args)
             case "spotlight": return await spotlightTool(args)
             case "workspace": return workspaceTool(args)

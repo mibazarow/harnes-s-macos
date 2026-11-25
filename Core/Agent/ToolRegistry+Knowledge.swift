@@ -65,7 +65,11 @@ extension ToolRegistry {
             let item = try await memory.merge(ids: ids, into: text,
                                                allowPinned: Self.bool(args, "allow_pinned") == true)
             await MemoryIndexer.index(id: item.id, content: item.content, sink: embeddings)
-            return .ok("Сведено в #\(item.id): \(item.content). Источники сохранены по id; резервная копия создана до свёртки.")
+            return .canonical(
+                ["id": item.id, "content": item.content, "pinned": item.pinned],
+                text: "Сведено в #\(item.id): \(item.content). Источники сохранены по id; "
+                    + "резервная копия создана до свёртки."
+            )
         }
         let pinned = Self.bool(args, "pinned") ?? false
         let kind = ((args["kind"] as? String) ?? "fact").lowercased()
@@ -168,7 +172,10 @@ extension ToolRegistry {
         let note = unverified
             ? " " + MemoryClaim.note(for: nil)
             : (verifiedCommand.map { " " + MemoryClaim.note(for: $0) } ?? "")
-        return .ok("Запомнил #\(item.id)\(mark): \(item.content)\(replaced)\(note)")
+        return .canonical(
+            ["id": item.id, "content": item.content, "pinned": item.pinned],
+            text: "Запомнил #\(item.id)\(mark): \(item.content)\(replaced)\(note)"
+        )
     }
 
     func memoryForget(_ args: [String: Any]) async throws -> ToolResult {
@@ -206,11 +213,11 @@ extension ToolRegistry {
             memoryUsage?.recordCall()
             let overview = try await memory.overview()
             memoryUsage?.recordHits(overview.count)
-            guard !overview.isEmpty else { return .ok("Память пуста.") }
-            return .ok(overview.map { item in
+            let text = overview.isEmpty ? "Память пуста." : overview.map { item in
                 let mark = item.pinned ? "📌 " : ""
                 return "#\(item.id) \(mark)[\(item.kind)] \(item.content)"
-            }.joined(separator: "\n"))
+            }.joined(separator: "\n")
+            return Self.memoryHitsResult(query: "", items: overview, text: text)
         }
 
         memoryUsage?.recordCall()
@@ -219,7 +226,10 @@ extension ToolRegistry {
            let item = try await memory.item(id: id) {
             let destination = try await memory.successor(of: id)
             let suffix = destination.map { " ⤶ #\($0)" } ?? (item.archived ? " [архив]" : "")
-            return .ok("#\(item.id) [\(item.kind)] \(item.content)\(suffix)")
+            return Self.memoryHitsResult(
+                query: query, items: [item],
+                text: "#\(item.id) [\(item.kind)] \(item.content)\(suffix)"
+            )
         }
 
         if let embeddings {
@@ -233,15 +243,38 @@ extension ToolRegistry {
             let hits = outcome.hits
             memoryUsage?.recordHits(hits.count)
             if hits.isEmpty { await noteMiss(query) }
-            guard !hits.isEmpty else { return .ok("Ничего не найдено.") }
-            return .ok(MemoryContradiction.groupedSearchText(hits.prefix(8).map(\.item)))
+            guard !hits.isEmpty else {
+                return Self.memoryHitsResult(query: query, items: [], text: "Ничего не найдено.")
+            }
+            let top = Array(hits.prefix(8).map(\.item))
+            return Self.memoryHitsResult(
+                query: query, items: top,
+                text: MemoryContradiction.groupedSearchText(top)
+            )
         }
 
         let hits = try await memory.search(query)
         memoryUsage?.recordHits(hits.count)
         if hits.isEmpty { await noteMiss(query) }
-        guard !hits.isEmpty else { return .ok("Ничего не найдено.") }
-        return .ok(MemoryContradiction.groupedSearchText(Array(hits.prefix(8))))
+        guard !hits.isEmpty else {
+            return Self.memoryHitsResult(query: query, items: [], text: "Ничего не найдено.")
+        }
+        let top = Array(hits.prefix(8))
+        return Self.memoryHitsResult(
+            query: query, items: top, text: MemoryContradiction.groupedSearchText(top)
+        )
+    }
+
+    /// D3: the value behind `memory_search` — ids and texts a caller can reuse without
+    /// parsing the rendered block.
+    static func memoryHitsResult(query: String, items: [MemoryItem], text: String) -> ToolResult {
+        let hits: [[String: Any]] = items.map { item in
+            ["id": item.id, "kind": item.kind, "content": item.content, "pinned": item.pinned]
+        }
+        return .canonical(
+            ["query": query, "count": items.count, "hits": hits],
+            text: text
+        )
     }
 
     /// R32.4: an empty result over a non-empty memory is worth one log line.

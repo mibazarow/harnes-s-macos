@@ -316,7 +316,12 @@ extension ToolRegistry {
                 "lines": ["type": "integer", "description": "Lines, default 50"],
                 "filter": ["type": "string", "description": "ps: name substring; logs: line substring"],
                 "timeout_ms": ["type": "integer", "description": "wait timeout, default 30000"]
-            ], required: ["action"])
+            ], required: ["action"]),
+            outputSchema: schema([
+                "action": ["type": "string"],
+                "ok": ["type": "boolean"],
+                "output": ["type": "string"]
+            ], required: ["action", "ok", "output"])
         ),
         ToolDefinition(
             name: "display",
@@ -379,7 +384,12 @@ extension ToolRegistry {
                 "types": ["type": "array", "items": ["type": "string"], "description": "discover: services, default ssh/http/smb/ipp"],
                 "service": ["type": "string", "description": "proxy: network service, default Wi-Fi"],
                 "confirm": ["type": "boolean", "description": "wifi join, vpn restart, proxy set"]
-            ], required: ["action"])
+            ], required: ["action"]),
+            outputSchema: schema([
+                "action": ["type": "string"],
+                "ok": ["type": "boolean"],
+                "output": ["type": "string"]
+            ], required: ["action", "ok", "output"])
         ),
         ToolDefinition(
             name: "watch",
@@ -822,7 +832,12 @@ extension ToolRegistry {
                 "confirm": ["type": "boolean", "description": "User confirmed merging these ids into this text"],
                 "allow_pinned": ["type": "boolean", "description": "User explicitly authorized merging pinned sources"],
                 "verified_command": ["type": "string", "description": "Command that proved a claim of a result (released, works, done); without it such a record is saved unverified"]
-            ], required: ["text"])
+            ], required: ["text"]),
+            outputSchema: schema([
+                "id": ["type": "integer"],
+                "content": ["type": "string"],
+                "pinned": ["type": "boolean"]
+            ], required: ["id", "content", "pinned"])
         ),
         ToolDefinition(
             name: "memory_forget",
@@ -850,7 +865,12 @@ extension ToolRegistry {
             description: "Search saved memory. Without query: pinned records and recent decisions, ten lines.",
             parameters: schema([
                 "query": ["type": "string", "description": "Words to find; omit to see what is worth knowing"]
-            ], required: [])
+            ], required: []),
+            outputSchema: schema([
+                "query": ["type": "string"],
+                "count": ["type": "integer"],
+                "hits": ["type": "array"]
+            ], required: ["query", "count", "hits"])
         ),
         ToolDefinition(
             name: "secret_save",
