@@ -70,7 +70,7 @@ final class HotkeyPanelController: NSObject {
 
         let field = NSTextField(frame: .zero)
         field.placeholderString = "Спроси Харнеса…"
-        field.font = .systemFont(ofSize: 16)
+        field.font = .systemFont(ofSize: FontSize.panelField)
         field.focusRingType = .none
         field.bezelStyle = .roundedBezel
         field.target = self
@@ -79,14 +79,14 @@ final class HotkeyPanelController: NSObject {
         self.field = field
 
         let hint = NSTextField(labelWithString: "Return — отправить, Esc — закрыть")
-        hint.font = .systemFont(ofSize: 11)
+        hint.font = .systemFont(ofSize: FontSize.panelHint)
         hint.textColor = .secondaryLabelColor
 
         let stack = NSStackView(views: [field, hint])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        stack.spacing = Spacing.small
+        stack.edgeInsets = NSEdgeInsets(top: Spacing.large, left: Spacing.large, bottom: Spacing.large, right: Spacing.large)
         stack.translatesAutoresizingMaskIntoConstraints = false
         field.translatesAutoresizingMaskIntoConstraints = false
 
@@ -97,7 +97,7 @@ final class HotkeyPanelController: NSObject {
             stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             stack.topAnchor.constraint(equalTo: container.topAnchor),
             stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            field.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32)
+            field.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -(Spacing.offGrid32))
         ])
         panel.contentView = container
         return panel

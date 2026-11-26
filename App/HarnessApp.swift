@@ -16,6 +16,9 @@ struct HarnessApp: App {
                 .environment(model.providerDirectory)
         }
         .defaultSize(width: 980, height: 680)
+        // Native chrome: the toolbar belongs to the window, so dragging, zoom,
+        // Full Screen and Stage Manager all work without a hand-drawn header.
+        .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {}
 

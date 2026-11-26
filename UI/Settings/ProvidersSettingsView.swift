@@ -113,25 +113,26 @@ struct ProvidersSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                .padding(12)
+                .padding(Spacing.medium)
                 .background(.bar)
             }
         }
     }
 
     private func providerRow(_ provider: ProviderModel, services: AppServices) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: Spacing.offGrid10) {
             Circle()
                 .fill(color(for: provider.health))
-                .frame(width: 7, height: 7)
-                .padding(.top, 5)
+                .frame(width: Spacing.offGrid6 + Spacing.hairline, height: Spacing.offGrid6 + Spacing.hairline)
+                .padding(.top, Spacing.offGrid5)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: Spacing.offGrid3) {
                 Text(provider.name)
                     .fontWeight(.semibold)
 
+                // A host is an address, not prose: it keeps the mono face.
                 Text(provider.host)
-                    .font(AppFont.mono(11))
+                    .font(AppFont.mono(Size.iconSmall))
                     .foregroundStyle(.secondary)
 
                 Text("\(provider.summary) · \(provider.contextWindow.formatted()) контекст")
@@ -147,9 +148,9 @@ struct ProvidersSettingsView: View {
                 Image(systemName: "ellipsis")
             }
             .menuStyle(.borderlessButton)
-            .frame(width: 24)
+            .frame(width: Size.controlRegular)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, Spacing.tight)
         .contextMenu {
             rowActions(provider, services: services)
         }
@@ -290,7 +291,7 @@ struct ProviderEditorView: View {
                 Section("Подключение") {
                     TextField("Название", text: $provider.name)
                     TextField("Base URL", text: $provider.baseURL, prompt: Text("https://api.example.com/v1"))
-                        .font(AppFont.mono(13))
+                        .font(AppFont.mono(FontSize.transcriptDefault))
                     SecureField("Токен", text: $provider.apiKey)
 
                     HStack(spacing: 10) {
@@ -317,7 +318,7 @@ struct ProviderEditorView: View {
                     // row only says what this connection offers.
                     if provider.models.isEmpty {
                         TextField("Имя модели", text: modelBinding)
-                            .font(AppFont.mono(13))
+                            .font(AppFont.mono(FontSize.transcriptDefault))
                         Text("Можно ввести вручную или загрузить список кнопкой выше.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -330,9 +331,9 @@ struct ProviderEditorView: View {
                     HStack(spacing: 10) {
                         Text("Окно контекста")
                         TextField("", value: $provider.contextWindow, format: .number)
-                            .frame(width: 110)
+                            .frame(width: Spacing.offGrid32 * 3 + Spacing.offGrid14)
                             .multilineTextAlignment(.trailing)
-                            .font(AppFont.mono(13))
+                            .font(AppFont.mono(FontSize.transcriptDefault))
                             .onChange(of: provider.contextWindow) { _, _ in
                                 // R34.2: typing a number is an explicit override. The
                                 // model-derived value would otherwise silently replace it.
@@ -387,9 +388,9 @@ struct ProviderEditorView: View {
                     HStack(spacing: 10) {
                         Text("Окно контекста подагентов")
                         TextField("", value: subagentWindowBinding(model: subagentName), format: .number)
-                            .frame(width: 110)
+                            .frame(width: Spacing.offGrid32 * 3 + Spacing.offGrid14)
                             .multilineTextAlignment(.trailing)
-                            .font(AppFont.mono(13))
+                            .font(AppFont.mono(FontSize.transcriptDefault))
                         Stepper("", value: subagentWindowBinding(model: subagentName),
                                 in: 2_000...4_000_000, step: 8_000)
                             .labelsHidden()
@@ -419,7 +420,7 @@ struct ProviderEditorView: View {
                             systemImage: "exclamationmark.triangle"
                         )
                         .font(.caption)
-                        .foregroundStyle(settings.theme.palette.reasoning)
+                        .foregroundStyle(settings.theme.tokens.warning)
                     }
 
                     Picker("Уровень размышлений", selection: $provider.reasoningLevel) {
@@ -441,8 +442,8 @@ struct ProviderEditorView: View {
                             step: 0.05
                         )
                         Text(provider.temperature.formatted(.number.precision(.fractionLength(2))))
-                            .font(AppFont.mono(13))
-                            .frame(width: 42, alignment: .trailing)
+                            .font(AppFont.mono(FontSize.transcriptDefault))
+                            .frame(width: Spacing.page + Spacing.hairline, alignment: .trailing)
                     }
 
                     Text("Насколько свободно модель выбирает слова. 0.2 — собранно и по делу; выше — живее, но многословнее. У каждого провайдера своя.")
@@ -452,8 +453,8 @@ struct ProviderEditorView: View {
                     HStack(spacing: 10) {
                         Text("Цена входа")
                         TextField("0", value: $provider.inputPrice, format: .number.precision(.fractionLength(0...4)))
-                            .font(AppFont.mono(13))
-                            .frame(width: 90)
+                            .font(AppFont.mono(FontSize.transcriptDefault))
+                            .frame(width: Spacing.offGrid32 * 3)
                         Text("за 1M токенов")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -462,8 +463,8 @@ struct ProviderEditorView: View {
                     HStack(spacing: 10) {
                         Text("Цена выхода")
                         TextField("0", value: $provider.outputPrice, format: .number.precision(.fractionLength(0...4)))
-                            .font(AppFont.mono(13))
-                            .frame(width: 90)
+                            .font(AppFont.mono(FontSize.transcriptDefault))
+                            .frame(width: Spacing.offGrid32 * 3)
                         Text("за 1M токенов")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -496,9 +497,9 @@ struct ProviderEditorView: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(saving || provider.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .padding(12)
+            .padding(Spacing.medium)
         }
-        .frame(width: 540, height: 500)
+        .frame(width: Spacing.offGrid32 * 17, height: Spacing.offGrid32 * 16)
         .interactiveDismissDisabled(saving)
     }
 

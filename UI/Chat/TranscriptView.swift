@@ -1,11 +1,11 @@
 import SwiftUI
 
 struct TranscriptView: View {
-    let palette: Palette
     let fontSize: CGFloat
     let showTimestamps: Bool
 
     @Environment(ChatStore.self) private var chat
+    @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var atBottom = true
@@ -32,23 +32,22 @@ struct TranscriptView: View {
                 // view holds at most `ChatStore.transcriptCap` messages, so laying them
                 // out eagerly is affordable — and unchanged rows are skipped by
                 // `equatable()`.
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: Spacing.offGrid10) {
                     if chat.isLoadingOlder || loadingOlder {
-                        HStack(spacing: 8) {
+                        HStack(spacing: Spacing.small) {
                             ProgressView()
                                 .controlSize(.small)
                             Text("загружаю историю…")
-                                .font(AppFont.mono(max(fontSize - 2, 9)))
-                                .foregroundStyle(palette.dim)
+                                .font(.caption)
+                                .foregroundStyle(theme.labelSecondary)
                         }
                         .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, Spacing.tight)
                     }
 
                     ForEach(displayed) { message in
                         MessageRow(
                             message: message,
-                            palette: palette,
                             fontSize: fontSize,
                             showTimestamp: showTimestamps,
                             animateReveal: chat.isStreaming || chat.revealID == message.id
@@ -62,7 +61,6 @@ struct TranscriptView: View {
                     ForEach(chat.queuedMessages) { message in
                         MessageRow(
                             message: message,
-                            palette: palette,
                             fontSize: fontSize,
                             showTimestamp: showTimestamps,
                             animateReveal: chat.isStreaming
@@ -73,23 +71,25 @@ struct TranscriptView: View {
                     }
 
                     Color.clear
-                        .frame(height: 1)
+                        .frame(height: Spacing.hairline)
                         .id(bottomID)
                 }
-                .padding(.horizontal, 0)
-                .padding(.vertical, 20)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Spacing.zero)
+                .padding(.vertical, Spacing.offGrid20)
+                // The chat column never grows past 1100 pt, whatever the window does.
+                .frame(maxWidth: Layout.chatContainer, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
                 // Selection is applied per block instead of once for the whole stack:
                 // the container-level modifier wrapped every run again, doubling the
                 // platform text views and slowing layout on every width change.
             }
-            .background(palette.background)
+            .background(theme.contentBackground)
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 let offset = geometry.contentOffset.y + geometry.contentInsets.top
                 return geometry.contentSize.height - offset - geometry.containerSize.height
             } action: { _, distance in
-                nearBottom = distance <= 80
-                atBottom = distance <= 120
+                nearBottom = distance <= Spacing.offGrid32 * 2 + Spacing.offGrid18
+                atBottom = distance <= Spacing.offGrid32 * 4
             }
             .onScrollPhaseChange { _, phase in
                 // Growth of the answer does not produce a scroll phase, so this is the
@@ -108,22 +108,22 @@ struct TranscriptView: View {
             }
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 let offset = geometry.contentOffset.y + geometry.contentInsets.top
-                let scrollable = geometry.contentSize.height > geometry.containerSize.height + 1
-                return scrollable && offset < 160
+                let scrollable = geometry.contentSize.height > geometry.containerSize.height + Spacing.hairline
+                return scrollable && offset < Spacing.offGrid32 * 5
             } action: { _, nearTop in
                 guard nearTop, chat.hasMoreHistory, !loadingOlder else { return }
                 Task { await loadOlder(proxy: proxy) }
             }
             .overlay(alignment: .bottomTrailing) {
                 if !atBottom && !follow {
-                    ScrollToBottomButton(palette: palette) {
+                    ScrollToBottomButton {
                         follow = true
                         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                             proxy.scrollTo(bottomID, anchor: .bottom)
                         }
                     }
-                    .padding(.trailing, 18)
-                    .padding(.bottom, 14)
+                    .padding(.trailing, Spacing.offGrid18)
+                    .padding(.bottom, Spacing.offGrid14)
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
                 }
             }
@@ -211,24 +211,20 @@ struct TranscriptView: View {
 }
 
 private struct ScrollToBottomButton: View {
-    let palette: Palette
     let action: () -> Void
 
+    @Environment(\.theme) private var theme
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: "arrow.down")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(palette.background)
-                .frame(width: 30, height: 30)
-                .background(hovering ? palette.reasoning : palette.accent)
-                .overlay(
-                    Circle()
-                        .stroke(palette.reasoning.opacity(hovering ? 0.9 : 0.35), lineWidth: 1)
-                )
+                .imageScale(.small)
+                .fontWeight(.bold)
+                .foregroundStyle(theme.onAccent)
+                .frame(width: Size.controlRegular + Spacing.offGrid6, height: Size.controlRegular + Spacing.offGrid6)
+                .background(hovering ? theme.accent.opacity(0.85) : theme.accent)
                 .clipShape(Circle())
-                .shadow(color: palette.accent.opacity(0.35), radius: 8, y: 2)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }

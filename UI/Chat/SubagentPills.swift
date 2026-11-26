@@ -1,27 +1,26 @@
 import SwiftUI
 
-/// S4: one pill per running child. A fact, not a control panel: no click, no popover,
-/// no steps. If the user wants details they ask, and `subagent_status` answers.
+/// One pill per running child. A fact, not a control panel: no click, no popover, no
+/// steps. Details come from `subagent_status` if the user asks.
 struct SubagentPills: View {
     let agents: [SubagentInfo]
-    let palette: Palette
+
+    @Environment(\.theme) private var theme
 
     static let visibleLimit = 3
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.offGrid6) {
             ForEach(agents.prefix(Self.visibleLimit)) { agent in
                 pill(agent)
             }
             if agents.count > Self.visibleLimit {
                 Text("+\(agents.count - Self.visibleLimit)")
-                    .font(AppFont.mono(11))
-                    .foregroundStyle(palette.dim)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(palette.panel)
-                    .overlay(Capsule().stroke(palette.border, lineWidth: 1))
-                    .clipShape(Capsule())
+                    .font(.caption2)
+                    .foregroundStyle(theme.labelSecondary)
+                    .padding(.horizontal, Spacing.small)
+                    .padding(.vertical, Spacing.offGrid2)
+                    .background(theme.labelQuaternary.opacity(0.15), in: Capsule())
                     .accessibilityLabel("Ещё \(agents.count - Self.visibleLimit) подагентов")
             }
         }
@@ -29,33 +28,30 @@ struct SubagentPills: View {
     }
 
     private func pill(_ agent: SubagentInfo) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: Spacing.offGrid5) {
             ProgressView()
-                .progressViewStyle(.circular)
                 .controlSize(.mini)
                 .scaleEffect(0.5)
-                .frame(width: 10, height: 10)
+                .frame(width: Spacing.offGrid10, height: Spacing.offGrid10)
             Text(agent.id)
-                .font(AppFont.mono(11))
-                .foregroundStyle(palette.dim)
+                .font(AppFont.mono(max(Size.iconSmall - 1, FontSize.minReadable)))
+                .foregroundStyle(theme.labelSecondary)
             Text(agent.title)
-                .font(AppFont.mono(11))
-                .foregroundStyle(palette.text)
+                .font(.caption2)
+                .foregroundStyle(theme.labelPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(maxWidth: 160, alignment: .leading)
+                .frame(maxWidth: Spacing.offGrid32 * 5, alignment: .leading)
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text(SubagentStatus.duration(context.date.timeIntervalSince(agent.startedAt)))
-                    .font(AppFont.mono(11))
-                    .foregroundStyle(palette.faint)
+                    .font(.caption2)
+                    .foregroundStyle(theme.labelTertiary)
                     .monospacedDigit()
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(palette.panel)
-        .overlay(Capsule().stroke(palette.border, lineWidth: 1))
-        .clipShape(Capsule())
+        .padding(.horizontal, Spacing.small)
+        .padding(.vertical, Spacing.offGrid3)
+        .background(theme.labelQuaternary.opacity(0.12), in: Capsule())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(agent.id), \(agent.title), работает")
     }

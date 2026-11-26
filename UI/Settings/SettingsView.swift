@@ -3,35 +3,33 @@ import SwiftUI
 struct SettingsView: View {
     let services: AppServices?
     @Environment(AppSettings.self) private var settings
-    @State private var tab = 0
+
+    @State private var tab = Tab.general
+
+    private enum Tab: Hashable {
+        case general, style, providers
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $tab) {
-                Text("Основные").tag(0)
-                Text("Стиль").tag(1)
-                Text("Провайдеры").tag(2)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(12)
+        TabView(selection: $tab) {
+            GeneralSettingsView()
+                .tabItem { Label("Основные", systemImage: "gearshape") }
+                .tag(Tab.general)
 
-            Divider()
+            StyleSettingsView(services: services)
+                .tabItem { Label("Стиль", systemImage: "textformat") }
+                .tag(Tab.style)
 
-            Group {
-                if tab == 0 {
-                    GeneralSettingsView()
-                } else if tab == 1 {
-                    StyleSettingsView(services: services)
-                } else {
-                    ProvidersSettingsView(services: services)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            ProvidersSettingsView(services: services)
+                .tabItem { Label("Провайдеры", systemImage: "server.rack") }
+                .tag(Tab.providers)
         }
-        .frame(width: 660, height: 540)
-        .tint(settings.theme.palette.accent)
-        .preferredColorScheme(settings.theme.palette.scheme)
+        // The native settings window sizes itself; a fixed frame breaks it when the
+        // system font changes.
+        .frame(minWidth: Layout.settingsWidth, minHeight: Layout.settingsHeight)
+        .theme(settings.theme.tokens)
+        .tint(settings.theme.tokens.accent)
+        .preferredColorScheme(settings.theme.tokens.scheme)
     }
 }
 
@@ -42,13 +40,19 @@ struct GeneralSettingsView: View {
         @Bindable var settings = settings
 
         Form {
-            Section("Внешний вид") {
+            Section {
                 Picker("Тема", selection: $settings.theme) {
-                    Text("Тёмная").tag(AppTheme.dark)
-                    Text("Светлая").tag(AppTheme.light)
+                    ForEach(AppTheme.allCases, id: \.self) { theme in
+                        Text(theme.title).tag(theme)
+                    }
                 }
 
-                Picker("Шрифт", selection: $settings.fontFamily) {
+                Toggle("Моноширинный интерфейс", isOn: $settings.monoInterface)
+                Text("По умолчанию интерфейс набран системным SF Pro; код и пути всегда моноширинные. Включите, чтобы вернуть Nordwand Mono всему интерфейсу.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("Шрифт кода", selection: $settings.fontFamily) {
                     Text("Nordwand Mono (встроенный)")
                         .tag(AppFont.bundledFamily)
                     Divider()
@@ -58,37 +62,50 @@ struct GeneralSettingsView: View {
                 }
                 .pickerStyle(.menu)
 
-                HStack(spacing: 12) {
-                    Text("Размер шрифта")
-                    Slider(value: $settings.fontSize, in: 11...20, step: 1)
+                HStack(spacing: Spacing.medium) {
+                    Text("Размер шрифта чата")
+                    Slider(
+                        value: $settings.fontSize,
+                        in: FontSize.transcriptMin...FontSize.transcriptMax,
+                        step: 1
+                    )
                     Text("\(Int(settings.fontSize))")
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
-                        .frame(width: 22, alignment: .trailing)
+                        .frame(width: Spacing.offGrid28, alignment: .trailing)
                 }
+                Text("Масштабирует только транскрипт: тулбар и настройки живут в системном размере.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Toggle("Показывать время сообщений", isOn: $settings.showTimestamps)
+            } header: {
+                Text("Внешний вид")
             }
 
-            Section("Агент") {
+            Section {
                 Toggle("Работать без подтверждений", isOn: $settings.autopilot)
                 Text("Инструменты выполняются сразу. Аварийные команды, ломающие систему, блокируются всегда.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } header: {
+                Text("Агент")
             }
 
-            Section("Контекст") {
-                HStack(spacing: 12) {
+            Section {
+                HStack(spacing: Spacing.medium) {
                     Text("Автокомпактация")
                     Slider(value: $settings.compactionThresholdPercent, in: 50...95, step: 5)
                     Text("\(Int(settings.compactionThresholdPercent))%")
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
-                        .frame(width: 38, alignment: .trailing)
+                        .frame(width: Spacing.offGrid38, alignment: .trailing)
                 }
                 Text("Порог считается от окна модели. Данные при компакции не удаляются.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } header: {
+                Text("Контекст")
             }
         }
         .formStyle(.grouped)

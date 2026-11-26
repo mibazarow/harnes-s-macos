@@ -6,7 +6,6 @@ struct ComposerView: View {
     @Binding var text: String
     @Binding var height: CGFloat
     @Binding var attachments: [ChatAttachment]
-    let palette: Palette
     let fontSize: CGFloat
     let isStreaming: Bool
     let queuedCount: Int
@@ -19,37 +18,35 @@ struct ComposerView: View {
     let onSend: () -> Void
     let onStop: () -> Void
 
+    @Environment(\.theme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isTargeted = false
     @State private var highlightedCommand = 0
     @State private var paletteHidden = false
 
-    private var mono: Font { AppFont.mono(fontSize) }
+    private var ui: Font { AppFont.ui(fontSize) }
 
     private var suggestions: [CommandSuggestion] {
         paletteHidden ? [] : CommandCatalog.suggestions(for: text)
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: Spacing.zero) {
             Rectangle()
-                .fill(palette.border)
-                .frame(height: 1)
+                .fill(theme.separator)
+                .frame(height: Spacing.hairline)
 
             if !attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: Spacing.small) {
                         ForEach(attachments) { attachment in
-                            AttachmentChip(
-                                attachment: attachment,
-                                palette: palette,
-                                fontSize: fontSize
-                            ) {
+                            AttachmentChip(attachment: attachment, fontSize: fontSize) {
                                 attachments.removeAll { $0.id == attachment.id }
                             }
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
+                    .padding(.horizontal, Spacing.large)
+                    .padding(.top, Spacing.small)
                 }
             }
 
@@ -58,25 +55,24 @@ struct ComposerView: View {
                     CommandPalette(
                         suggestions: suggestions,
                         highlighted: min(highlightedCommand, suggestions.count - 1),
-                        palette: palette,
                         fontSize: fontSize,
                         onPick: accept
                     )
-                    .padding(.bottom, 2)
+                    .padding(.bottom, Spacing.offGrid2)
                 }
 
-                HStack(alignment: .top, spacing: 8) {
-                    Text("❯")
-                        .font(mono)
-                        .foregroundStyle(palette.accent)
-                        .padding(.top, 5)
+                HStack(alignment: .top, spacing: Spacing.small) {
+                    Image(systemName: "chevron.right")
+                        .imageScale(.small)
+                        .foregroundStyle(theme.labelTertiary)
+                        .padding(.top, Spacing.offGrid5)
 
                     ZStack(alignment: .topLeading) {
                         if text.isEmpty {
                             Text(isTargeted ? "Отпусти файл" : "Напиши…")
-                                .font(mono)
-                                .foregroundStyle(isTargeted ? palette.accent : palette.faint)
-                                .padding(.top, 5)
+                                .font(ui)
+                                .foregroundStyle(isTargeted ? theme.accent : theme.labelQuaternary)
+                                .padding(.top, Spacing.offGrid5)
                                 .allowsHitTesting(false)
                         }
 
@@ -84,8 +80,8 @@ struct ComposerView: View {
                             text: $text,
                             height: $height,
                             fontSize: fontSize,
-                            textColor: palette.text.nsColor,
-                            insertionColor: palette.accent.nsColor,
+                            textColor: theme.labelPrimary.nsColor,
+                            insertionColor: theme.accent.nsColor,
                             onSend: onSend,
                             keyHandler: handlePaletteKey
                         )
@@ -94,9 +90,9 @@ struct ComposerView: View {
 
                     Button(action: addFiles) {
                         Image(systemName: "paperclip")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(palette.dim)
-                            .frame(width: 26, height: 26)
+                            .imageScale(.medium)
+                            .foregroundStyle(theme.labelSecondary)
+                            .frame(width: Size.controlRegular, height: Size.controlRegular)
                     }
                     .buttonStyle(.borderless)
                     .help("Прикрепить файл")
@@ -104,9 +100,9 @@ struct ComposerView: View {
 
                     Button(action: addFolder) {
                         Image(systemName: "folder")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(palette.dim)
-                            .frame(width: 26, height: 26)
+                            .imageScale(.medium)
+                            .foregroundStyle(theme.labelSecondary)
+                            .frame(width: Size.controlRegular, height: Size.controlRegular)
                     }
                     .buttonStyle(.borderless)
                     .help("Выбрать папку для работы")
@@ -115,74 +111,85 @@ struct ComposerView: View {
                     if isStreaming {
                         // One control, two meanings: the ring says "working", the square
                         // says "you can still stop this".
-                        StopButton(palette: palette, action: onStop)
+                        StopButton(action: onStop)
                     }
 
                     Button(action: onSend) {
                         Image(systemName: "arrow.up")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(palette.accent)
-                            .frame(width: 26, height: 26)
+                            .imageScale(.medium)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(canSend ? theme.onAccent : theme.labelQuaternary)
+                            .frame(width: Size.controlRegular, height: Size.controlRegular)
+                            .background(canSend ? theme.accent : theme.labelQuaternary.opacity(0.15), in: Circle())
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.plain)
                     .controlSize(.small)
-                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)
+                    .disabled(!canSend)
                     .help(isStreaming ? "В очередь (Return)" : "Отправить (Return)")
                     .accessibilityLabel(isStreaming ? "Поставить в очередь" : "Отправить")
                 }
 
-                HStack(spacing: 8) {
+                HStack(spacing: Spacing.small) {
                     Text("⏎ отправить · ⇧⏎ перенос · Esc стоп · / команды")
-                        .foregroundStyle(palette.dim)
+                        .foregroundStyle(theme.labelTertiary)
 
                     if queuedCount > 0 {
                         Text("· в очереди: \(queuedCount)")
-                            .foregroundStyle(palette.reasoning)
+                            .foregroundStyle(theme.warning)
                     }
 
                     if spent > 0 {
                         Text("· $\(spent.formatted(.number.precision(.fractionLength(2))))")
-                            .foregroundStyle(palette.faint)
+                            .foregroundStyle(theme.labelTertiary)
                             .help("Потрачено по текущим ценам провайдера. Считается из usage каждого запроса.")
                     }
 
                     if let modelLabel {
                         Text("· \(modelLabel)")
-                            .foregroundStyle(modelWarning ? palette.reasoning : palette.faint)
+                            .foregroundStyle(modelWarning ? theme.warning : theme.labelTertiary)
                             .help(modelWarning
                                   ? "Модель эмбеддингов не скачалась. Семантический поиск работает по ключевым словам; загрузка повторится при следующем запуске."
                                   : "Скачивается встроенная модель эмбеддингов. До конца загрузки поиск по памяти работает по ключевым словам.")
                     }
 
-                    Spacer(minLength: 8)
+                    Spacer(minLength: Spacing.small)
 
+                    // Meta pills: capsule, caption, secondary; warning keeps its icon so
+                    // the state is not carried by colour alone.
                     Text(providerLabel)
-                        .foregroundStyle(palette.faint)
                         .lineLimit(1)
+                        .modifier(MetaPill())
 
-                    Text("·")
-                        .foregroundStyle(palette.faint)
-
-                    Text(contextLabel)
-                        .foregroundStyle(contextWarning ? palette.reasoning : palette.faint)
-                        .help(contextWarning
-                              ? "История превышает порог окна: при отправке старые сообщения свернутся в саммари"
-                              : "Заполнение окна контекста")
+                    HStack(spacing: Spacing.tight) {
+                        if contextWarning {
+                            Image(systemName: "exclamationmark.triangle")
+                                .imageScale(.small)
+                        }
+                        Text(contextLabel)
+                    }
+                    .modifier(MetaPill(warning: contextWarning))
+                    .help(contextWarning
+                          ? "История превышает порог окна: при отправке старые сообщения свернутся в саммари"
+                          : "Заполнение окна контекста")
                 }
-                .font(AppFont.mono(max(fontSize - 3, 9)))
-                .padding(.leading, 18)
+                .font(.caption2)
+                .padding(.leading, Spacing.offGrid18)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 8)
+            .padding(.horizontal, Spacing.large)
+            .padding(.top, Spacing.offGrid10)
+            .padding(.bottom, Spacing.small)
         }
-        .background(palette.panel)
-        .overlay(alignment: .top) {
-            if isTargeted {
-                Rectangle()
-                    .fill(palette.accent.opacity(0.12))
-            }
-        }
+        // Content, not chrome: a solid plate with a hairline, not glass and not a capsule.
+        .background(theme.controlBackground)
+        .clipShape(RoundedRectangle(cornerRadius: Radius.panel))
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.panel)
+                .stroke(isTargeted ? theme.accent : theme.separator, lineWidth: Spacing.hairline)
+        )
+        .frame(maxWidth: Layout.chatContainer)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.horizontal, Spacing.large)
+        .padding(.bottom, Spacing.medium)
         .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
             handleDrop(providers)
         }
@@ -193,6 +200,10 @@ struct ComposerView: View {
             highlightedCommand = 0
         }
         .onExitCommand(perform: onStop)
+    }
+
+    private var canSend: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }
 
     /// Returns true when the key belonged to the palette and must not reach the text
@@ -292,11 +303,31 @@ struct ComposerView: View {
     }
 }
 
+/// Caption pill for provider and context. No border: the fill carries the grouping.
+private struct MetaPill: ViewModifier {
+    var warning = false
+
+    @Environment(\.theme) private var theme
+
+    func body(content: Content) -> some View {
+        content
+            .font(.caption2)
+            .foregroundStyle(warning ? theme.warning : theme.labelSecondary)
+            .padding(.horizontal, Spacing.small)
+            .padding(.vertical, Spacing.offGrid2)
+            .background(
+                (warning ? theme.warning : theme.labelQuaternary).opacity(0.12),
+                in: Capsule()
+            )
+    }
+}
+
 struct AttachmentChip: View {
     let attachment: ChatAttachment
-    let palette: Palette
     let fontSize: CGFloat
     let onRemove: () -> Void
+
+    @Environment(\.theme) private var theme
 
     private var chipSymbol: String {
         switch attachment.kind {
@@ -313,37 +344,38 @@ struct AttachmentChip: View {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: 28, height: 28)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .frame(width: Size.row, height: Size.row)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.small))
             } else {
                 Image(systemName: chipSymbol)
-                    .font(.system(size: 13))
-                    .foregroundStyle(palette.dim)
-                    .frame(width: 28, height: 28)
+                    .imageScale(.medium)
+                    .foregroundStyle(theme.labelSecondary)
+                    .frame(width: Size.row, height: Size.row)
             }
 
             Text(attachment.name)
-                .font(AppFont.mono(max(fontSize - 2, 9)))
-                .foregroundStyle(palette.text)
+                .font(.caption)
+                .foregroundStyle(theme.labelPrimary)
                 .lineLimit(1)
-                .frame(maxWidth: 160, alignment: .leading)
+                .truncationMode(.middle)
+                .frame(maxWidth: Spacing.offGrid32 * 5, alignment: .leading)
 
             Button(action: onRemove) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(palette.dim)
+                    .imageScale(.small)
+                    .fontWeight(.bold)
+                    .foregroundStyle(theme.labelSecondary)
             }
             .buttonStyle(.borderless)
             .help("Убрать")
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(palette.background.opacity(0.8))
+        .padding(.horizontal, Spacing.small)
+        .padding(.vertical, Spacing.offGrid5)
+        .background(theme.controlBackground, in: RoundedRectangle(cornerRadius: Radius.control))
         .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(palette.border, lineWidth: 1)
+            RoundedRectangle(cornerRadius: Radius.control)
+                .stroke(theme.separator, lineWidth: Spacing.hairline)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -382,7 +414,7 @@ struct ComposerTextView: NSViewRepresentable {
         textView.importsGraphics = false
         textView.allowsUndo = true
         textView.drawsBackground = false
-        textView.font = AppFont.nsMono(fontSize)
+        textView.font = AppFont.nsUI(fontSize)
         textView.textColor = textColor
         textView.insertionPointColor = insertionColor
         textView.textContainerInset = NSSize(width: 0, height: 5)
@@ -416,7 +448,7 @@ struct ComposerTextView: NSViewRepresentable {
             textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
         }
 
-        textView.font = AppFont.nsMono(fontSize)
+        textView.font = AppFont.nsUI(fontSize)
         textView.textColor = textColor
         textView.insertionPointColor = insertionColor
 
@@ -479,9 +511,10 @@ final class ComposerNSTextView: NSTextView {
 /// the centre stays a plain stop square, so the affordance never changes shape while
 /// the agent works.
 private struct StopButton: View {
-    let palette: Palette
     let action: () -> Void
 
+    @Environment(\.theme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
 
     /// The angle is a function of the clock, not a `repeatForever` state animation.
@@ -494,23 +527,30 @@ private struct StopButton: View {
         Button(action: action) {
             ZStack {
                 Circle()
-                    .stroke(palette.border, lineWidth: 2)
+                    .stroke(theme.separator, lineWidth: Spacing.offGrid2)
 
-                TimelineView(.animation) { context in
+                if reduceMotion {
+                    // Reduce Motion: the ring stops spinning and stays a plain stop ring.
                     Circle()
                         .trim(from: 0, to: 0.28)
-                        .stroke(
-                            palette.accent,
-                            style: StrokeStyle(lineWidth: 2, lineCap: .round)
-                        )
-                        .rotationEffect(.degrees(Self.angle(at: context.date)))
+                        .stroke(theme.destructive, style: StrokeStyle(lineWidth: Spacing.offGrid2, lineCap: .round))
+                } else {
+                    TimelineView(.animation) { context in
+                        Circle()
+                            .trim(from: 0, to: 0.28)
+                            .stroke(
+                                theme.destructive,
+                                style: StrokeStyle(lineWidth: Spacing.offGrid2, lineCap: .round)
+                            )
+                            .rotationEffect(.degrees(Self.angle(at: context.date)))
+                    }
                 }
 
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(hovering ? palette.reasoning : palette.accent)
-                    .frame(width: 9, height: 9)
+                RoundedRectangle(cornerRadius: Spacing.offGrid2)
+                    .fill(hovering ? theme.destructive.opacity(0.8) : theme.destructive)
+                    .frame(width: Spacing.offGrid10, height: Spacing.offGrid10)
             }
-            .frame(width: 26, height: 26)
+            .frame(width: Size.controlRegular, height: Size.controlRegular)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)

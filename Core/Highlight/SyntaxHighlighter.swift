@@ -252,6 +252,9 @@ enum HighlightCache {
         let language: CodeLanguage
         let fontSize: CGFloat
         let code: String
+        /// Step 2: the same code in another theme is another colour set. Without this
+        /// the cache served the previous theme's colours after a switch.
+        let themeID: String
     }
 
     private static var storage: [Key: AttributedString] = [:]
@@ -261,10 +264,11 @@ enum HighlightCache {
     static func render(
         language: CodeLanguage,
         palette: Palette,
+        themeID: String,
         fontSize: CGFloat,
         code: String
     ) -> AttributedString {
-        let key = Key(language: language, fontSize: fontSize, code: code)
+        let key = Key(language: language, fontSize: fontSize, code: code, themeID: themeID)
         if let hit = storage[key] { return hit }
 
         let value = SyntaxHighlighter(language: language, palette: palette, fontSize: fontSize)

@@ -1,14 +1,16 @@
 import AppKit
 import SwiftUI
 
-/// Code block. The reference UI has no header bar: the block is a plain raised plate,
-/// and a small copy button fades in on hover in the top-right corner.
+/// Code block: a raised plate, code face, copy button on hover.
+///
+/// The text scrolls horizontally inside the block, so a long line never stretches the
+/// message column and never wraps into something that looks like broken code.
 struct CodeBlockView: View {
     let code: String
     let language: String?
-    let palette: Palette
     let fontSize: CGFloat
 
+    @Environment(\.theme) private var theme
     @State private var copied = false
     @State private var hovering = false
     @State private var resetTask: Task<Void, Never>?
@@ -21,52 +23,55 @@ struct CodeBlockView: View {
         hovering || copied
     }
 
+    private var codeSize: CGFloat {
+        max(fontSize + FontSize.codeOffset, FontSize.minReadable)
+    }
+
     var body: some View {
-        Text(highlighted)
-            .font(AppFont.mono(fontSize))
-            .lineSpacing(AppFont.lineSpacing(for: fontSize))
-            .selectableWhileIdle()
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .background(palette.codeBackground)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(palette.border, lineWidth: 1)
-            )
-            .overlay(alignment: .topTrailing) {
-                Button {
-                    copy()
-                } label: {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(copied ? palette.accent : palette.dim)
-                        .frame(width: 24, height: 24)
-                        .background(palette.panel)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .stroke(palette.border, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                .padding(4)
-                .opacity(showsButton ? 1 : 0)
-                .animation(.easeOut(duration: 0.15), value: showsButton)
-                .help(copied ? "Скопировано" : "Скопировать код")
-                .accessibilityLabel(copied ? "Скопировано" : "Скопировать код")
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(highlighted)
+                .font(AppFont.mono(codeSize))
+                .lineSpacing(AppFont.lineSpacing(for: codeSize))
+                .selectableWhileIdle()
+                .padding(.horizontal, Spacing.large)
+                .padding(.vertical, Spacing.medium)
+                .fixedSize(horizontal: true, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.codeBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.panel)
+                .stroke(theme.separator, lineWidth: Spacing.hairline)
+        )
+        .overlay(alignment: .topTrailing) {
+            Button {
+                copy()
+            } label: {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .imageScale(.small)
+                    .fontWeight(.medium)
+                    .foregroundStyle(copied ? theme.accent : theme.labelSecondary)
+                    .frame(width: Size.controlRegular, height: Size.controlRegular)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Radius.small))
             }
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .onHover { hovering = $0 }
-            .accessibilityElement(children: .contain)
+            .buttonStyle(.plain)
+            .padding(Spacing.tight)
+            .opacity(showsButton ? 1 : 0)
+            .animation(.easeOut(duration: 0.15), value: showsButton)
+            .help(copied ? "Скопировано" : "Скопировать код")
+            .accessibilityLabel(copied ? "Скопировано" : "Скопировать код")
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Radius.panel))
+        .onHover { hovering = $0 }
+        .accessibilityElement(children: .contain)
     }
 
     private var highlighted: AttributedString {
         HighlightCache.render(
             language: resolvedLanguage,
-            palette: palette,
-            fontSize: fontSize,
+            palette: theme.syntax,
+            themeID: theme.id,
+            fontSize: codeSize,
             code: code
         )
     }

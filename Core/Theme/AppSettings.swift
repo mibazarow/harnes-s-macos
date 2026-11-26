@@ -27,6 +27,11 @@ final class AppSettings {
         didSet { defaults.set(fontFamily, forKey: AppFont.familyKey) }
     }
 
+    /// Step 3: off by default. When on, the interface uses Nordwand Mono again.
+    var monoInterface: Bool {
+        didSet { defaults.set(monoInterface, forKey: AppFont.monoInterfaceKey) }
+    }
+
     var showTimestamps: Bool {
         didSet { defaults.set(showTimestamps, forKey: Key.showTimestamps) }
     }
@@ -50,12 +55,14 @@ final class AppSettings {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        self.theme = AppTheme(rawValue: defaults.string(forKey: Key.theme) ?? "") ?? .dark
+        // Step 2: the system theme is the default; Copper stays as an option.
+        self.theme = AppTheme(rawValue: defaults.string(forKey: Key.theme) ?? "") ?? .system
 
         let storedFontSize = defaults.double(forKey: Key.fontSize)
-        self.fontSize = storedFontSize > 0 ? storedFontSize : 13
+        self.fontSize = storedFontSize > 0 ? storedFontSize : FontSize.transcriptDefault
 
         self.fontFamily = defaults.string(forKey: AppFont.familyKey) ?? AppFont.bundledFamily
+        self.monoInterface = defaults.bool(forKey: AppFont.monoInterfaceKey)
 
         if defaults.object(forKey: Key.showTimestamps) == nil {
             self.showTimestamps = true

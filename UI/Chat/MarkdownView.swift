@@ -2,31 +2,33 @@ import AppKit
 import Markdown
 import SwiftUI
 
-/// Markdown rendering. Metrics mirror the reference UI's stylesheet: a 160% line box,
-/// 12 pt between paragraphs, 24 pt around code, 16 pt around tables and quotes, and a
-/// flat heading ladder where size barely moves and weight, color and space carry rank.
+/// Markdown rendering.
+///
+/// Typography follows the design tokens: SF Pro at the transcript size, a flat heading
+/// ladder (+3 / +1 / 0 pt over the body) where weight and space carry rank, and 20 pt
+/// between paragraphs. The ladder and the line box are pinned by `StyleTests`.
 struct MarkdownView: View {
     let text: String
-    let palette: Palette
     let fontSize: CGFloat
     var isStreaming: Bool = false
 
+    @Environment(\.theme) private var theme
+
     /// Parsed blocks live in state and are rebuilt only when the text changes. Parsing
     /// inside `body` re-ran on every layout pass — including each frame of a window
-    /// resize — which is a large part of why dragging an edge felt like 15 fps.
+    /// resize.
     @State private var blocks: [Markup] = []
     @State private var parsedText: String?
-    /// Coalesces streaming bursts. Parsing the whole answer on every token was the
-    /// other half of the live-resize cost: at 40–60 chunks per second the parser ran
-    /// tens of times a second for no visible benefit.
+    /// Coalesces streaming bursts: at 40–60 chunks per second the parser would run tens
+    /// of times a second for no visible benefit.
     @State private var parseTask: Task<Void, Never>?
     @State private var pendingText = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: Spacing.zero) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, child in
-                MarkdownBlockView(node: child, palette: palette, fontSize: fontSize, dimmed: false)
-                    .padding(.top, index == 0 ? 0 : MarkdownBlockView.gap(after: blocks[index - 1], before: child))
+                MarkdownBlockView(node: child, fontSize: fontSize, dimmed: false)
+                    .padding(.top, index == 0 ? Spacing.zero : MarkdownBlockView.gap(after: blocks[index - 1], before: child))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -59,8 +61,6 @@ extension MarkdownView {
         }
         guard parseTask == nil else { return }
         parseTask = Task {
-            // Kept in step with the paint interval, so formatting does not lag the
-            // words it formats.
             try? await Task.sleep(for: .seconds(Tuning.markdownParseInterval))
             guard !Task.isCancelled else { return }
             let latest = pendingText
@@ -80,43 +80,44 @@ extension MarkdownView {
 
 struct MarkdownBlockView: View {
     let node: Markup
-    let palette: Palette
     let fontSize: CGFloat
     var dimmed: Bool = false
     var depth: Int = 0
 
-    private var baseColor: Color { dimmed ? palette.dim : palette.assistantText }
-    private var mono: Font { AppFont.mono(fontSize) }
+    @Environment(\.theme) private var theme
+
+    private var baseColor: Color { dimmed ? theme.labelSecondary : theme.labelPrimary }
+    private var ui: Font { AppFont.ui(fontSize) }
     private var lineSpacing: CGFloat { AppFont.lineSpacing(for: fontSize) }
 
     // MARK: - Vertical rhythm
 
-    /// CSS margin-top of a block, in points.
+    /// Margin above a block, in points.
     static func marginTop(_ node: Markup) -> CGFloat {
         if let heading = node as? Heading {
-            return [28, 24, 20, 20][min(max(heading.level - 1, 0), 3)]
+            return [Spacing.offGrid28, Spacing.section, Spacing.offGrid20, Spacing.offGrid20][min(max(heading.level - 1, 0), 3)]
         }
-        if node is CodeBlock { return 12 }
-        if node is Markdown.Image { return 24 }
-        if node is Markdown.Table || node is BlockQuote { return 16 }
-        if node is ThematicBreak { return 32 }
-        if node is UnorderedList || node is OrderedList { return 8 }
-        return 0
+        if node is CodeBlock { return Spacing.medium }
+        if node is Markdown.Image { return Spacing.section }
+        if node is Markdown.Table || node is BlockQuote { return Spacing.large }
+        if node is ThematicBreak { return Spacing.offGrid32 }
+        if node is UnorderedList || node is OrderedList { return Spacing.small }
+        return Spacing.zero
     }
 
-    /// CSS margin-bottom of a block, in points.
+    /// Margin below a block, in points.
     static func marginBottom(_ node: Markup) -> CGFloat {
         if let heading = node as? Heading {
-            return [12, 10, 8, 8][min(max(heading.level - 1, 0), 3)]
+            return [Spacing.medium, Spacing.offGrid10, Spacing.small, Spacing.small][min(max(heading.level - 1, 0), 3)]
         }
-        if node is CodeBlock { return 24 }
-        if node is Markdown.Image { return 24 }
-        if node is Markdown.Table || node is BlockQuote { return 16 }
-        if node is ThematicBreak { return 32 }
-        if node is UnorderedList || node is OrderedList { return 12 }
-        // A paragraph is followed by a real blank line: with the tightened leading the
-        // old 12 pt merged neighbouring paragraphs into one block of text.
-        return 20
+        if node is CodeBlock { return Spacing.section }
+        if node is Markdown.Image { return Spacing.section }
+        if node is Markdown.Table || node is BlockQuote { return Spacing.large }
+        if node is ThematicBreak { return Spacing.offGrid32 }
+        if node is UnorderedList || node is OrderedList { return Spacing.medium }
+        // A paragraph is followed by a real blank line: with the tightened leading a
+        // 12 pt gap merged neighbouring paragraphs into one wall of text.
+        return Spacing.offGrid20
     }
 
     /// Adjacent vertical margins collapse: the larger one wins.
@@ -133,12 +134,7 @@ struct MarkdownBlockView: View {
         } else if node is Paragraph {
             paragraphView
         } else if let code = node as? CodeBlock {
-            CodeBlockView(
-                code: code.code,
-                language: code.language,
-                palette: palette,
-                fontSize: fontSize
-            )
+            CodeBlockView(code: code.code, language: code.language, fontSize: fontSize)
         } else if node is BlockQuote {
             quoteView
         } else if let list = node as? UnorderedList {
@@ -146,37 +142,38 @@ struct MarkdownBlockView: View {
         } else if let list = node as? OrderedList {
             listView(items: listChildren(list), ordered: true, start: Int(list.startIndex))
         } else if node is ThematicBreak {
-            // The reference draws no rule: a break is 32 pt of air, nothing more.
-            Color.clear.frame(height: 0)
+            // No rule: a break is air, nothing more.
+            Color.clear.frame(height: Spacing.zero)
         } else if let table = node as? Markdown.Table {
             tableView(table)
         } else if let image = node as? Markdown.Image {
             imageView(image)
         } else if let html = node as? HTMLBlock {
             Text(html.rawHTML)
-                .font(mono)
-                .foregroundStyle(palette.comment)
+                .font(AppFont.mono(fontSize))
+                .foregroundStyle(theme.labelTertiary)
                 .selectableWhileIdle()
         } else {
             childBlocks
         }
     }
 
-    private var resolvedBase: Color { baseColor }
-
     private var paragraphView: some View {
         Text(inlineText(node, bold: false, scale: 1))
-            .font(mono)
-            .foregroundStyle(resolvedBase)
+            .font(ui)
+            .foregroundStyle(baseColor)
             .lineSpacing(lineSpacing)
             .selectableWhileIdle()
             .fixedSize(horizontal: false, vertical: true)
+            // Prose is capped so a line does not run the full 1100 pt container. Code
+            // blocks and tables below intentionally skip this and use the full width.
+            .frame(maxWidth: Layout.textColumn, alignment: .leading)
     }
 
     // MARK: - Headings
 
     /// Size ladder: +3 / +1 / 0 / 0 points over the body. Absolute steps keep the ratio
-    /// flat as the user changes the font size; a multiplier would inflate the gap too.
+    /// flat as the user changes the font size. Pinned by `StyleTests`.
     static func headingSize(level: Int, fontSize: CGFloat) -> CGFloat {
         switch level {
         case 1: fontSize + 3
@@ -198,35 +195,30 @@ struct MarkdownBlockView: View {
             bold: Self.headingWeight(level: level) != .regular,
             scale: size / max(fontSize, 1)
         ))
-        .font(mono)
-        .foregroundStyle(level >= 4 ? palette.dim : resolvedBase)
+        .font(AppFont.ui(size, weight: Self.headingWeight(level: level)))
+        .foregroundStyle(level >= 4 ? theme.labelSecondary : theme.labelPrimary)
         .lineSpacing(lineSpacing)
         .selectableWhileIdle()
         .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: Layout.textColumn, alignment: .leading)
     }
 
     // MARK: - Quote
 
     private var quoteView: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: Spacing.zero) {
             let children = Array(node.children)
             ForEach(Array(children.enumerated()), id: \.offset) { index, child in
-                MarkdownBlockView(
-                    node: child,
-                    palette: palette,
-                    fontSize: fontSize,
-                    dimmed: true,
-                    depth: depth
-                )
-                .padding(.top, index == 0 ? 0 : Self.gap(after: children[index - 1], before: child))
+                MarkdownBlockView(node: child, fontSize: fontSize, dimmed: true, depth: depth)
+                    .padding(.top, index == 0 ? Spacing.zero : Self.gap(after: children[index - 1], before: child))
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, 8)
+        .frame(maxWidth: Layout.textColumn, alignment: .leading)
+        .padding(.leading, Spacing.small)
         .overlay(alignment: .leading) {
             Rectangle()
-                .fill(palette.border)
-                .frame(width: 1)
+                .fill(theme.separator)
+                .frame(width: Spacing.hairline)
         }
     }
 
@@ -237,48 +229,37 @@ struct MarkdownBlockView: View {
     }
 
     private func listView(items: [Markup], ordered: Bool, start: Int) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.small) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.medium) {
                     Text(ordered ? "\(start + index)." : "•")
-                        .font(mono)
-                        .foregroundStyle(palette.dim)
-                        .frame(minWidth: 20, alignment: .trailing)
-                    VStack(alignment: .leading, spacing: 0) {
+                        .font(ui)
+                        .foregroundStyle(theme.labelSecondary)
+                        .frame(minWidth: Spacing.offGrid20, alignment: .trailing)
+                    VStack(alignment: .leading, spacing: Spacing.zero) {
                         let children = Array(item.children)
                         ForEach(Array(children.enumerated()), id: \.offset) { childIndex, child in
-                            MarkdownBlockView(
-                                node: child,
-                                palette: palette,
-                                fontSize: fontSize,
-                                dimmed: dimmed,
-                                depth: depth + 1
-                            )
-                            .padding(.top, childIndex == 0 ? 0 : Self.gap(after: children[childIndex - 1], before: child))
+                            MarkdownBlockView(node: child, fontSize: fontSize, dimmed: dimmed, depth: depth + 1)
+                                .padding(.top, childIndex == 0 ? Spacing.zero : Self.gap(after: children[childIndex - 1], before: child))
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
+        .frame(maxWidth: Layout.textColumn, alignment: .leading)
         // Nested lists get a shallower indent than a top-level list.
-        .padding(.leading, depth > 0 ? 16 : 0)
+        .padding(.leading, depth > 0 ? Spacing.large : Spacing.zero)
     }
 
     @ViewBuilder
     private var childBlocks: some View {
         if node.childCount > 0 {
             let children = Array(node.children)
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: Spacing.zero) {
                 ForEach(Array(children.enumerated()), id: \.offset) { index, child in
-                    MarkdownBlockView(
-                        node: child,
-                        palette: palette,
-                        fontSize: fontSize,
-                        dimmed: dimmed,
-                        depth: depth
-                    )
-                    .padding(.top, index == 0 ? 0 : Self.gap(after: children[index - 1], before: child))
+                    MarkdownBlockView(node: child, fontSize: fontSize, dimmed: dimmed, depth: depth)
+                        .padding(.top, index == 0 ? Spacing.zero : Self.gap(after: children[index - 1], before: child))
                 }
             }
         }
@@ -287,47 +268,46 @@ struct MarkdownBlockView: View {
     // MARK: - Tables
 
     private func tableView(_ table: Markdown.Table) -> some View {
-        let tableFont = max(fontSize - 1, 10)
+        let tableFont = max(fontSize - 1, FontSize.minReadable)
         let rows = Array(table.body.rows)
 
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 0) {
+        return VStack(alignment: .leading, spacing: Spacing.zero) {
+            HStack(spacing: Spacing.zero) {
                 ForEach(Array(table.head.cells.enumerated()), id: \.offset) { _, cell in
                     Text(inlineText(cell, bold: false, scale: tableFont / max(fontSize, 1)))
-                        .font(AppFont.mono(tableFont, weight: .medium))
-                        .foregroundStyle(palette.dim)
+                        .font(AppFont.ui(tableFont, weight: .medium))
+                        .foregroundStyle(theme.labelSecondary)
                         .lineSpacing(AppFont.lineSpacing(for: tableFont))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
+                        .padding(.horizontal, Spacing.medium)
+                        .padding(.vertical, Spacing.small)
                 }
             }
 
-            ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 Rectangle()
-                    .fill(palette.border.opacity(0.7))
-                    .frame(height: 1)
+                    .fill(theme.separator)
+                    .frame(height: Spacing.hairline)
 
-                HStack(spacing: 0) {
+                HStack(spacing: Spacing.zero) {
                     ForEach(Array(row.cells.enumerated()), id: \.offset) { _, cell in
                         Text(inlineText(cell, bold: false, scale: tableFont / max(fontSize, 1)))
-                            .font(AppFont.mono(tableFont))
-                            .foregroundStyle(palette.assistantText)
+                            .font(AppFont.ui(tableFont))
+                            .foregroundStyle(theme.labelPrimary)
                             .lineSpacing(AppFont.lineSpacing(for: tableFont))
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
+                            .padding(.horizontal, Spacing.medium)
+                            .padding(.vertical, Spacing.offGrid10)
                     }
                 }
-                .background(rowIndex.isMultiple(of: 2) ? Color.clear : palette.codeBackground.opacity(0.45))
             }
         }
-        .background(palette.panel)
+        .background(theme.controlBackground)
         .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(palette.border, lineWidth: 1)
+            RoundedRectangle(cornerRadius: Radius.control)
+                .stroke(theme.separator, lineWidth: Spacing.hairline)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .clipShape(RoundedRectangle(cornerRadius: Radius.control))
         .accessibilityElement(children: .contain)
     }
 
@@ -354,13 +334,13 @@ struct MarkdownBlockView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .clipShape(RoundedRectangle(cornerRadius: Radius.panel))
     }
 
     private func imagePlaceholder(_ image: Markdown.Image) -> some View {
         Text(image.plainText.isEmpty ? "[изображение]" : "[\(image.plainText)]")
-            .font(mono)
-            .foregroundStyle(palette.dim)
+            .font(ui)
+            .foregroundStyle(theme.labelSecondary)
     }
 }
 
@@ -404,7 +384,7 @@ extension MarkdownBlockView {
                 let inner = renderInline(link, style: style)
                 var linked = inner
                 linked.link = link.destination.flatMap(URL.init(string:))
-                linked.foregroundColor = palette.accent
+                linked.foregroundColor = theme.accent
                 result.append(linked)
             } else if let image = child as? Markdown.Image {
                 var next = style
@@ -428,25 +408,22 @@ extension MarkdownBlockView {
 
     private func fragment(_ string: String, style: InlineStyle, link: URL?) -> AttributedString {
         var fragment = AttributedString(string)
-        var font = AppFont.mono(fontSize * style.scale, weight: style.bold ? .semibold : .regular)
-        if style.code {
-            font = AppFont.mono(fontSize * style.scale, weight: .medium)
-        }
+        // The interface face carries prose; code and identifiers keep the mono face.
+        let size = fontSize * style.scale
+        var font = style.code
+            ? AppFont.mono(size, weight: .medium)
+            : AppFont.ui(size, weight: style.bold ? .semibold : .regular)
         if style.italic {
             font = font.italic()
         }
         fragment.font = font
 
-        if style.dimmed {
-            fragment.foregroundColor = palette.dim
-        } else {
-            fragment.foregroundColor = palette.assistantText
-        }
+        fragment.foregroundColor = style.dimmed ? theme.labelSecondary : theme.labelPrimary
 
         // Inline code is tinted with the accent and left on the page background, so
-        // commit hashes, paths and flags stand out without a plate behind them.
+        // paths, flags and hashes stand out without a plate behind them.
         if style.code {
-            fragment.foregroundColor = palette.accent
+            fragment.foregroundColor = theme.accent
         }
 
         if style.strikethrough {
@@ -454,7 +431,7 @@ extension MarkdownBlockView {
         }
         if let link {
             fragment.link = link
-            fragment.foregroundColor = palette.accent
+            fragment.foregroundColor = theme.accent
         }
 
         return fragment

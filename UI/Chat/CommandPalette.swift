@@ -1,64 +1,63 @@
 import SwiftUI
 
-/// Floating list above the composer. Arrow keys and Tab move and pick, the mouse works
-/// too, and the hint line says so.
+/// Floating list of slash-command hints above the composer. Arrow keys and Tab move and
+/// pick, the mouse works too, and the hint line says so.
 struct CommandPalette: View {
     let suggestions: [CommandSuggestion]
     let highlighted: Int
-    let palette: Palette
     let fontSize: CGFloat
     let onPick: (CommandSuggestion) -> Void
 
-    private var mono: Font { AppFont.mono(max(fontSize - 1, 10)) }
+    @Environment(\.theme) private var theme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: Spacing.zero) {
             // A plain stack, not a ScrollView: the list is capped at nine rows, so it
-            // always fits, and a scroll view here costs a gesture and renders worse.
-            VStack(alignment: .leading, spacing: 0) {
+            // always fits.
+            VStack(alignment: .leading, spacing: Spacing.zero) {
                 ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, item in
                     row(item, selected: index == highlighted)
                 }
             }
 
             Rectangle()
-                .fill(palette.border)
-                .frame(height: 1)
+                .fill(theme.separator)
+                .frame(height: Spacing.hairline)
 
             Text("↑↓ выбрать · Tab вставить · Esc скрыть")
-                .font(AppFont.mono(max(fontSize - 3, 9)))
-                .foregroundStyle(palette.faint)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                .font(.caption2)
+                .foregroundStyle(theme.labelTertiary)
+                .padding(.horizontal, Spacing.medium)
+                .padding(.vertical, Spacing.tight)
         }
-        .background(palette.background)
+        // A floating layer: material plus a hairline, no coloured border.
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Radius.panel))
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(palette.border, lineWidth: 1)
+            RoundedRectangle(cornerRadius: Radius.panel)
+                .stroke(theme.separator, lineWidth: Spacing.hairline)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func row(_ item: CommandSuggestion, selected: Bool) -> some View {
         Button {
             onPick(item)
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: Spacing.medium) {
                 Text(item.title)
-                    .foregroundStyle(selected ? palette.accent : palette.text)
+                    .foregroundStyle(selected ? theme.labelPrimary : theme.labelSecondary)
 
                 Text(item.detail)
-                    .foregroundStyle(palette.dim)
+                    .foregroundStyle(theme.labelTertiary)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
-                Spacer(minLength: 0)
+                Spacer(minLength: Spacing.zero)
             }
-            .font(mono)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .font(AppFont.ui(max(fontSize - 1, 10)))
+            .padding(.horizontal, Spacing.medium)
+            .frame(height: Size.row)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(selected ? palette.accent.opacity(0.12) : Color.clear)
+            .background(selected ? theme.accent.opacity(0.14) : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

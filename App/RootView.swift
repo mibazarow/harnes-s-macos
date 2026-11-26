@@ -7,37 +7,33 @@ struct RootView: View {
     @Environment(ChatStore.self) private var chat
     @Environment(ProviderDirectory.self) private var providerDirectory
     @State private var draft = ""
-    @State private var composerHeight: CGFloat = 24
+    @State private var composerHeight: CGFloat = Size.composerMin
     @State private var attachments: [ChatAttachment] = []
     /// Set while the user drags a window edge; rows drop text selection for the drag.
     @State private var liveResize = LiveResizeState()
 
-    private var palette: Palette { settings.theme.palette }
+    private var tokens: ThemeTokens { settings.theme.tokens }
 
     var body: some View {
         // The context numbers come from a snapshot, not from the plan: reading the plan
         // here subscribed the whole screen — including the composer and the stop ring —
-        // to `messages`, and every 60 ms paint tick re-evaluated it.
+        // to `messages`, and every paint tick re-evaluated it.
         let usage = chat.statusPressure()
 
-        VStack(spacing: 0) {
-            HeaderBar(palette: palette, planMode: chat.isPlanMode)
-
+        VStack(spacing: Spacing.zero) {
             TranscriptView(
-                palette: palette,
                 fontSize: settings.fontSize,
                 showTimestamps: settings.showTimestamps
             )
 
             if let services, !services.todos.items.isEmpty {
-                PlanBar(todos: services.todos, palette: palette, fontSize: settings.fontSize)
+                PlanBar(todos: services.todos, fontSize: settings.fontSize)
             }
 
             ComposerView(
                 text: $draft,
                 height: $composerHeight,
                 attachments: $attachments,
-                palette: palette,
                 fontSize: settings.fontSize,
                 isStreaming: chat.isStreaming,
                 queuedCount: chat.queuedCount,
@@ -51,15 +47,23 @@ struct RootView: View {
                 onStop: chat.stop
             )
         }
-        .background(palette.background)
+        .background(tokens.contentBackground)
         .background(
             WindowResizeBridge(state: liveResize)
-                .frame(width: 0, height: 0)
+                .frame(width: Spacing.zero, height: Spacing.zero)
         )
+        .environment(\.theme, tokens)
         .environment(liveResize)
-        .tint(palette.accent)
-        .preferredColorScheme(palette.scheme)
+        .tint(tokens.accent)
+        // `nil` means "follow the system appearance" — the .system and .copper themes
+        // must not pin a scheme.
+        .preferredColorScheme(tokens.scheme)
         .frame(minWidth: 560, minHeight: 420)
+        .navigationTitle("HARNES-S")
+        .navigationSubtitle(providerDirectory.label)
+        .toolbar { toolbarContent }
+        // The navigation layer is glass; the content layer stays solid.
+        .toolbarBackground(.ultraThinMaterial, for: .windowToolbar)
         .task {
             #if DEBUG
             if DemoTranscript.scenario != nil { return }
@@ -100,6 +104,44 @@ struct RootView: View {
             let threshold = Int(Double(newValue) * settings.compactionThresholdPercent / 100)
             guard used > threshold else { return }
             chat.notice("Окно контекста уменьшилось: \(oldValue) → \(newValue) токенов. Сейчас в истории ~\(used). При следующем ответе старые сообщения свернутся в саммари; из базы ничего не удалится.")
+        }
+    }
+
+    /// Native chrome: the window keeps its own title bar, so dragging, Full Screen, zoom
+    /// and Stage Manager work without a hand-drawn header.
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            // S4: only the fact that a child is working. Finished children lose their
+            // pill immediately; the report arrives in the transcript.
+            SubagentPills(agents: chat.runningSubagents)
+        }
+
+        ToolbarItemGroup(placement: .primaryAction) {
+            if chat.isStreaming {
+                Button {
+                    chat.stop()
+                } label: {
+                    Label("Остановить", systemImage: "stop.fill")
+                }
+                .help("Остановить ответ (Esc)")
+                .tint(tokens.destructive)
+            }
+
+            Button {
+                chat.setPlanMode(!chat.isPlanMode)
+            } label: {
+                Label(
+                    chat.isPlanMode ? "Выключить режим плана" : "Режим плана",
+                    systemImage: chat.isPlanMode ? "eye.slash" : "eye"
+                )
+            }
+            .help(chat.isPlanMode ? "Выключить режим плана" : "Режим плана: только чтение")
+
+            SettingsLink {
+                Label("Настройки", systemImage: "gearshape")
+            }
+            .help("Настройки (⌘,)")
         }
     }
 
@@ -173,133 +215,67 @@ struct RootView: View {
         let text = draft
         let files = attachments
         draft = ""
-        composerHeight = 24
+        composerHeight = Size.composerMin
         attachments = []
         chat.send(text, attachments: files)
     }
 }
 
-struct HeaderBar: View {
-    let palette: Palette
-    let planMode: Bool
-    @Environment(AppSettings.self) private var settings
-    @Environment(ChatStore.self) private var chat
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text("HARNES-S")
-                .fontWeight(.semibold)
-                .foregroundStyle(palette.text)
-
-            HStack(spacing: 4) {
-                Image(systemName: "folder")
-                    .font(.system(size: 10))
-                Text("HARNES_S_DATA/workspace")
-            }
-            .foregroundStyle(palette.dim)
-
-            Spacer(minLength: 12)
-
-            // S4: only the fact that a child is working. Finished children lose their
-            // pill immediately; the report arrives in the transcript.
-            SubagentPills(agents: chat.runningSubagents, palette: palette)
-
-            if planMode {
-                Text("plan")
-                    .foregroundStyle(palette.reasoning)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(palette.reasoningBackground)
-                    .clipShape(Capsule())
-            }
-
-            Button {
-                chat.setPlanMode(!planMode)
-            } label: {
-                Image(systemName: planMode ? "eye.slash" : "eye")
-                    .font(.system(size: 11))
-                    .frame(width: 22, height: 22)
-                    .foregroundStyle(planMode ? palette.reasoning : palette.dim)
-            }
-            .buttonStyle(.borderless)
-            .help(planMode ? "Выключить режим плана" : "Режим плана: только чтение")
-            .accessibilityLabel("Режим плана")
-
-            SettingsLink {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 11))
-                    .frame(width: 22, height: 22)
-            }
-            .buttonStyle(.borderless)
-            .help("Настройки (⌘,)")
-            .accessibilityLabel("Настройки")
-        }
-        .font(AppFont.mono(11))
-        .padding(.horizontal, 16)
-        .frame(height: 38)
-        .background(palette.panel)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(palette.border)
-                .frame(height: 1)
-        }
-    }
-}
-
 struct PlanBar: View {
     let todos: TodoStore
-    let palette: Palette
     let fontSize: CGFloat
 
+    @Environment(\.theme) private var theme
     @State private var expanded = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Spacing.tight) {
             Button {
                 withAnimation(.easeInOut(duration: 0.12)) { expanded.toggle() }
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: Spacing.offGrid6) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
+                        .imageScale(.small)
                     Text("план · \(todos.items.filter { $0.status == "done" }.count)/\(todos.items.count)")
-                    Spacer(minLength: 0)
+                    Spacer(minLength: Spacing.zero)
                     Button {
                         todos.clear()
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 8, weight: .semibold))
+                            .imageScale(.small)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("Убрать план")
                     .accessibilityLabel("Убрать план")
                 }
-                .font(AppFont.mono(max(fontSize - 3, 9)))
-                .foregroundStyle(palette.dim)
+                .font(.caption)
+                .foregroundStyle(theme.labelSecondary)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             if expanded {
                 ForEach(todos.items) { item in
-                    HStack(alignment: .top, spacing: 6) {
+                    HStack(alignment: .top, spacing: Spacing.offGrid6) {
                         Text(mark(item.status))
                             .foregroundStyle(color(item.status))
                         Text(item.text)
-                            .foregroundStyle(item.status == "done" ? palette.faint : palette.text)
-                            .strikethrough(item.status == "done", color: palette.faint)
+                            .foregroundStyle(item.status == "done" ? theme.labelTertiary : theme.labelPrimary)
+                            .strikethrough(item.status == "done", color: theme.labelTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .font(AppFont.mono(max(fontSize - 2, 10)))
+                    .font(AppFont.ui(max(fontSize - 2, FontSize.minReadable)))
                 }
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.panel.opacity(0.7))
+        .padding(.horizontal, Spacing.offGrid20)
+        .padding(.vertical, Spacing.small)
+        .frame(maxWidth: Layout.chatContainer, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .background(theme.controlBackground)
         .overlay(alignment: .top) {
-            Rectangle().fill(palette.border).frame(height: 1)
+            Rectangle().fill(theme.separator).frame(height: Spacing.hairline)
         }
     }
 
@@ -314,10 +290,10 @@ struct PlanBar: View {
 
     private func color(_ status: String) -> Color {
         switch status {
-        case "done": palette.faint
-        case "active", "in_progress": palette.accent
-        case "cancelled": palette.number
-        default: palette.dim
+        case "done": theme.labelTertiary
+        case "active", "in_progress": theme.accent
+        case "cancelled": theme.destructive
+        default: theme.labelSecondary
         }
     }
 }

@@ -51,7 +51,7 @@ struct StyleSettingsView: View {
 
                 Section("Что изучено") {
                     Text(summary.isEmpty ? "Пока нет данных." : summary)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
 

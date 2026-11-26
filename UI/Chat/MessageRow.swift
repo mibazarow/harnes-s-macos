@@ -3,18 +3,18 @@ import SwiftUI
 
 struct MessageRow: View, Equatable {
     let message: ChatMessage
-    let palette: Palette
     let fontSize: CGFloat
     let showTimestamp: Bool
     /// New answers receive a brief opacity transition; history appears immediately.
     var animateReveal: Bool = false
+
+    @Environment(\.theme) private var theme
 
     /// Rows that did not change must not re-render while another row streams: with a
     /// plain stack this is what keeps a long transcript from re-parsing every message
     /// on every token.
     nonisolated static func == (lhs: MessageRow, rhs: MessageRow) -> Bool {
         lhs.message == rhs.message
-            && lhs.palette == rhs.palette
             && lhs.fontSize == rhs.fontSize
             && lhs.showTimestamp == rhs.showTimestamp
             && lhs.animateReveal == rhs.animateReveal
@@ -23,73 +23,37 @@ struct MessageRow: View, Equatable {
     private var isUser: Bool { message.role == .user }
 
     var body: some View {
-        BubbleContainer(isUser: isUser) {
-            content
-        }
+        // No bubble: role, text and space. The container is only a symmetric inset.
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Spacing.offGrid15)
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text(message.role.label)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(labelColor)
-
-                if showTimestamp {
-                    Text(message.date.formatted(date: .omitted, time: .shortened))
-                        .foregroundStyle(palette.faint)
-                }
-
-                if message.state == .streaming {
-                    Text("●")
-                        .foregroundStyle(palette.accent)
-                }
-
-                switch message.state {
-                case .queued:
-                    StateBadge(
-                        symbol: "clock",
-                        text: "в очереди",
-                        color: palette.reasoning,
-                        fontSize: fontSize
-                    )
-                case .cancelled:
-                    StateBadge(
-                        symbol: "xmark",
-                        text: "не отправлено",
-                        color: palette.faint,
-                        fontSize: fontSize
-                    )
-                case .streaming, .complete:
-                    EmptyView()
-                }
-
-                Spacer(minLength: 0)
-            }
-            .font(AppFont.mono(max(fontSize - 2, 9)))
+        VStack(alignment: .leading, spacing: Spacing.small) {
+            roleLine
 
             if !message.tools.isEmpty {
-                ToolTraceList(traces: message.tools, palette: palette, fontSize: fontSize)
+                ToolTraceList(traces: message.tools, fontSize: fontSize)
             }
 
             if isUser {
                 if !message.text.isEmpty {
                     Text(message.text)
-                        .font(AppFont.mono(fontSize))
-                        .foregroundStyle(palette.text)
+                        .font(AppFont.ui(fontSize))
+                        .foregroundStyle(theme.labelPrimary)
                         .lineSpacing(AppFont.lineSpacing(for: fontSize))
                         .selectableWhileIdle()
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: Layout.textColumn, alignment: .leading)
                 }
                 if !message.attachments.isEmpty {
-                    AttachmentGrid(attachments: message.attachments, palette: palette, fontSize: fontSize)
+                    AttachmentGrid(attachments: message.attachments, fontSize: fontSize)
                 }
             } else {
                 if let reasoning = message.reasoning, !reasoning.isEmpty {
                     ReasoningBlock(
                         text: reasoning,
-                        palette: palette,
                         fontSize: fontSize,
                         isStreaming: message.state == .streaming
                     )
@@ -98,7 +62,6 @@ struct MessageRow: View, Equatable {
                 if !message.text.isEmpty {
                     AnswerText(
                         text: message.text,
-                        palette: palette,
                         fontSize: fontSize,
                         animate: animateReveal,
                         isStreaming: message.state == .streaming
@@ -110,37 +73,73 @@ struct MessageRow: View, Equatable {
                     // screen it already shows that work is happening, and a second
                     // "thinking" line under it is just noise.
                     Text("думает…")
-                        .font(AppFont.mono(fontSize))
-                        .foregroundStyle(palette.faint)
+                        .font(AppFont.ui(fontSize))
+                        .foregroundStyle(theme.labelTertiary)
                 }
             }
 
             if let warning = message.warning, !warning.isEmpty {
-                HStack(alignment: .top, spacing: 6) {
+                HStack(alignment: .top, spacing: Spacing.offGrid6) {
                     Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: max(fontSize - 2, 9)))
+                        .imageScale(.small)
                     Text(warning)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .font(AppFont.mono(max(fontSize - 2, 9)))
-                .foregroundStyle(palette.reasoning)
-                .padding(.top, 2)
+                .font(.caption)
+                .foregroundStyle(theme.warning)
+                .padding(.top, Spacing.offGrid2)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(bubbleBackground)
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(isUser ? palette.accent.opacity(0.7) : palette.border)
-                .frame(width: isUser ? 3 : 2)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
         .contextMenu {
-            Button("Копировать сообщение") { copyToPasteboard() }
+            Button("Копировать сообщение", systemImage: "doc.on.doc") { copyToPasteboard() }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(isUser ? "Сообщение пользователя" : "Ответ Харнеса")
+    }
+
+    /// `ВЫ · 21:47` / `АССИСТЕНТ · 21:47`: caption, tertiary, upper case with tracking.
+    /// No accent: the accent is for actions, not decoration.
+    private var roleLine: some View {
+        HStack(spacing: Spacing.offGrid6) {
+            Text(message.role.label)
+                .textCase(.uppercase)
+                .tracking(0.6)
+
+            if showTimestamp {
+                Text("·")
+                Text(message.date.formatted(date: .omitted, time: .shortened))
+            }
+
+            if message.state == .streaming {
+                ProgressView()
+                    .controlSize(.mini)
+                    .scaleEffect(0.6)
+                    .frame(width: Spacing.medium, height: Spacing.medium)
+            }
+
+            switch message.state {
+            case .queued:
+                StateBadge(symbol: "clock", text: "в очереди", tone: .neutral)
+            case .cancelled:
+                StateBadge(symbol: "xmark", text: "не отправлено", tone: .neutral)
+            case .streaming, .complete:
+                EmptyView()
+            }
+
+            Spacer(minLength: Spacing.zero)
+        }
+        .font(.caption2)
+        .foregroundStyle(theme.labelTertiary)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityRole)
+    }
+
+    private var accessibilityRole: String {
+        switch message.role {
+        case .user: "Пользователь"
+        case .assistant: "Ассистент"
+        case .system: "Система"
+        }
     }
 
     /// Whole-message copy for cases where dragging across several paragraphs is awkward.
@@ -157,48 +156,44 @@ struct MessageRow: View, Equatable {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(parts.joined(separator: "\n\n"), forType: .string)
     }
-
-    private var bubbleBackground: Color {
-        isUser ? palette.userBackground : palette.panel
-    }
-
-    private var labelColor: Color {
-        switch message.role {
-        case .user: palette.accent
-        case .assistant: palette.dim
-        case .system: palette.faint
-        }
-    }
 }
 
-/// Small pill that explains why a message has no answer yet.
+/// Small pill that explains why a message has no answer yet. Icon plus text, never
+/// colour alone.
 struct StateBadge: View {
+    enum Tone {
+        case neutral
+        case warning
+    }
+
     let symbol: String
     let text: String
-    let color: Color
-    let fontSize: CGFloat
+    var tone: Tone = .neutral
+
+    @Environment(\.theme) private var theme
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.tight) {
             Image(systemName: symbol)
-                .font(.system(size: max(fontSize - 4, 8)))
+                .imageScale(.small)
             Text(text)
         }
-        .foregroundStyle(color)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 1)
-        .background(color.opacity(0.12))
-        .clipShape(Capsule())
+        .font(.caption2)
+        .foregroundStyle(tone == .warning ? theme.warning : theme.labelSecondary)
+        .padding(.horizontal, Spacing.offGrid6)
+        .padding(.vertical, Spacing.offGrid2)
+        .background(theme.labelQuaternary.opacity(0.15), in: Capsule())
     }
 }
 
 struct AttachmentGrid: View {
     let attachments: [ChatAttachment]
-    let palette: Palette
     let fontSize: CGFloat
 
+    @Environment(\.theme) private var theme
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.small) {
             ForEach(attachments) { attachment in
                 if let thumbnail = attachment.thumbnail,
                    let image = NSImage(data: thumbnail) {
@@ -208,32 +203,27 @@ struct AttachmentGrid: View {
                         Image(nsImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: 320, maxHeight: 220, alignment: .leading)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(palette.border, lineWidth: 1)
-                            )
+                            .frame(maxWidth: Spacing.offGrid32 * 10, maxHeight: Spacing.offGrid20 * 11, alignment: .leading)
+                            .clipShape(RoundedRectangle(cornerRadius: Radius.control))
                     }
                     .buttonStyle(.plain)
                     .help("Открыть \(attachment.name)")
                 } else {
-                    HStack(spacing: 8) {
+                    HStack(spacing: Spacing.small) {
                         Image(systemName: symbol(for: attachment.kind))
-                            .foregroundStyle(palette.dim)
-                        VStack(alignment: .leading, spacing: 1) {
+                            .foregroundStyle(theme.labelSecondary)
+                        VStack(alignment: .leading, spacing: Spacing.hairline) {
                             Text(attachment.name)
-                                .foregroundStyle(palette.text)
+                                .foregroundStyle(theme.labelPrimary)
                             Text(attachment.kind == .folder ? attachment.path : attachment.summary)
-                                .foregroundStyle(palette.faint)
+                                .foregroundStyle(theme.labelTertiary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
                     }
-                    .font(AppFont.mono(max(fontSize - 2, 9)))
-                    .padding(8)
-                    .background(palette.background.opacity(0.6))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .font(.caption)
+                    .padding(Spacing.small)
+                    .background(theme.controlBackground, in: RoundedRectangle(cornerRadius: Radius.control))
                 }
             }
         }
@@ -251,52 +241,51 @@ private func symbol(for kind: ChatAttachment.Kind) -> String {
 
 struct ToolTraceList: View {
     let traces: [ToolTrace]
-    let palette: Palette
     let fontSize: CGFloat
 
+    @Environment(\.theme) private var theme
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Spacing.hairline) {
             ForEach(traces) { trace in
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: symbol(for: trace))
-                        .font(.system(size: 9))
-                        .foregroundStyle(trace.isError ? palette.number : palette.faint)
-                        .frame(width: 12)
-                        .padding(.top, 1)
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.offGrid6) {
+                        Image(systemName: symbol(for: trace))
+                            .imageScale(.small)
+                            .foregroundStyle(trace.isError ? theme.destructive : theme.labelTertiary)
+                            .frame(width: Spacing.medium, alignment: .center)
 
-                    Text(trace.name)
-                        .foregroundStyle(palette.dim)
+                        // Mono is for the tool name; the human line next to it is prose.
+                        Text(trace.name)
+                            .font(AppFont.mono(max(fontSize - 2, FontSize.minReadable)))
+                            .foregroundStyle(theme.labelSecondary)
 
-                    Text(ToolTrace.summaryText(for: trace))
-                        .foregroundStyle(palette.faint)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
+                        Text(ToolTrace.summaryText(for: trace))
+                            .foregroundStyle(theme.labelTertiary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
 
-                    Spacer(minLength: 0)
+                        Spacer(minLength: Spacing.zero)
 
-                    if trace.isRunning {
-                        Text("…")
-                            .foregroundStyle(palette.accent)
+                        if trace.isRunning {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .scaleEffect(0.6)
+                                .frame(width: Spacing.medium, height: Spacing.medium)
+                        }
                     }
-                }
-                .font(AppFont.mono(max(fontSize - 3, 9)))
+                    .font(.caption)
 
-                if let path = trace.imagePath {
-                    LocalChatImage(path: path)
-                        .frame(maxWidth: 420, maxHeight: 260, alignment: .leading)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(palette.border, lineWidth: 1)
-                        )
-                        .padding(.leading, 18)
+                    if let path = trace.imagePath {
+                        LocalChatImage(path: path)
+                            .frame(maxWidth: Spacing.offGrid32 * 13, maxHeight: Spacing.offGrid32 * 8, alignment: .leading)
+                            .clipShape(RoundedRectangle(cornerRadius: Radius.control))
+                            .padding(.leading, Spacing.offGrid20)
+                    }
                 }
             }
         }
-        .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.background.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 5))
         .accessibilityElement(children: .combine)
     }
 
@@ -348,31 +337,34 @@ struct LocalChatImage: View {
 
 struct ReasoningBlock: View {
     let text: String
-    let palette: Palette
     let fontSize: CGFloat
     var isStreaming: Bool = false
 
+    @Environment(\.theme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Spacing.offGrid6) {
             Button {
-                withAnimation(.easeInOut(duration: 0.15)) {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.15)) {
                     expanded.toggle()
                 }
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: Spacing.offGrid6) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
+                        .imageScale(.small)
                     Text("размышления")
                     if isStreaming {
                         ProgressView()
                             .controlSize(.mini)
+                            .scaleEffect(0.6)
+                            .frame(width: Spacing.medium, height: Spacing.medium)
                     }
-                    Spacer(minLength: 0)
+                    Spacer(minLength: Spacing.zero)
                 }
-                .font(AppFont.mono(max(fontSize - 2, 9)))
-                .foregroundStyle(palette.reasoning)
+                .font(.caption)
+                .foregroundStyle(theme.labelSecondary)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -380,44 +372,22 @@ struct ReasoningBlock: View {
 
             if expanded {
                 Text(text)
-                    .font(AppFont.mono(fontSize))
-                    .foregroundStyle(palette.reasoning)
+                    .font(AppFont.ui(fontSize))
+                    .foregroundStyle(theme.labelSecondary)
                     .lineSpacing(AppFont.lineSpacing(for: fontSize))
                     .selectableWhileIdle()
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(palette.reasoningBackground)
-                    .overlay(alignment: .leading) {
-                        Rectangle()
-                            .fill(palette.reasoning.opacity(0.45))
-                            .frame(width: 2)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .padding(Spacing.medium)
+                    .frame(maxWidth: Layout.textColumn, alignment: .leading)
+                    .background(theme.reasoningBackground, in: RoundedRectangle(cornerRadius: Radius.control))
+                    .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .top)))
             }
         }
     }
 }
 
-/// Full-width message body with a small symmetric inset.
-/// Nothing is laid out beyond the available width, so shrinking the window
-/// wraps text instead of pushing it off-screen.
-struct BubbleContainer<Content: View>: View {
-    let isUser: Bool
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        content
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 15)
-    }
-}
-
-
 /// Render the final layout immediately; appearance never delays access to the answer.
 struct AnswerText: View {
     let text: String
-    let palette: Palette
     let fontSize: CGFloat
     var animate: Bool = false
     var isStreaming: Bool = false
@@ -426,7 +396,7 @@ struct AnswerText: View {
     @State private var appeared = false
 
     var body: some View {
-        MarkdownView(text: text, palette: palette, fontSize: fontSize, isStreaming: isStreaming)
+        MarkdownView(text: text, fontSize: fontSize, isStreaming: isStreaming)
             .opacity(appeared || !animate || reduceMotion ? 1 : 0.85)
             .onAppear {
                 withAnimation(reduceMotion || !animate ? nil : .easeOut(duration: 0.16)) {

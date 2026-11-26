@@ -28,16 +28,33 @@ final class TranscriptGroupingTests: XCTestCase {
     }
 
     @MainActor
-    func testThemePersistsWithDarkDefault() {
+    func testThemeDefaultsToSystemAndPersists() {
         let name = "theme-test-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = AppSettings(defaults: defaults)
-        XCTAssertEqual(settings.theme, .dark)
-        XCTAssertEqual(settings.theme.palette, Palette.dark)
+        // Step 2: the system theme is the default; Copper is an option, not the identity.
+        XCTAssertEqual(settings.theme, .system)
+        XCTAssertNil(settings.theme.tokens.scheme, "системная тема следует за системой")
+        XCTAssertEqual(settings.theme.tokens, ThemeTokens.system)
+
+        settings.theme = .copper
+        XCTAssertEqual(AppSettings(defaults: defaults).theme, .copper)
+        XCTAssertNil(settings.theme.tokens.scheme, "Copper рендерится в обеих схемах")
+        XCTAssertEqual(settings.theme.tokens.syntax, Palette.copperAdaptive)
+
         settings.theme = .light
-        XCTAssertEqual(AppSettings(defaults: defaults).theme, .light)
-        XCTAssertEqual(settings.theme.palette.scheme, .light)
+        XCTAssertEqual(settings.theme.tokens.scheme, .light)
+    }
+
+    func testCopperKeepsItsLook() {
+        // Copper is the previous palette mapped onto roles, not a new design. Its code
+        // colours resolve per appearance, so equality is on the theme id and on the
+        // dark rendering of the Copper palette itself.
+        let copper = ThemeTokens.copper
+        XCTAssertEqual(copper.id, "copper")
+        XCTAssertEqual(Palette.copper.text, Color(hex: 0xE2D8CD))
+        XCTAssertEqual(Palette.copper.accent, Color(hex: 0xB87333))
     }
 
     @MainActor
@@ -64,7 +81,7 @@ final class TranscriptGroupingTests: XCTestCase {
     func testStreamingMarkdownUpdatesBeforeStreamEnds() async throws {
         let resize = LiveResizeState()
         let host = NSHostingView(rootView: MarkdownView(
-            text: "Start", palette: .current, fontSize: 14, isStreaming: true
+            text: "Start", fontSize: 14, isStreaming: true
         ).environment(resize))
         host.frame = NSRect(x: 0, y: 0, width: 400, height: 800)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless],
@@ -76,7 +93,7 @@ final class TranscriptGroupingTests: XCTestCase {
         for index in 1...20 {
             host.rootView = MarkdownView(
                 text: (0...index).map { "Paragraph \($0)" }.joined(separator: "\n\n"),
-                palette: .current, fontSize: 14, isStreaming: true
+                fontSize: 14, isStreaming: true
             ).environment(resize)
             try await Task.sleep(for: .milliseconds(30))
             host.layoutSubtreeIfNeeded()
