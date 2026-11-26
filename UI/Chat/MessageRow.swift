@@ -11,6 +11,9 @@ struct MessageRow: View, Equatable {
     var searchQuery: String = ""
 
     @Environment(\.theme) private var theme
+    /// Measured width of the transcript content, before the row's side padding. The
+    /// bubble limits in `Bubble` are fractions of this width.
+    @State private var containerWidth: CGFloat = 0
 
     /// Rows that did not change must not re-render while another row streams: with a
     /// plain stack this is what keeps a long transcript from re-parsing every message
@@ -26,36 +29,73 @@ struct MessageRow: View, Equatable {
     private var isUser: Bool { message.role == .user }
 
     var body: some View {
-        // The assistant answers are prose on the page. The user's own words get a quiet
-        // plate of a slightly different shade, so "where I wrote" is obvious without
-        // reading the role line.
-        Group {
+        // Both roles sit in bubbles: the user's words on a warm plate on the right, the
+        // answer on a white plate on the left. The role line is gone — position and
+        // shade already say who wrote what.
+        HStack(spacing: Spacing.zero) {
             if isUser {
-                content
-                    .padding(.horizontal, Spacing.medium)
-                    .padding(.vertical, Spacing.small)
-                    // A bubble, not a banner: it stops at the prose column instead of
-                    // stretching across the whole container.
-                    .frame(maxWidth: Layout.textColumn, alignment: .leading)
-                    .background(
-                        theme.userBubble,
-                        in: RoundedRectangle(cornerRadius: Radius.panel)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Radius.panel)
-                            .stroke(theme.separator.opacity(0.55), lineWidth: Spacing.hairline)
-                    )
-            } else {
-                content
+                Spacer(minLength: Spacing.zero)
+            }
+
+            bubble
+
+            if !isUser {
+                Spacer(minLength: Spacing.zero)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Spacing.offGrid15)
+        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        // Measured before the column padding: the bubble limits are fractions of the
+        // content box, exactly as `calc(100% - 50px)` and `86%` in the mockup.
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+        } action: { width in
+            containerWidth = width
+        }
+        // The 760 pt message column with 24 pt of air on each side, as in the mockup.
+        .padding(.horizontal, Spacing.section)
+        .frame(maxWidth: Layout.textColumn)
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var bubble: some View {
+        content
+            .padding(.vertical, Bubble.verticalPadding)
+            .padding(.horizontal, Bubble.horizontalPadding)
+            // The answer is a block that fills its column; the user bubble hugs its
+            // text and only stops at 86% of the container.
+            .frame(maxWidth: isUser ? nil : .infinity, alignment: .leading)
+            .background(bubbleBackground, in: bubbleShape)
+            .overlay(bubbleShape.stroke(bubbleBorder, lineWidth: Spacing.hairline))
+            .frame(
+                maxWidth: containerWidth > 0
+                    ? Bubble.maxWidth(container: containerWidth, isUser: isUser)
+                    : nil,
+                alignment: isUser ? .trailing : .leading
+            )
+    }
+
+    private var bubbleShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: Bubble.radius,
+            bottomLeadingRadius: isUser ? Bubble.radius : Bubble.tailRadius,
+            bottomTrailingRadius: isUser ? Bubble.tailRadius : Bubble.radius,
+            topTrailingRadius: Bubble.radius
+        )
+    }
+
+    private var bubbleBackground: Color {
+        isUser ? theme.userBubble : theme.assistantBubble
+    }
+
+    private var bubbleBorder: Color {
+        isUser ? theme.userBubbleBorder : theme.assistantBubbleBorder
     }
 
     private var content: some View {
         VStack(alignment: .leading, spacing: Spacing.small) {
-            roleLine
+            if showsStateLine {
+                roleLine
+            }
 
             if !message.tools.isEmpty {
                 ToolTraceList(traces: message.tools, fontSize: fontSize, searchQuery: searchQuery)
@@ -73,7 +113,8 @@ struct MessageRow: View, Equatable {
                         .lineSpacing(AppFont.lineSpacing(for: fontSize))
                         .selectableWhileIdle()
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: Layout.textColumn, alignment: .leading)
+                        // No width cap of its own: the user bubble hugs the text and
+                        // stops at 86% of the column, as in the mockup.
                 }
                 if !message.attachments.isEmpty {
                     AttachmentGrid(attachments: message.attachments, fontSize: fontSize)
@@ -127,19 +168,20 @@ struct MessageRow: View, Equatable {
         .accessibilityLabel(isUser ? "Сообщение пользователя" : "Ответ Харнеса")
     }
 
-    /// `ВЫ · 21:47` / `АССИСТЕНТ · 21:47`: caption, tertiary, upper case with tracking.
-    /// No accent: the accent is for actions, not decoration.
+    /// Only states need a line now: the role name and the time are gone. When a
+    /// message is complete there is nothing to draw, so the row does not reserve an
+    /// empty gap above the bubble.
+    private var showsStateLine: Bool {
+        switch message.state {
+        case .streaming, .queued, .cancelled: true
+        case .complete: false
+        }
+    }
+
+    /// The streaming indicator and the `в очереди` / `не отправлено` badges. No role
+    /// name, no timestamp: the bubble already says who wrote it.
     private var roleLine: some View {
         HStack(spacing: Spacing.offGrid6) {
-            Text(message.role.label)
-                .textCase(.uppercase)
-                .tracking(0.6)
-
-            if showTimestamp {
-                Text("·")
-                Text(message.date.formatted(date: .omitted, time: .shortened))
-            }
-
             if message.state == .streaming {
                 ProgressView()
                     .controlSize(.mini)
@@ -287,9 +329,10 @@ struct ToolTraceList: View {
                             .frame(width: Spacing.medium, alignment: .center)
 
                         // Mono is for the tool name; the human line next to it is prose.
+                        // The strong copper is the readable one on light surfaces.
                         Text(trace.name)
                             .font(AppFont.mono(max(fontSize - 2, FontSize.minReadable)))
-                            .foregroundStyle(theme.labelSecondary)
+                            .foregroundStyle(theme.accentStrong)
 
                         Text(SearchHighlight.attributed(
                             ToolTrace.summaryText(for: trace),

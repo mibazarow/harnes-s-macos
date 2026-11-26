@@ -41,6 +41,27 @@ enum Radius {
     static let medium: CGFloat = 8
 }
 
+/// The "Пузыри" transcript geometry from `design/chat-stand.html`.
+///
+/// The numbers are fixed by the accepted mockup: radius 14, 11/14 padding, 14 between
+/// messages, the answer stops 50 pt short of the container and the user bubble never
+/// takes more than 86% of it.
+enum Bubble {
+    static let radius: CGFloat = 14
+    static let tailRadius: CGFloat = 4
+    static let verticalPadding: CGFloat = 11
+    static let horizontalPadding: CGFloat = 14
+    static let gap: CGFloat = 14
+    static let assistantInset: CGFloat = 50
+    static let userMaxWidthFraction: CGFloat = 0.86
+
+    /// The answer is a block that fills `container − 50`; the user bubble hugs its
+    /// content but may not grow past 86% of the container.
+    static func maxWidth(container: CGFloat, isUser: Bool) -> CGFloat {
+        isUser ? container * userMaxWidthFraction : max(container - assistantInset, 0)
+    }
+}
+
 enum Size {
     static let controlSmall: CGFloat = 20
     static let controlRegular: CGFloat = 24

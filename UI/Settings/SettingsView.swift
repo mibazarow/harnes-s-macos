@@ -70,8 +70,6 @@ struct GeneralSettingsView: View {
                 Text("Масштабирует только транскрипт: тулбар и настройки живут в системном размере.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-                Toggle("Показывать время сообщений", isOn: $settings.showTimestamps)
             } header: {
                 Text("Внешний вид")
             }

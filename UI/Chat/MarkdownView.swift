@@ -392,7 +392,7 @@ extension MarkdownBlockView {
                 let inner = renderInline(link, style: style)
                 var linked = inner
                 linked.link = link.destination.flatMap(URL.init(string:))
-                linked.foregroundColor = theme.accent
+                linked.foregroundColor = theme.accentStrong
                 result.append(linked)
             } else if let image = child as? Markdown.Image {
                 var next = style
@@ -428,10 +428,10 @@ extension MarkdownBlockView {
 
         fragment.foregroundColor = style.dimmed ? theme.labelSecondary : theme.labelPrimary
 
-        // Inline code is tinted with the accent and left on the page background, so
-        // paths, flags and hashes stand out without a plate behind them.
+        // Inline code and links use the strong copper: the button accent is too light
+        // to read as text on the page and on both bubble plates.
         if style.code {
-            fragment.foregroundColor = theme.accent
+            fragment.foregroundColor = theme.accentStrong
         }
 
         if style.strikethrough {
@@ -439,7 +439,7 @@ extension MarkdownBlockView {
         }
         if let link {
             fragment.link = link
-            fragment.foregroundColor = theme.accent
+            fragment.foregroundColor = theme.accentStrong
         }
 
         // R33: the find bar tints hits after every other attribute is set, so a match

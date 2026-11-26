@@ -2,8 +2,8 @@ import SwiftUI
 import XCTest
 @testable import Harness
 
-/// Smoke tests for the HIG layout: the views must lay out in the app's only theme and
-/// must not depend on the old bubble or on a palette passed down by hand.
+/// Smoke tests for the light "Пузыри" layout: the views must lay out in the app's only
+/// theme and must not depend on the old bubble or on a palette passed down by hand.
 @MainActor
 final class DesignLayoutTests: XCTestCase {
     private func host<Content: View>(_ view: Content, width: CGFloat = 900) -> NSHostingView<Content> {
@@ -65,9 +65,36 @@ final class DesignLayoutTests: XCTestCase {
         XCTAssertGreaterThan(host.fittingSize.height, 40, "блок кода отрисован")
     }
 
-    func testThereIsOneThemeAndItIsDark() {
+    func testThereIsOneThemeAndItIsLight() {
         XCTAssertEqual(ThemeTokens.copper.id, "copper")
-        XCTAssertEqual(ThemeTokens.copper.scheme, .dark)
+        XCTAssertEqual(ThemeTokens.copper.scheme, .light)
+    }
+
+    func testBubbleWidthsFollowTheMockup() {
+        let container: CGFloat = 1_000
+        XCTAssertEqual(Bubble.maxWidth(container: container, isUser: false), container - 50)
+        XCTAssertEqual(Bubble.maxWidth(container: container, isUser: true), container * 0.86)
+        XCTAssertLessThanOrEqual(
+            Bubble.maxWidth(container: container, isUser: true),
+            container * 0.86,
+            "пузырь пользователя не должен занимать больше 86% контейнера"
+        )
+    }
+
+    func testMessageRowDoesNotRenderRoleNameOrTime() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("UI/Chat/MessageRow.swift"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(source.contains("message.role.label"), "имя роли убрано")
+        XCTAssertFalse(source.contains("message.date"), "время убрано")
+        XCTAssertFalse(source.contains("formatted(date:"), "время убрано")
+        // The state badges are not role decoration and must stay.
+        XCTAssertTrue(source.contains("в очереди"))
+        XCTAssertTrue(source.contains("не отправлено"))
     }
 
     func testHeaderBarIsGone() throws {
@@ -84,8 +111,8 @@ final class DesignLayoutTests: XCTestCase {
     }
 }
 
-/// The user's message must be visually distinct from the answer in every theme, and the
-/// answer must stay plain prose.
+/// Both roles must be visually distinct bubbles in the light theme, and both must stay
+/// readable on their own plate.
 @MainActor
 final class UserBubbleTests: XCTestCase {
     private func luminance(_ color: NSColor) throws -> Double {
@@ -102,13 +129,23 @@ final class UserBubbleTests: XCTestCase {
         return (max(x, y) + 0.05) / (min(x, y) + 0.05)
     }
 
-    func testCopperBubbleDiffersFromTheBackground() throws {
+    func testUserBubbleDiffersFromTheBackground() throws {
         let palette = Palette()
         let bubble = try XCTUnwrap(NSColor(palette.userBackground).usingColorSpace(.sRGB))
         let background = try XCTUnwrap(NSColor(palette.background).usingColorSpace(.sRGB))
         XCTAssertGreaterThan(
             abs(try luminance(bubble) - luminance(background)), 0.005,
-            "медный пузырь должен быть виден"
+            "пузырь пользователя должен быть виден"
+        )
+    }
+
+    func testAssistantBubbleIsAWhitePlate() throws {
+        let palette = Palette()
+        let bubble = try XCTUnwrap(NSColor(palette.assistantBubble).usingColorSpace(.sRGB))
+        let background = try XCTUnwrap(NSColor(palette.background).usingColorSpace(.sRGB))
+        XCTAssertGreaterThan(
+            abs(try luminance(bubble) - luminance(background)), 0.005,
+            "белый пузырь ответа должен отличаться от бумажного фона"
         )
     }
 
@@ -116,10 +153,31 @@ final class UserBubbleTests: XCTestCase {
         let palette = Palette()
         let text = try XCTUnwrap(NSColor(palette.text).usingColorSpace(.sRGB))
         let bubble = try XCTUnwrap(NSColor(palette.userBackground).usingColorSpace(.sRGB))
-        XCTAssertGreaterThanOrEqual(try contrast(text, bubble), 4.5, "текст на пузыре Copper должен читаться")
+        XCTAssertGreaterThanOrEqual(try contrast(text, bubble), 4.5, "текст на пузыре должен читаться")
     }
 
-    func testCopperKeepsTheOldUserShade() {
-        XCTAssertEqual(Palette().userBackground, Color(hex: 0x1F1B16))
+    func testAccentStrongIsReadableOnEverySurface() throws {
+        let palette = Palette()
+        let copper = try XCTUnwrap(NSColor(palette.accentStrong).usingColorSpace(.sRGB))
+        let surfaces = [
+            palette.background,
+            palette.panel,
+            palette.codeBackground,
+            palette.assistantBubble,
+            palette.userBackground
+        ]
+        for surface in surfaces {
+            let nsSurface = try XCTUnwrap(NSColor(surface).usingColorSpace(.sRGB))
+            XCTAssertGreaterThanOrEqual(
+                try contrast(copper, nsSurface), 4.5,
+                "медь на именах инструментов и инлайн-коде должна читаться"
+            )
+        }
+    }
+
+    func testLightPaletteKeepsTheBubblesValues() {
+        XCTAssertEqual(Palette().userBackground, Color(hex: 0xF3E7D5))
+        XCTAssertEqual(Palette().assistantBubble, Color(hex: 0xFFFFFF))
+        XCTAssertEqual(Palette().background, Color(hex: 0xFBFAF8))
     }
 }

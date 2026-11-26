@@ -3,11 +3,12 @@ import SwiftUI
 
 /// A view never knows what "orange" means: it asks for a role.
 ///
-/// There is one theme, Copper, and it is always dark. The app has no appearance choice:
-/// no system/light/dark variants and no setting to pick between them.
+/// There is one theme, Copper, and it is always light: the "Пузыри" variant of
+/// `design/chat-stand.html`. The app has no appearance choice: no system/light/dark
+/// variants and no setting to pick between them.
 struct ThemeTokens: Equatable, Sendable {
     var id: String
-    /// Always `.dark`. Kept as a field so the window can pin its appearance in one place.
+    /// Always `.light`. Kept as a field so the window can pin its appearance in one place.
     var scheme: ColorScheme
 
     var windowBackground: Color
@@ -21,6 +22,9 @@ struct ThemeTokens: Equatable, Sendable {
     var labelQuaternary: Color
 
     var accent: Color
+    /// Readable copper for tool names, inline code and links. The button `accent` is
+    /// too light on these surfaces to carry text.
+    var accentStrong: Color
     var destructive: Color
     var warning: Color
     var success: Color
@@ -28,9 +32,13 @@ struct ThemeTokens: Equatable, Sendable {
 
     var reasoningBackground: Color
     var codeBackground: Color
-    /// The user's own messages sit on a slightly different shade, so the transcript
-    /// makes "where I wrote" and "where it answered" obvious at a glance.
+    /// Both transcript roles sit in bubbles. The user's own words take a warm plate,
+    /// the answer takes a white one, so "where I wrote" and "where it answered" are
+    /// obvious without a role line.
     var userBubble: Color
+    var userBubbleBorder: Color
+    var assistantBubble: Color
+    var assistantBubbleBorder: Color
     var syntax: Palette
 
     /// Text on top of `accent`, for filled buttons.
@@ -44,7 +52,7 @@ extension ThemeTokens {
         let palette = Palette()
         return ThemeTokens(
             id: "copper",
-            scheme: .dark,
+            scheme: .light,
             windowBackground: palette.background,
             contentBackground: palette.background,
             controlBackground: palette.panel,
@@ -55,13 +63,17 @@ extension ThemeTokens {
             // Copper never had a fourth label; the faintest available tone is the point.
             labelQuaternary: palette.faint,
             accent: palette.accent,
-            destructive: palette.number,
-            warning: palette.reasoning,
-            success: Color(hex: 0x2FA84F),
+            accentStrong: palette.accentStrong,
+            destructive: palette.destructive,
+            warning: palette.warning,
+            success: palette.success,
             selection: palette.accent,
             reasoningBackground: palette.reasoningBackground,
             codeBackground: palette.codeBackground,
             userBubble: palette.userBackground,
+            userBubbleBorder: palette.userBubbleBorder,
+            assistantBubble: palette.assistantBubble,
+            assistantBubbleBorder: palette.assistantBubbleBorder,
             syntax: palette
         )
     }()
@@ -90,30 +102,39 @@ extension View {
 
 /// Copper, and the syntax colours that go with it.
 ///
-/// `SyntaxHighlighter` takes this type directly; the default value is the Copper dark
-/// palette, so a plain `Palette()` is the app's only palette.
+/// The values are the light "Пузыри" variant of `design/chat-stand.html`.
+/// `SyntaxHighlighter` takes this type directly; the default value is that palette, so
+/// a plain `Palette()` is the app's only palette.
 struct Palette: Equatable, Sendable {
-    var background = Color(hex: 0x0D0D10)
-    var panel = Color(hex: 0x16161A)
-    var codeBackground = Color(hex: 0x1B1A1E)
-    var border = Color(hex: 0x2A2724)
-    var text = Color(hex: 0xE2D8CD)
-    var assistantText = Color(hex: 0xCFC4B8)
-    var dim = Color(hex: 0x9C9086)
-    var faint = Color(hex: 0x6B6159)
+    var background = Color(hex: 0xFBFAF8)
+    var panel = Color(hex: 0xF4F2EE)
+    var codeBackground = Color(hex: 0xEFEDE8)
+    var border = Color(hex: 0xE1DCD4)
+    var text = Color(hex: 0x23201C)
+    var assistantText = Color(hex: 0x23201C)
+    var dim = Color(hex: 0x635C54)
+    var faint = Color(hex: 0x918879)
 
-    var accent = Color(hex: 0xB87333)
-    var reasoning = Color(hex: 0xD9A05F)
-    var reasoningBackground = Color(hex: 0x1E1A15)
-    var userBackground = Color(hex: 0x1F1B16)
+    var accent = Color(hex: 0xB0601B)
+    /// Readable copper on light surfaces: tool names, inline code and links.
+    var accentStrong = Color(hex: 0xA0510C)
+    var destructive = Color(hex: 0xB0501E)
+    var warning = Color(hex: 0xB0501E)
+    var success = Color(hex: 0x2E7D32)
+    var reasoningBackground = Color(hex: 0xF7F3EB)
+    var userBackground = Color(hex: 0xF3E7D5)
 
-    var keyword = Color(hex: 0xC98A54)
-    var string = Color(hex: 0xB5A38B)
-    var number = Color(hex: 0xD98C4A)
-    var type = Color(hex: 0xD9B27A)
-    var call = Color(hex: 0xE0B27F)
-    var comment = Color(hex: 0x6B6159)
-    var punctuation = Color(hex: 0xA89A8C)
+    var userBubbleBorder = Color(hex: 0xE4D2B8)
+    var assistantBubble = Color(hex: 0xFFFFFF)
+    var assistantBubbleBorder = Color(hex: 0xE4DFD7)
+
+    var keyword = Color(hex: 0x7B3FA0)
+    var string = Color(hex: 0x4A6B1F)
+    var number = Color(hex: 0xA0510C)
+    var type = Color(hex: 0x1F5A96)
+    var call = Color(hex: 0x1F5A96)
+    var comment = Color(hex: 0x8C8479)
+    var punctuation = Color(hex: 0x918879)
 
     init() {}
 }

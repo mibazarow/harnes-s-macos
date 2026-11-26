@@ -28,13 +28,14 @@ final class TranscriptGroupingTests: XCTestCase {
     }
 
     func testCopperKeepsItsLook() {
-        // Copper is the previous palette mapped onto roles, not a new design. There is
-        // one palette now, and the default value of `Palette` is it.
+        // Copper is the app's only palette. It is the light "Пузыри" variant now; the
+        // name and the `copper` id stay so call sites do not move.
         let copper = ThemeTokens.copper
         XCTAssertEqual(copper.id, "copper")
-        XCTAssertEqual(copper.scheme, .dark)
-        XCTAssertEqual(Palette().text, Color(hex: 0xE2D8CD))
-        XCTAssertEqual(Palette().accent, Color(hex: 0xB87333))
+        XCTAssertEqual(copper.scheme, .light)
+        XCTAssertEqual(Palette().text, Color(hex: 0x23201C))
+        XCTAssertEqual(Palette().accent, Color(hex: 0xB0601B))
+        XCTAssertEqual(Palette().accentStrong, Color(hex: 0xA0510C))
     }
 
     @MainActor

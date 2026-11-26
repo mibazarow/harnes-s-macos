@@ -32,7 +32,7 @@ struct TranscriptView: View {
                 // view holds at most `ChatStore.transcriptCap` messages, so laying them
                 // out eagerly is affordable — and unchanged rows are skipped by
                 // `equatable()`.
-                VStack(alignment: .leading, spacing: Spacing.offGrid10) {
+                VStack(alignment: .leading, spacing: Bubble.gap) {
                     if chat.isLoadingOlder || loadingOlder {
                         HStack(spacing: Spacing.small) {
                             ProgressView()

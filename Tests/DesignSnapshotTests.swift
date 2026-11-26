@@ -35,13 +35,18 @@ final class DesignSnapshotTests: XCTestCase {
     )
 
     private var column: some View {
-        VStack(alignment: .leading, spacing: Spacing.offGrid10) {
+        VStack(alignment: .leading, spacing: Bubble.gap) {
             MessageRow(
                 message: ChatMessage(role: .user, text: "Посмотри `init.php` — там регистрация обработчиков размазана. Собери в один блок и убери дубли."),
                 fontSize: 13,
                 showTimestamp: true
             )
             MessageRow(message: assistant, fontSize: 13, showTimestamp: true)
+            MessageRow(
+                message: ChatMessage(role: .user, text: "А на проде сколько таких пустых?"),
+                fontSize: 13,
+                showTimestamp: true
+            )
         }
         .frame(width: Layout.chatContainer - Spacing.offGrid32, alignment: .leading)
         .padding(Spacing.offGrid20)
@@ -68,16 +73,16 @@ final class DesignSnapshotTests: XCTestCase {
 
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless],
                               backing: .buffered, defer: false)
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = NSAppearance(named: .aqua)
         window.contentView = host
         host.layoutSubtreeIfNeeded()
 
         let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: rep)
         let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
-        let url = directory.appendingPathComponent("copper.png")
+        let url = directory.appendingPathComponent("bubbles.png")
         try data.write(to: url)
-        XCTAssertGreaterThan(data.count, 10_000, "copper")
+        XCTAssertGreaterThan(data.count, 10_000, "bubbles")
         print("SNAPSHOT \(url.path)")
         window.contentView = nil
     }

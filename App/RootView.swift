@@ -13,7 +13,7 @@ struct RootView: View {
     /// Set while the user drags a window edge; rows drop text selection for the drag.
     @State private var liveResize = LiveResizeState()
 
-    /// One theme: Copper, always dark. There is no appearance setting to read here.
+    /// One theme: light Copper ("Пузыри"). There is no appearance setting to read here.
     private var tokens: ThemeTokens { .copper }
 
     var body: some View {
@@ -57,8 +57,7 @@ struct RootView: View {
         .environment(\.theme, tokens)
         .environment(liveResize)
         .tint(tokens.accent)
-        // `nil` means "follow the system appearance" — the .system and .copper themes
-        // must not pin a scheme.
+        // Pin the app to its one light theme instead of following the system.
         .preferredColorScheme(tokens.scheme)
         .frame(minWidth: 560, minHeight: 420)
         .navigationTitle("HARNES-S")

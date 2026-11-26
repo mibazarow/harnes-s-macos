@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HARNES-S — стенд чата (светлый)</title>
+<style>
+/* ============================================================
+   Стенд окна чата. Только светлые варианты.
+   Переключалка внизу (или клавиши 1..8).
+   Медь для имён инструментов и инлайн-кода сделана поярче:
+   на светлом фоне светлый купер не читается вообще.
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  --font-ui: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, monospace;
+
+  /* --- базовые токены: бумага --- */
+  --outer: #E7E4DE;
+  --bg: #FBFAF8;
+  --panel: #F4F2EE;
+  --surface: #EFEDE8;
+  --tool-body: #F7F5F1;
+  --user-bg: #F0E8DC;
+  --reason-bg: #F7F3EB;
+
+  --text: #23201C;
+  --text-2: #635C54;
+  --text-3: #918879;
+  --strong: #100D0A;
+
+  --line: #E1DCD4;
+  --line-soft: #EBE7E0;
+
+  --accent: #B0601B;          /* кнопки, акцентные плашки */
+  --accent-strong: #A0510C;   /* медь, которая читается: имена тулз, инлайн-код, ссылки */
+  --accent-tint: #FBF0E1;
+  --send-fg: #FFFFFF;
+
+  --ok: #2E7D32;
+  --bad: #B0501E;
+
+  /* --- синтаксис --- */
+  --tok-k: #7B3FA0;
+  --tok-s: #4A6B1F;
+  --tok-c: #8C8479;
+  --tok-f: #1F5A96;
+  --tok-n: #A0510C;
+
+  /* --- diff / alert --- */
+  --diff-add-bg: #E4F2E4; --diff-add-fg: #2A6B2A;
+  --diff-del-bg: #F9E5D9; --diff-del-fg: #8B4A28;
+  --diff-hunk-bg: #EAE7E1;
+  --alert-bg: #FDF4EA; --alert-line: #E8D2B8; --alert-fg: #8B4A28;
+
+  /* --- метрики --- */
+  --fs: 13px;
+  --lh: 1.55;
+  --gap: 28px;
+  --pad: 24px;
+  --col: 760px;
+  --radius: 8px;
+  --radius-code: 6px;
+  --body-font: var(--font-ui);
+  --msg-rule: none;
+  --bubble-radius: 14px;
+  --bubble-user-bg: #F3E7D5;
+  --bubble-user-line: #E4D2B8;
+  --bubble-bot-bg: #FFFFFF;
+  --bubble-bot-line: #E4DFD7;
+}
+
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--outer);
+  color: var(--text);
+  font: var(--fs)/var(--lh) var(--body-font);
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---------- Каркас окна ---------- */
+.win {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  margin: 0 auto;
+  width: 100%;
+  max-width: 1100px;
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+.titlebar {
+  height: 38px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 12px;
+  color: var(--text-2);
+}
+.dots { display: flex; gap: 6px; }
+.dots i { width: 10px; height: 10px; border-radius: 50%; background: #D6D0C6; display: block; }
+.titlebar .name { color: var(--text); font-weight: 500; }
+.titlebar .spacer { flex: 1; }
+
+/* ---------- Лента ---------- */
+.thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--pad) 0 8px;
+}
+.thread::-webkit-scrollbar { width: 10px; }
+.thread::-webkit-scrollbar-thumb { background: #DCD7CE; border-radius: 5px; }
+
+.msg {
+  max-width: var(--col);
+  margin: 0 auto var(--gap);
+  padding: 0 var(--pad);
+}
+.msg:last-child { margin-bottom: 8px; }
+
+/* Роль */
+.role {
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.role time { text-transform: none; letter-spacing: 0; color: var(--text-3); }
+
+/* Текст */
+.msg p { margin: 0 0 10px; }
+.msg p:last-child { margin-bottom: 0; }
+.msg ul, .msg ol { margin: 0 0 10px; padding-left: 20px; }
+.msg li { margin: 2px 0; }
+.msg strong { color: var(--strong); font-weight: 600; }
+.msg code:not(pre code) {
+  font-family: var(--font-mono);
+  font-size: .92em;
+  background: var(--accent-tint);
+  border: 1px solid #EBD9BF;
+  color: var(--accent-strong);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.msg a { color: var(--accent-strong); }
+
+/* Код */
+pre {
+  margin: 0 0 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-code);
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+}
+pre code { font-family: inherit; }
+.tok-k { color: var(--tok-k); }
+.tok-s { color: var(--tok-s); }
+.tok-c { color: var(--tok-c); font-style: italic; }
+.tok-f { color: var(--tok-f); }
+.tok-n { color: var(--tok-n); }
+
+/* Пользователь */
+.msg.user .body {
+  background: var(--user-bg);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  border: 1px solid var(--bubble-user-line);
+}
+
+/* ---------- Размышления ---------- */
+.reasoning {
+  border-left: 2px solid #E0CDB2;
+  padding: 2px 0 2px 12px;
+  margin: 0 0 12px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-style: italic;
+}
+.reasoning .rhead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-style: normal;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-3);
+  margin-bottom: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.reasoning .rhead .caret { transition: transform .15s; display: inline-block; }
+.reasoning.collapsed .rtext { display: none; }
+.reasoning.collapsed .rhead .caret { transform: rotate(-90deg); }
+.reasoning .timer { color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* ---------- Вызов инструмента ---------- */
+.tool {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-code);
+  background: var(--panel);
+  margin: 0 0 10px;
+  overflow: hidden;
+}
+.tool .thead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.tool .tname {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--accent-strong);
+  font-size: 11.5px;
+}
+.tool .targ {
+  font-family: var(--font-mono);
+  color: var(--text-2);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.tool .tstate {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-3);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.tool .tstate::before {
+  content: "";
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ok);
+}
+.tool.failed .tstate::before { background: var(--bad); }
+.tool .tbody {
+  border-top: 1px solid var(--line);
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  background: var(--tool-body);
+}
+.tool.collapsed .tbody { display: none; }
+
+/* ---------- Diff ---------- */
+.diff {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-code);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  margin: 0 0 10px;
+}
+.diff .dline { padding: 1px 12px; white-space: pre; }
+.diff .add { background: var(--diff-add-bg); color: var(--diff-add-fg); }
+.diff .del { background: var(--diff-del-bg); color: var(--diff-del-fg); }
+.diff .hunk { background: var(--diff-hunk-bg); color: var(--text-3); padding: 3px 12px; }
+
+/* ---------- Таблица ---------- */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+  margin: 0 0 10px;
+}
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+th { color: var(--text-2); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+
+/* ---------- Ошибка / статус ---------- */
+.alert {
+  border: 1px solid var(--alert-line);
+  background: var(--alert-bg);
+  color: var(--alert-fg);
+  border-radius: var(--radius-code);
+  padding: 9px 12px;
+  font-size: 12.5px;
+  margin: 0 0 10px;
+}
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-2);
+  margin: 0 0 10px;
+}
+.pulse {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100% { opacity: .35; } 50% { opacity: 1; } }
+
+/* ---------- Композер ---------- */
+.composer-wrap {
+  flex: none;
+  padding: 10px var(--pad) 14px;
+  background: var(--bg);
+  border-top: var(--msg-rule);
+}
+.composer {
+  max-width: var(--col);
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 8px 10px;
+}
+.composer .field {
+  flex: 1;
+  min-height: 22px;
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 22px;
+}
+.composer .send {
+  width: 24px; height: 24px;
+  border-radius: 5px;
+  background: var(--accent);
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--send-fg);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* ---------- Переключалка ---------- */
+.bar {
+  flex: none;
+  background: #F1EEE8;
+  border-top: 1px solid #DDD8CF;
+  padding: 10px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-ui);
+}
+.bar .lbl {
+  color: #8B8478;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin-right: 6px;
+}
+.bar button {
+  font: inherit;
+  font-size: 12px;
+  color: #5F584F;
+  background: #FBFAF8;
+  border: 1px solid #DCD7CE;
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all .12s;
+}
+.bar button:hover { color: #23201C; border-color: #C4BDB1; }
+.bar button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFF;
+  font-weight: 600;
+}
+.bar kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  opacity: .55;
+  margin-left: 5px;
+}
+.bar .hint {
+  width: 100%;
+  text-align: center;
+  color: #9A9286;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+/* ============================================================
+   ВАРИАНТЫ — все светлые. Каждый меняет только токены и
+   несколько правил, медь остаётся читаемой везде.
+   ============================================================ */
+
+/* --- 1. Бумага: спокойная база, минимум оформления --- */
+body[data-v="paper"] { --msg-rule: none; }
+
+/* --- 2. Пузыри: светлые бабблы, пользователь справа --- */
+body[data-v="bubbles"] {
+  --gap: 14px;
+  --msg-rule: none;
+}
+body[data-v="bubbles"] .msg { display: flex; flex-direction: column; }
+body[data-v="bubbles"] .msg .body {
+  border-radius: var(--bubble-radius);
+  padding: 11px 14px;
+  border: 1px solid var(--bubble-bot-line);
+  background: var(--bubble-bot-bg);
+  max-width: 86%;
+  box-shadow: 0 1px 1px rgba(40,32,24,.04);
+}
+body[data-v="bubbles"] .msg.user { align-items: flex-end; }
+body[data-v="bubbles"] .msg .role { display: none; }
+body[data-v="bubbles"] .msg.user .body {
+  background: var(--bubble-user-bg);
+  border-color: var(--bubble-user-line);
+  border-bottom-right-radius: 4px;
+}
+body[data-v="bubbles"] .msg.assistant .body {
+  border-bottom-left-radius: 4px;
+  max-width: calc(100% - 50px);
+}
+body[data-v="bubbles"] .tool,
+body[data-v="bubbles"] pre,
+body[data-v="bubbles"] table,
+body[data-v="bubbles"] .diff { max-width: 100%; }
+body[data-v="bubbles"] .msg code:not(pre code) { background: #FBF1E3; border-color: #EBD9BF; }
+
+/* --- 3. Плотный: меньше воздуха, больше на экран --- */
+body[data-v="dense"] {
+  --fs: 12.5px;
+  --lh: 1.42;
+  --gap: 16px;
+  --pad: 20px;
+  --col: 820px;
+}
+body[data-v="dense"] .role { margin-bottom: 3px; font-size: 10px; }
+body[data-v="dense"] pre { padding: 8px 10px; font-size: 11.5px; }
+body[data-v="dense"] .msg p { margin-bottom: 6px; }
+body[data-v="dense"] .tool .thead { padding: 5px 9px; }
+body[data-v="dense"] .tool .tbody { padding: 6px 9px; }
+body[data-v="dense"] .composer-wrap { padding: 8px var(--pad) 10px; }
+
+/* --- 4. Контрастный: чёрный текст, чёткая иерархия --- */
+body[data-v="contrast"] {
+  --bg: #FFFFFF;
+  --panel: #F7F5F1;
+  --surface: #F2EFE9;
+  --tool-body: #FAF8F4;
+  --text: #12100D;
+  --text-2: #4E4740;
+  --text-3: #7C746A;
+  --strong: #000000;
+  --line: #C9C2B7;
+  --line-soft: #DFD9CF;
+  --accent: #A24E0A;
+  --accent-strong: #8F4304;
+  --accent-tint: #FBEFDE;
+}
+body[data-v="contrast"] .msg.assistant .role { color: var(--accent-strong); font-weight: 600; }
+body[data-v="contrast"] .msg.user .body { border-color: #DCC9AE; background: #F6EBDA; }
+body[data-v="contrast"] .msg.user .role { color: var(--accent-strong); }
+body[data-v="contrast"] .tool { background: #FAF8F4; border-color: #CFC8BC; }
+body[data-v="contrast"] pre { background: #F4F1EB; border-color: #CFC8BC; }
+body[data-v="contrast"] .reasoning { border-left-color: var(--accent); color: #4E4740; }
+
+/* --- 5. Рельса: акцентная линия у каждого сообщения --- */
+body[data-v="rail"] .msg { position: relative; }
+body[data-v="rail"] .msg .body { padding-left: 16px; border-left: 2px solid var(--line); }
+body[data-v="rail"] .msg.user .body {
+  border-left-color: var(--accent);
+  background: transparent;
+  border-top: none; border-right: none; border-bottom: none;
+  border-radius: 0;
+  padding: 0 0 0 16px;
+}
+body[data-v="rail"] .msg.assistant .body { border-left-color: #D6CFC3; }
+body[data-v="rail"] .msg .role { padding-left: 16px; }
+
+/* --- 6. Машинописный: моно, минимум хрома --- */
+body[data-v="mono"] {
+  --body-font: var(--font-mono);
+  --fs: 12.5px;
+  --lh: 1.5;
+  --gap: 20px;
+  --col: 900px;
+  --bg: #FCFBF9;
+  --panel: #FCFBF9;
+  --surface: #F5F3EE;
+  --tool-body: #FAF9F6;
+  --line: #E4E0D8;
+  --text: #2A2723;
+  --text-2: #5E574E;
+  --text-3: #8E867A;
+  --accent: #A4550F;
+  --accent-strong: #97480A;
+  --accent-tint: #FAF0E2;
+}
+body[data-v="mono"] .msg .body { border: none; background: transparent; padding: 0; }
+body[data-v="mono"] .msg.user .body { background: transparent; border: none; padding: 0; }
+body[data-v="mono"] .role::before { content: "> "; color: var(--accent-strong); }
+body[data-v="mono"] .msg.user .role::before { content: "$ "; }
+body[data-v="mono"] .tool { border: none; border-left: 2px solid var(--line); border-radius: 0; background: transparent; }
+body[data-v="mono"] .tool .tbody { background: transparent; }
+body[data-v="mono"] pre { background: transparent; border: none; border-left: 2px solid var(--line); border-radius: 0; }
+body[data-v="mono"] .reasoning { border-left-color: var(--line); }
+
+/* --- 7. Широкий код: текст узкий, код и тулзы на всю ширину --- */
+body[data-v="widecode"] { --col: 760px; }
+body[data-v="widecode"] .msg { max-width: 1100px; }
+body[data-v="widecode"] .msg > .body > p,
+body[data-v="widecode"] .msg > .body > ul,
+body[data-v="widecode"] .msg > .body > ol,
+body[data-v="widecode"] .msg > .body > .role { max-width: 760px; }
+body[data-v="widecode"] pre,
+body[data-v="widecode"] .tool,
+body[data-v="widecode"] .diff,
+body[data-v="widecode"] table { max-width: 100%; }
+body[data-v="widecode"] .msg.user .body { max-width: 760px; }
+
+/* --- 8. Сепия: тёплый кремовый, мягче для глаз --- */
+body[data-v="sepia"] {
+  --outer: #E3DBCB;
+  --bg: #F6EFE1;
+  --panel: #EFE6D4;
+  --surface: #EBE1CD;
+  --tool-body: #F3EBDC;
+  --user-bg: #E9D9BF;
+  --reason-bg: #F2E9D8;
+  --text: #2C251B;
+  --text-2: #635843;
+  --text-3: #8F8270;
+  --strong: #17120B;
+  --line: #DCCFB6;
+  --line-soft: #E7DCC7;
+  --accent: #A95C14;
+  --accent-strong: #97490A;
+  --accent-tint: #F7E9D2;
+  --bubble-user-bg: #E9D8BB;
+  --bubble-user-line: #D9C3A0;
+  --bubble-bot-bg: #FBF5E9;
+  --bubble-bot-line: #E2D5BC;
+}
+
+/* --- 9. Сепия + пузыри + меди побольше: комбинация 1 и 8 --- */
+body[data-v="sepia-bubbles"] {
+  --outer: #E4E4E4;
+  --bg: #FFFFFF;
+
+  --panel: #F0E5D0;
+  --surface: #EBDFC7;
+  --tool-body: #F5ECDB;
+  --user-bg: #E9D6B6;
+  --reason-bg: #F3E9D5;
+  --text: #2B2318;
+  --text-2: #60543E;
+  --text-3: #8C7C63;
+  --strong: #150F07;
+  --line: #D9C9AA;
+  --line-soft: #E6D9BF;
+  --accent: #A85812;          /* кнопки, плашки */
+  --accent-strong: #8E4205;   /* медь для имён тулз, кода, ссылок — ярче */
+  --accent-tint: #F8E7CC;     /* подложка инлайн-кода, заметно медная */
+  --send-fg: #FFFDF8;
+  --ok: #2F7331;
+  --bad: #A8481A;
+  --tok-k: #6E3A8C;
+  --tok-s: #47621C;
+  --tok-c: #94856B;
+  --tok-f: #1E5488;
+  --tok-n: #8E4205;
+  --diff-add-bg: #E3EEDC; --diff-add-fg: #2A6329;
+  --diff-del-bg: #F6E1CE; --diff-del-fg: #86421F;
+  --diff-hunk-bg: #E7DAC2;
+  --alert-bg: #FCEEDB; --alert-line: #E3C7A1; --alert-fg: #86421F;
+  --gap: 15px;
+  --msg-rule: none;
+  --bubble-user-bg: #EFD8B4;
+  --bubble-user-line: #DBBB8C;
+  --bubble-bot-bg: #FCF6EA;
+  --bubble-bot-line: #E3D4B8;
+}
+
+/* пузыри: та же раскладка, что в варианте 1 */
+body[data-v="sepia-bubbles"] .msg { display: flex; flex-direction: column; }
+body[data-v="sepia-bubbles"] .msg .body {
+  border-radius: var(--bubble-radius);
+  padding: 11px 14px;
+  border: 1px solid var(--bubble-bot-line);
+  background: var(--bubble-bot-bg);
+  max-width: 86%;
+  box-shadow: 0 1px 2px rgba(70,52,26,.06);
+}
+body[data-v="sepia-bubbles"] .msg.user { align-items: flex-end; }
+body[data-v="sepia-bubbles"] .msg .role { display: none; }
+
+body[data-v="sepia-bubbles"] .msg.user .body {
+  background: var(--bubble-user-bg);
+  border-color: var(--bubble-user-line);
+  border-bottom-right-radius: 4px;
+}
+body[data-v="sepia-bubbles"] .msg.assistant .body {
+  border-bottom-left-radius: 4px;
+  max-width: calc(100% - 50px);
+}
+body[data-v="sepia-bubbles"] .tool,
+body[data-v="sepia-bubbles"] pre,
+body[data-v="sepia-bubbles"] table,
+body[data-v="sepia-bubbles"] .diff { max-width: 100%; }
+
+/* меди побольше: роли, тулзы, код */
+body[data-v="sepia-bubbles"] .msg .role { color: var(--accent-strong); font-weight: 600; }
+body[data-v="sepia-bubbles"] .msg code:not(pre code) {
+  background: var(--accent-tint);
+  border: 1px solid #E6CFA9;
+  color: var(--accent-strong);
+}
+body[data-v="sepia-bubbles"] .tool {
+  border-color: #DCC49C;
+  border-left: 3px solid var(--accent);
+  background: #FAF1E1;
+}
+body[data-v="sepia-bubbles"] .tool .thead { background: #F5E8D2; }
+body[data-v="sepia-bubbles"] .tool .tname { color: var(--accent-strong); font-weight: 700; }
+body[data-v="sepia-bubbles"] .tool .tbody { background: #FBF5E9; }
+body[data-v="sepia-bubbles"] .tool.failed { border-left-color: var(--bad); }
+body[data-v="sepia-bubbles"] pre {
+  background: #FAF2E3;
+  border-color: #E2D2B4;
+  border-left: 3px solid #D9C29B;
+}
+body[data-v="sepia-bubbles"] .reasoning { border-left: 2px solid #DCC7A2; background: var(--reason-bg); }
+body[data-v="sepia-bubbles"] .reasoning .rhead { color: var(--accent-strong); }
+body[data-v="sepia-bubbles"] .diff { border-color: #E2D2B4; }
+body[data-v="sepia-bubbles"] .composer { background: #FBF3E4; border-color: #DFCDAC; }
+body[data-v="sepia-bubbles"] .composer .send { background: var(--accent); color: var(--send-fg); }
+body[data-v="sepia-bubbles"] .status-line { color: var(--text-2); }
+body[data-v="sepia-bubbles"] .pulse { background: var(--accent); }
+
+/* --- служебное --- */
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body data-v="bubbles">
+
+<div class="win">
+  <div class="titlebar">
+    <div class="dots"><i></i><i></i><i></i></div>
+    <span class="name">HARNES-S</span>
+    <span class="spacer"></span>
+    <span>Copper · светлая</span>
+  </div>
+
+  <div class="thread" id="thread">
+
+    <!-- ================= 1. Пользователь ================= -->
+    <div class="msg user">
+      <div class="role">Ты <time>14:02</time></div>
+      <div class="body">
+        <p>Глянь <code>PriceFormatter</code>, он в каталоге падает на пустой цене. И заодно — почему тесты на нём зелёные?</p>
+      </div>
+    </div>
+
+    <!-- ================= 2. Ассистент: размышления + тулза + код ================= -->
+    <div class="msg assistant">
+      <div class="role">HARNES-S <time>14:02</time></div>
+      <div class="body">
+
+        <div class="reasoning">
+          <div class="rhead">
+            <span class="caret">▾</span>
+            <span>Размышления</span>
+            <span class="timer">4 с</span>
+          </div>
+          <div class="rtext">
+            Пустая цена — это <code>null</code> или <code>0</code>? В <code>formatList</code> есть
+            проверка на <code>null</code>, значит падает на чём-то другом. Надо посмотреть,
+            что реально приходит из инфоблока. Скорее всего <code>''</code> из базы,
+            а не <code>null</code> — тогда <code>number_format</code> получает строку.
+          </div>
+        </div>
+
+        <p>Смотрю, что реально приходит в массив:</p>
+
+        <div class="tool">
+          <div class="thead">
+            <span class="tname">bash</span>
+            <span class="targ">php -r "var_dump((new PriceFormatter)-&gt;formatList([['name'=&gt;'A','price'=&gt;'']]))"</span>
+            <span class="tstate">готово</span>
+          </div>
+          <div class="tbody">PHP Fatal error:  Uncaught TypeError: number_format():
+Argument #1 ($num) must be of type float, string given in PriceFormatter.php:24</div>
+        </div>
+
+        <p>Вот и всё. Баг в том, что <code>''</code> не <code>null</code> — проверка не срабатывает,
+        и строка уезжает в <code>number_format</code>. Правлю:</p>
+
+        <div class="diff">
+          <div class="dline hunk">@@ -19,7 +19,11 @@ public function formatList(array $items): array</div>
+          <div class="dline">     {</div>
+          <div class="dline del">-        $fmt = static fn (?float $price): string =&gt; $price === null</div>
+          <div class="dline del">-            ? 'по запросу'</div>
+          <div class="dline del">-            : number_format($price, $this-&gt;precision, ',', ' ');</div>
+          <div class="dline add">+        $fmt = static fn (mixed $price): string =&gt; match (true) {</div>
+          <div class="dline add">+            $price === null, $price === '' =&gt; 'по запросу',</div>
+          <div class="dline add">+            !is_numeric($price) =&gt; 'по запросу',</div>
+          <div class="dline add">+            default =&gt; number_format((float) $price, $this-&gt;precision, ',', ' '),</div>
+          <div class="dline add">+        };</div>
+        </div>
+
+        <p>И тест, который этого не ловил — он передавал <code>null</code>, а не <code>''</code>:</p>
+
+        <pre><code><span class="tok-c">// было</span>
+$items = [[<span class="tok-s">'name'</span> =&gt; <span class="tok-s">'Тест'</span>, <span class="tok-s">'price'</span> =&gt; <span class="tok-k">null</span>]];
+<span class="tok-c">// стало — добавил пустую строку и ноль</span>
+$items = [
+    [<span class="tok-s">'name'</span> =&gt; <span class="tok-s">'Тест'</span>, <span class="tok-s">'price'</span> =&gt; <span class="tok-k">null</span>],
+    [<span class="tok-s">'name'</span> =&gt; <span class="tok-s">'Пусто'</span>, <span class="tok-s">'price'</span> =&gt; <span class="tok-s">''</span>],
+    [<span class="tok-s">'name'</span> =&gt; <span class="tok-s">'Ноль'</span>, <span class="tok-s">'price'</span> =&gt; <span class="tok-n">0</span>],
+];
+<span class="tok-f">$this</span>-&gt;assertSame([<span class="tok-s">'Тест — по запросу'</span>, <span class="tok-s">'Пусто — по запросу'</span>, <span class="tok-s">'Ноль — 0'</span>], <span class="tok-f">$formatter</span>-&gt;<span class="tok-f">formatList</span>($items));</code></pre>
+
+        <p><strong>Тесты были зелёные</strong>, потому что единственный кейс в них подавал ровно
+        то значение, которое код умеет обрабатывать. Классика: тест проверяет ветку,
+        а не контракт.</p>
+
+      </div>
+    </div>
+
+    <!-- ================= 3. Пользователь: короткий ================= -->
+    <div class="msg user">
+      <div class="role">Ты <time>14:07</time></div>
+      <div class="body">
+        <p>А на проде сколько таких пустых?</p>
+      </div>
+    </div>
+
+    <!-- ================= 4. Ассистент: таблица + упавший тул + статус ================= -->
+    <div class="msg assistant">
+      <div class="role">HARNES-S <time>14:07</time></div>
+      <div class="body">
+
+        <p>Дёрнул базу. Из 1 284 активных товаров пустая цена у 37:</p>
+
+        <table>
+          <thead>
+            <tr><th>Раздел</th><th>Товаров</th><th>Без цены</th><th>Доля</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Котлы</td><td>412</td><td>21</td><td>5,1 %</td></tr>
+            <tr><td>Радиаторы</td><td>508</td><td>9</td><td>1,8 %</td></tr>
+            <tr><td>Трубы</td><td>364</td><td>7</td><td>1,9 %</td></tr>
+          </tbody>
+        </table>
+
+        <p>Пробую вытащить ID, чтобы отдать тебе списком:</p>
+
+        <div class="tool failed">
+          <div class="thead">
+            <span class="tname">mysql</span>
+            <span class="targ">SELECT ID FROM b_iblock_element WHERE PRICE IS NULL AND ACTIVE='Y'</span>
+            <span class="tstate">ошибка</span>
+          </div>
+          <div class="tbody">ERROR 1054 (42S22): Unknown column 'PRICE' in 'where clause'
+Подсказка: цена лежит в b_catalog_price, а не в b_iblock_element.</div>
+        </div>
+
+        <div class="alert">
+          Упало на неверной таблице. Цена в Bitrix — отдельная сущность
+          (<code>b_catalog_price</code>), а не поле элемента. Переписываю запрос через JOIN.
+        </div>
+
+        <div class="status-line">
+          <span class="pulse"></span>
+          <span>Выполняю запрос через <code>b_catalog_price</code>…</span>
+        </div>
+
+        <p>Пока считает — предупрежу: 37 позиций без цены это не баг каталога,
+        а <strong>незаполненные карточки</strong>. Их надо не чинить кодом, а отдать
+        контент-менеджеру списком.</p>
+
+      </div>
+    </div>
+
+  </div>
+
+  <div class="composer-wrap">
+    <div class="composer">
+      <div class="field">Напиши сообщение…</div>
+      <div class="send">↑</div>
+    </div>
+  </div>
+</div>
+
+<div class="bar" id="bar">
+  <span class="lbl">Оформление</span>
+</div>
+
+<script>
+const variants = [
+  ["bubbles",  "Пузыри"],
+  ["paper",    "Бумага"],
+  ["dense",    "Плотный"],
+  ["contrast", "Контрастный"],
+  ["rail",     "Рельса"],
+  ["mono",     "Машинописный"],
+  ["widecode", "Широкий код"],
+  ["sepia",    "Сепия"],
+  ["sepia-bubbles", "Сепия + пузыри"],
+];
+
+const bar = document.getElementById("bar");
+const hint = document.createElement("div");
+hint.className = "hint";
+hint.textContent = "Клавиши 1–9 переключают. Всё светлое; медь для тулз и инлайн-кода — --accent-strong в :root.";
+
+variants.forEach(([id, label], i) => {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.innerHTML = `${label}<kbd>${i + 1}</kbd>`;
+  b.addEventListener("click", () => setVariant(id));
+  b.dataset.v = id;
+  bar.appendChild(b);
+});
+bar.appendChild(hint);
+
+function setVariant(id) {
+  document.body.dataset.v = id;
+  document.querySelectorAll(".bar button").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.v === id));
+  });
+  localStorage.setItem("stand-variant-light", id);
+}
+
+const fromUrl = new URLSearchParams(location.search).get("v");
+const saved = fromUrl || localStorage.getItem("stand-variant-light");
+setVariant(saved && variants.some(([id]) => id === saved) ? saved : "bubbles");
+
+document.addEventListener("keydown", (e) => {
+  const n = Number(e.key);
+  if (n >= 1 && n <= variants.length) setVariant(variants[n - 1][0]);
+});
+
+/* Разворачивание/сворачивание тулз и размышлений */
+document.querySelectorAll(".tool .thead").forEach((h) =>
+  h.addEventListener("click", () => h.parentElement.classList.toggle("collapsed"))
+);
+document.querySelectorAll(".reasoning .rhead").forEach((h) =>
+  h.addEventListener("click", () => h.parentElement.classList.toggle("collapsed"))
+);
+</script>
+</body>
+</html>
