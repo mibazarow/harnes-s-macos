@@ -27,54 +27,14 @@ final class TranscriptGroupingTests: XCTestCase {
         XCTAssertEqual(ToolTrace.summaryText(for: long).count, 81)
     }
 
-    @MainActor
-    func testThemeDefaultsToSystemAndPersists() {
-        let name = "theme-test-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)!
-        defer { defaults.removePersistentDomain(forName: name) }
-        let settings = AppSettings(defaults: defaults)
-        // Step 2: the system theme is the default; Copper is an option, not the identity.
-        XCTAssertEqual(settings.theme, .system)
-        XCTAssertNil(settings.theme.tokens.scheme, "системная тема следует за системой")
-        XCTAssertEqual(settings.theme.tokens, ThemeTokens.system)
-
-        settings.theme = .copper
-        XCTAssertEqual(AppSettings(defaults: defaults).theme, .copper)
-        XCTAssertNil(settings.theme.tokens.scheme, "Copper рендерится в обеих схемах")
-        XCTAssertEqual(settings.theme.tokens.syntax, Palette.copperAdaptive)
-
-        settings.theme = .light
-        XCTAssertEqual(settings.theme.tokens.scheme, .light)
-    }
-
     func testCopperKeepsItsLook() {
-        // Copper is the previous palette mapped onto roles, not a new design. Its code
-        // colours resolve per appearance, so equality is on the theme id and on the
-        // dark rendering of the Copper palette itself.
+        // Copper is the previous palette mapped onto roles, not a new design. There is
+        // one palette now, and the default value of `Palette` is it.
         let copper = ThemeTokens.copper
         XCTAssertEqual(copper.id, "copper")
-        XCTAssertEqual(Palette.copper.text, Color(hex: 0xE2D8CD))
-        XCTAssertEqual(Palette.copper.accent, Color(hex: 0xB87333))
-    }
-
-    @MainActor
-    func testLightPaletteContrast() throws {
-        func luminance(_ color: Color) throws -> Double {
-            let rgb = try XCTUnwrap(NSColor(color).usingColorSpace(.sRGB))
-            let channels = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent].map {
-                $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4)
-            }
-            return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
-        }
-        let palette = Palette.light
-        for background in [palette.background, palette.panel, palette.codeBackground, palette.userBackground] {
-            for foreground in [palette.text, palette.assistantText, palette.dim, palette.faint, palette.comment] {
-                let a = try luminance(background)
-                let b = try luminance(foreground)
-                let ratio = (max(a, b) + 0.05) / (min(a, b) + 0.05)
-                XCTAssertGreaterThanOrEqual(ratio, foreground == palette.text ? 7 : 4.5)
-            }
-        }
+        XCTAssertEqual(copper.scheme, .dark)
+        XCTAssertEqual(Palette().text, Color(hex: 0xE2D8CD))
+        XCTAssertEqual(Palette().accent, Color(hex: 0xB87333))
     }
 
     @MainActor

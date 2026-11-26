@@ -19,7 +19,6 @@ enum ModelSelection {
     /// Unit separator: provider ids are UUIDs and model names never contain it.
     static let separator = "\u{1F}"
     static let mainModelKey = "selectedMainModel"
-    static let subagentModelKey = "selectedSubagentModel"
 
     static func raw(providerID: String, model: String) -> String {
         providerID + separator + model

@@ -2,8 +2,8 @@ import SwiftUI
 import XCTest
 @testable import Harness
 
-/// Smoke tests for the HIG layout: the new views must lay out in every theme and must
-/// not depend on the old bubble or on a palette passed down by hand.
+/// Smoke tests for the HIG layout: the views must lay out in the app's only theme and
+/// must not depend on the old bubble or on a palette passed down by hand.
 @MainActor
 final class DesignLayoutTests: XCTestCase {
     private func host<Content: View>(_ view: Content, width: CGFloat = 900) -> NSHostingView<Content> {
@@ -18,29 +18,28 @@ final class DesignLayoutTests: XCTestCase {
             .environment(\.theme, theme)
     }
 
-    func testMessageRowLaysOutInEveryTheme() throws {
+    func testMessageRowLaysOutInTheTheme() throws {
         let assistant = ChatMessage(
             role: .assistant,
             text: "Готово.\n\n```swift\nlet x = 1\n```",
             reasoning: "сначала читаю",
             tools: [ToolTrace(name: "bash", summary: "exit 0", isRunning: false)]
         )
-        for theme in [ThemeTokens.system, .systemDark, .systemLight, .copper] {
-            let host = host(environments(
-                MessageRow(message: assistant, fontSize: 13, showTimestamp: true),
-                theme: theme
-            ))
-            host.layoutSubtreeIfNeeded()
-            XCTAssertGreaterThan(host.fittingSize.height, 80, theme.id)
-            XCTAssertGreaterThan(host.fittingSize.width, 0, theme.id)
-        }
+        let theme = ThemeTokens.copper
+        let host = host(environments(
+            MessageRow(message: assistant, fontSize: 13, showTimestamp: true),
+            theme: theme
+        ))
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(host.fittingSize.height, 80, theme.id)
+        XCTAssertGreaterThan(host.fittingSize.width, 0, theme.id)
     }
 
     func testRowLaysOutAtNarrowWidthWithoutCrashing() throws {
         let assistant = ChatMessage(role: .assistant, text: String(repeating: "слово ", count: 400))
         let host = host(environments(
             MessageRow(message: assistant, fontSize: 13, showTimestamp: false),
-            theme: .system
+            theme: .copper
         ), width: 560)
         host.layoutSubtreeIfNeeded()
         // `fittingSize` reports the ideal size at an unconstrained width, so the useful
@@ -66,13 +65,9 @@ final class DesignLayoutTests: XCTestCase {
         XCTAssertGreaterThan(host.fittingSize.height, 40, "блок кода отрисован")
     }
 
-    func testThemesAreDistinctAndCarryRoles() {
-        let system = ThemeTokens.system
-        XCTAssertNil(system.scheme, "системная тема следует за системой")
-        XCTAssertEqual(ThemeTokens.systemDark.scheme, .dark)
-        XCTAssertEqual(ThemeTokens.systemLight.scheme, .light)
-        XCTAssertNil(ThemeTokens.copper.scheme)
-        XCTAssertNotEqual(system.accent, ThemeTokens.copper.accent)
+    func testThereIsOneThemeAndItIsDark() {
+        XCTAssertEqual(ThemeTokens.copper.id, "copper")
+        XCTAssertEqual(ThemeTokens.copper.scheme, .dark)
     }
 
     func testHeaderBarIsGone() throws {
@@ -107,59 +102,24 @@ final class UserBubbleTests: XCTestCase {
         return (max(x, y) + 0.05) / (min(x, y) + 0.05)
     }
 
-    func testSystemBubbleIsAQuietLabelWash() throws {
-        // The system theme cannot borrow a named surface: `windowBackground` and
-        // `textBackground` are both white in light mode, so a named colour produced no
-        // bubble at all. The plate is a low-alpha wash of the label colour instead.
-        let expected = Color(nsColor: .labelColor).opacity(0.07)
-        XCTAssertEqual(ThemeTokens.system.userBubble, expected)
-        XCTAssertEqual(ThemeTokens.systemDark.userBubble, expected)
-        XCTAssertEqual(ThemeTokens.systemLight.userBubble, expected)
-    }
-
-    func testCopperBubbleDiffersInBothAppearances() throws {
-        // Copper is authored, so the check is on the palette itself, not on AppKit.
-        for pair in [
-            (Palette.light.userBackground, Palette.light.background),
-            (Palette.dark.userBackground, Palette.dark.background)
-        ] {
-            let bubble = try XCTUnwrap(NSColor(pair.0).usingColorSpace(.sRGB))
-            let background = try XCTUnwrap(NSColor(pair.1).usingColorSpace(.sRGB))
-            let bubbleLuminance = try luminance(bubble)
-            let backgroundLuminance = try luminance(background)
-            XCTAssertGreaterThan(
-                abs(bubbleLuminance - backgroundLuminance), 0.005,
-                "медный пузырь должен быть виден"
-            )
-        }
+    func testCopperBubbleDiffersFromTheBackground() throws {
+        let palette = Palette()
+        let bubble = try XCTUnwrap(NSColor(palette.userBackground).usingColorSpace(.sRGB))
+        let background = try XCTUnwrap(NSColor(palette.background).usingColorSpace(.sRGB))
+        XCTAssertGreaterThan(
+            abs(try luminance(bubble) - luminance(background)), 0.005,
+            "медный пузырь должен быть виден"
+        )
     }
 
     func testUserTextStaysReadableOnItsBubble() throws {
-        // Copper text on Copper bubble, both appearances.
-        for pair in [
-            (Palette.light.text, Palette.light.userBackground),
-            (Palette.dark.text, Palette.dark.userBackground)
-        ] {
-            let text = try XCTUnwrap(NSColor(pair.0).usingColorSpace(.sRGB))
-            let bubble = try XCTUnwrap(NSColor(pair.1).usingColorSpace(.sRGB))
-            let ratio = try contrast(text, bubble)
-            XCTAssertGreaterThanOrEqual(ratio, 4.5, "текст на пузыре Copper должен читаться")
-        }
-
-        // A 7% wash never moves the plate far enough to hurt contrast: the label keeps
-        // its own ratio against the content background.
-        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
-            var label: CGColor?
-            NSAppearance(named: appearance)?.performAsCurrentDrawingAppearance {
-                label = NSColor.labelColor.cgColor
-            }
-            let text = try XCTUnwrap(NSColor(cgColor: try XCTUnwrap(label))?.usingColorSpace(.sRGB))
-            XCTAssertGreaterThanOrEqual(try contrast(text, .white), 1.0)
-        }
+        let palette = Palette()
+        let text = try XCTUnwrap(NSColor(palette.text).usingColorSpace(.sRGB))
+        let bubble = try XCTUnwrap(NSColor(palette.userBackground).usingColorSpace(.sRGB))
+        XCTAssertGreaterThanOrEqual(try contrast(text, bubble), 4.5, "текст на пузыре Copper должен читаться")
     }
 
     func testCopperKeepsTheOldUserShade() {
-        XCTAssertEqual(Palette.copper.userBackground, Color(hex: 0x1F1B16))
-        XCTAssertEqual(Palette.light.userBackground, Color(hex: 0xF3EEE7))
+        XCTAssertEqual(Palette().userBackground, Color(hex: 0x1F1B16))
     }
 }

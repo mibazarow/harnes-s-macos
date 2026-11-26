@@ -58,23 +58,4 @@ enum Tuning {
 
     /// A closed task longer than this is folded into the checkpoint at its boundary.
     static let taskBoundarySummaryMessages = 40
-
-    /// Tool calls a subagent may spend before it is asked to wrap up (soft) and before
-    /// it is stopped (hard). Counted in calls, not rounds: one round can batch dozens,
-    /// and calls are what the log already measures.
-    static let subagentSoftCalls = 200
-    static let subagentHardCalls = 300
-
-    /// S0.8/S6: rounds a subagent may take before it has to report. It used to be a
-    /// literal 12 in the loop, invisible to the status line.
-    static let subagentSteps = 12
-
-    /// S6: a hard wall-clock ceiling per child. The timer lives in `SubagentRunner`, not
-    /// in the child loop: a loop parked in a long tool would never notice.
-    static let subagentTimeoutSeconds = 600
-
-    /// S0.8: archive of finished children, so a status query after the report still
-    /// finds them. Bounded by count and by age.
-    static let subagentArchiveLimit = 8
-    static let subagentArchiveTTL: TimeInterval = 30 * 60
 }

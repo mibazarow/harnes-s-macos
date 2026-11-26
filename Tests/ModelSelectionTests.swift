@@ -1,7 +1,7 @@
 import XCTest
 @testable import Harness
 
-/// The two working models are chosen once, app-wide, from what the providers saved.
+/// The working model is chosen once, app-wide, from what the providers saved.
 final class ModelSelectionTests: XCTestCase {
     private func provider(
         _ name: String, id: String = UUID().uuidString,
@@ -69,48 +69,41 @@ final class ModelSelectionTests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsPersistBothChoices() {
+    func testSettingsPersistTheChoice() {
         let name = "models-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
 
         let settings = AppSettings(defaults: defaults)
         XCTAssertEqual(settings.mainModel, "")
-        XCTAssertEqual(settings.subagentModel, "")
 
         settings.mainModel = ModelSelection.raw(providerID: "p", model: "main")
-        settings.subagentModel = ModelSelection.raw(providerID: "p", model: "child")
 
         let reloaded = AppSettings(defaults: defaults)
         XCTAssertEqual(reloaded.mainModel, ModelSelection.raw(providerID: "p", model: "main"))
-        XCTAssertEqual(reloaded.subagentModel, ModelSelection.raw(providerID: "p", model: "child"))
     }
 }
 
 /// The store reads the same choice the settings tab writes.
 @MainActor
 final class ModelSelectionStoreTests: XCTestCase {
-    private func makeStore() async throws -> (ChatStore, AppServices, ProviderModel, ProviderModel) {
+    private func makeStore() async throws -> (ChatStore, AppServices, ProviderModel) {
         let database = try AppDatabase(inMemory: true)
         let services = AppServices(database: database)
         let main = try await services.providers.save(ProviderModel(
             name: "Main", baseURL: "https://main.example/v1",
             models: ["main-a", "main-b"], defaultModel: "main-a", isDefault: true
         ))
-        let child = try await services.providers.save(ProviderModel(
-            name: "Child", baseURL: "https://child.example/v1",
-            models: ["child-a"], defaultModel: "child-a"
-        ))
         let chat = ChatStore(services: services)
         let name = "store-models-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         addTeardownBlock { defaults.removePersistentDomain(forName: name) }
         chat.modelDefaults = defaults
-        return (chat, services, main, child)
+        return (chat, services, main)
     }
 
     func testMainModelComesFromTheChoiceNotTheProviderDefault() async throws {
-        let (chat, services, main, _) = try await makeStore()
+        let (chat, services, main) = try await makeStore()
         chat.modelDefaults.set(
             ModelSelection.raw(providerID: main.id, model: "main-b"),
             forKey: ModelSelection.mainModelKey
@@ -121,31 +114,9 @@ final class ModelSelectionStoreTests: XCTestCase {
     }
 
     func testEmptyChoiceFallsBackToFirstProvider() async throws {
-        let (chat, services, main, _) = try await makeStore()
+        let (chat, services, main) = try await makeStore()
         let resolved = try await chat.resolvedMain(services)
         XCTAssertEqual(resolved?.provider.id, main.id)
         XCTAssertEqual(resolved?.model, "main-a")
-    }
-
-    func testSubagentChoiceMayUseAnotherProvider() async throws {
-        let (chat, services, main, child) = try await makeStore()
-        chat.modelDefaults.set(
-            ModelSelection.raw(providerID: child.id, model: "child-a"),
-            forKey: ModelSelection.subagentModelKey
-        )
-        let resolved = await chat.resolvedSubagent(
-            main: main, model: "main-a", readOnly: true, services: services
-        )
-        XCTAssertEqual(resolved.provider.id, child.id)
-        XCTAssertEqual(resolved.model, "child-a")
-    }
-
-    func testWithoutChoiceProviderFieldsStillApply() async throws {
-        let (chat, services, main, _) = try await makeStore()
-        let resolved = await chat.resolvedSubagent(
-            main: main, model: "main-a", readOnly: false, services: services
-        )
-        XCTAssertEqual(resolved.provider.id, main.id)
-        XCTAssertEqual(resolved.model, "main-a")
     }
 }

@@ -1,8 +1,8 @@
 import Foundation
 
 extension ToolRegistry {
-    /// R30.4: the agent's own procedures. A subagent may read them and hand the text to
-    /// the parent, but never writes: the parent owns the conversation and the source.
+    /// R30.4: the agent's own procedures. The model may read them and write them,
+    /// because it owns the conversation and the source.
     func skillLearnTool(_ args: [String: Any]) async -> ToolResult {
         let action = (args["action"] as? String)?.lowercased() ?? "list"
         switch action {
@@ -21,10 +21,6 @@ extension ToolRegistry {
             return .ok("\(skill.name)\n\(skill.body)")
 
         case "save":
-            guard !isSubagent else {
-                return .fail("Сабагент не сохраняет навыки: верни знание родителю текстом, "
-                    + "он решит, писать ли процедуру.")
-            }
             guard currentUserMessage != nil else {
                 return .fail("Навык сохраняется только в ходе, начатом сообщением пользователя.")
             }
@@ -74,9 +70,6 @@ extension ToolRegistry {
             return .ok("Навык сохранён: \(name) (тело \(cleaned.count) символов).")
 
         case "patch":
-            guard !isSubagent else {
-                return .fail("Сабагент не правит навыки: верни текст родителю.")
-            }
             guard let name = args["name"] as? String, !name.isEmpty,
                   let old = args["old"] as? String, !old.isEmpty,
                   let new = args["new"] as? String else {

@@ -1,43 +1,14 @@
 import AppKit
 import SwiftUI
 
-/// Colour identity of the app, separate from the appearance on screen.
-///
-/// `.system` and `.copper` follow the system appearance, so each has a light and a dark
-/// rendering. `.light` and `.dark` force an appearance on the system colours.
-enum AppTheme: String, CaseIterable, Sendable {
-    case system
-    case light
-    case dark
-    case copper
-
-    var title: String {
-        switch self {
-        case .system: "Системная"
-        case .light: "Светлая"
-        case .dark: "Тёмная"
-        case .copper: "Copper"
-        }
-    }
-
-    var tokens: ThemeTokens {
-        switch self {
-        case .system: .system
-        case .light: .systemLight
-        case .dark: .systemDark
-        case .copper: .copper
-        }
-    }
-}
-
 /// A view never knows what "orange" means: it asks for a role.
 ///
-/// `Palette` stays as the syntax representation and as the Copper source, because code
-/// highlighting is not system semantics: a keyword is a keyword in every theme.
+/// There is one theme, Copper, and it is always dark. The app has no appearance choice:
+/// no system/light/dark variants and no setting to pick between them.
 struct ThemeTokens: Equatable, Sendable {
     var id: String
-    /// `nil` means "follow the system appearance".
-    var scheme: ColorScheme?
+    /// Always `.dark`. Kept as a field so the window can pin its appearance in one place.
+    var scheme: ColorScheme
 
     var windowBackground: Color
     var contentBackground: Color
@@ -69,75 +40,29 @@ struct ThemeTokens: Equatable, Sendable {
 }
 
 extension ThemeTokens {
-    static let system = ThemeTokens(
-        id: "system",
-        scheme: nil,
-        windowBackground: Color(nsColor: .windowBackgroundColor),
-        contentBackground: Color(nsColor: .textBackgroundColor),
-        controlBackground: Color(nsColor: .controlBackgroundColor),
-        separator: Color(nsColor: .separatorColor),
-        labelPrimary: Color(nsColor: .labelColor),
-        labelSecondary: Color(nsColor: .secondaryLabelColor),
-        labelTertiary: Color(nsColor: .tertiaryLabelColor),
-        labelQuaternary: Color(nsColor: .quaternaryLabelColor),
-        accent: .accentColor,
-        destructive: Color(nsColor: .systemRed),
-        warning: Color(nsColor: .systemOrange),
-        success: Color(nsColor: .systemGreen),
-        selection: Color(nsColor: .selectedContentBackgroundColor),
-        reasoningBackground: Color(nsColor: .underPageBackgroundColor),
-        codeBackground: Color(nsColor: .controlBackgroundColor),
-        // A quiet plate derived from the label colour. `windowBackground` and
-        // `textBackground` resolve to the same white in light mode, so a system surface
-        // colour gave no visible bubble there; a 7% label wash is one step off the
-        // content background in both appearances and still follows Increase Contrast.
-        userBubble: Color(nsColor: .labelColor).opacity(0.07),
-        syntax: .xcode
-    )
-
-    static var systemDark: ThemeTokens {
-        var tokens = system
-        tokens.id = "dark"
-        tokens.scheme = .dark
-        return tokens
-    }
-
-    static var systemLight: ThemeTokens {
-        var tokens = system
-        tokens.id = "light"
-        tokens.scheme = .light
-        return tokens
-    }
-
-    /// Today's look, unchanged, rendered per appearance instead of pinned to one:
-    /// `Palette.dark` for a dark system, `Palette.light` for a light one.
     static let copper: ThemeTokens = {
-        func pair(_ path: KeyPath<Palette, Color>) -> Color {
-            copperColor(light: Palette.light[keyPath: path], dark: Palette.dark[keyPath: path])
-        }
+        let palette = Palette()
         return ThemeTokens(
             id: "copper",
-            scheme: nil,
-            windowBackground: pair(\.background),
-            contentBackground: pair(\.background),
-            controlBackground: pair(\.panel),
-            separator: pair(\.border),
-            labelPrimary: pair(\.text),
-            labelSecondary: pair(\.dim),
-            labelTertiary: pair(\.faint),
+            scheme: .dark,
+            windowBackground: palette.background,
+            contentBackground: palette.background,
+            controlBackground: palette.panel,
+            separator: palette.border,
+            labelPrimary: palette.text,
+            labelSecondary: palette.dim,
+            labelTertiary: palette.faint,
             // Copper never had a fourth label; the faintest available tone is the point.
-            labelQuaternary: pair(\.faint),
-            accent: pair(\.accent),
-            destructive: pair(\.number),
-            warning: pair(\.reasoning),
-            success: Color(nsColor: .systemGreen),
-            selection: pair(\.accent),
-            reasoningBackground: pair(\.reasoningBackground),
-            codeBackground: pair(\.codeBackground),
-            userBubble: pair(\.userBackground),
-            // Syntax must follow the appearance too: dark Copper colours on the light
-            // code plate were nearly unreadable.
-            syntax: .copperAdaptive
+            labelQuaternary: palette.faint,
+            accent: palette.accent,
+            destructive: palette.number,
+            warning: palette.reasoning,
+            success: Color(hex: 0x2FA84F),
+            selection: palette.accent,
+            reasoningBackground: palette.reasoningBackground,
+            codeBackground: palette.codeBackground,
+            userBubble: palette.userBackground,
+            syntax: palette
         )
     }()
 }
@@ -145,7 +70,7 @@ extension ThemeTokens {
 // MARK: - Environment
 
 private struct ThemeKey: EnvironmentKey {
-    static let defaultValue = ThemeTokens.system
+    static let defaultValue = ThemeTokens.copper
 }
 
 extension EnvironmentValues {
@@ -161,15 +86,13 @@ extension View {
     }
 }
 
-// MARK: - Palettes
+// MARK: - Palette
 
-/// Copper, and the syntax colours that go with a theme.
+/// Copper, and the syntax colours that go with it.
 ///
-/// `SyntaxHighlighter` takes this type directly; the tests that pin code colours create
-/// `Palette()` and keep working, because Copper is the default value.
+/// `SyntaxHighlighter` takes this type directly; the default value is the Copper dark
+/// palette, so a plain `Palette()` is the app's only palette.
 struct Palette: Equatable, Sendable {
-    var scheme: ColorScheme = .dark
-
     var background = Color(hex: 0x0D0D10)
     var panel = Color(hex: 0x16161A)
     var codeBackground = Color(hex: 0x1B1A1E)
@@ -192,87 +115,7 @@ struct Palette: Equatable, Sendable {
     var comment = Color(hex: 0x6B6159)
     var punctuation = Color(hex: 0xA89A8C)
 
-    static let dark = Palette()
-    static let copper = Palette()
-
-    /// Each colour resolves per appearance, so one Copper theme is readable in both.
-    static let copperAdaptive: Palette = {
-        func pair(_ path: KeyPath<Palette, Color>) -> Color {
-            copperColor(light: Palette.light[keyPath: path], dark: Palette.dark[keyPath: path])
-        }
-        var p = Palette()
-        p.background = pair(\.background)
-        p.panel = pair(\.panel)
-        p.codeBackground = pair(\.codeBackground)
-        p.border = pair(\.border)
-        p.text = pair(\.text)
-        p.assistantText = pair(\.assistantText)
-        p.dim = pair(\.dim)
-        p.faint = pair(\.faint)
-        p.accent = pair(\.accent)
-        p.reasoning = pair(\.reasoning)
-        p.reasoningBackground = pair(\.reasoningBackground)
-        p.userBackground = pair(\.userBackground)
-        p.keyword = pair(\.keyword)
-        p.string = pair(\.string)
-        p.number = pair(\.number)
-        p.type = pair(\.type)
-        p.call = pair(\.call)
-        p.comment = pair(\.comment)
-        p.punctuation = pair(\.punctuation)
-        return p
-    }()
-
-    static let light: Palette = {
-        var p = Palette()
-        p.scheme = .light
-        p.background = Color(hex: 0xFAF8F5)
-        p.panel = Color(hex: 0xFFFFFF)
-        p.codeBackground = Color(hex: 0xF4F1EC)
-        p.border = Color(hex: 0xE6E1DA)
-        p.text = Color(hex: 0x1F1B17)
-        p.assistantText = Color(hex: 0x40382F)
-        p.dim = Color(hex: 0x6B6159)
-        p.faint = Color(hex: 0x70665D)
-        p.accent = Color(hex: 0xA65A1E)
-        p.reasoning = Color(hex: 0x8A5A22)
-        p.reasoningBackground = Color(hex: 0xFBF2E6)
-        p.userBackground = Color(hex: 0xF3EEE7)
-        p.keyword = Color(hex: 0x9B4A18)
-        p.string = Color(hex: 0x4A6B3A)
-        p.number = Color(hex: 0x8A5A22)
-        p.type = Color(hex: 0x7A5A1E)
-        p.call = Color(hex: 0x6B4A8A)
-        p.comment = Color(hex: 0x70665D)
-        p.punctuation = Color(hex: 0x70665D)
-        return p
-    }()
-
-    /// Xcode-like syntax colours for the system theme: the palette a Mac user already
-    /// reads every day, resolved per appearance.
-    static let xcode: Palette = {
-        var p = Palette()
-        p.keyword = copperColor(light: Color(hex: 0xAD3DA4), dark: Color(hex: 0xFC5FA3))
-        p.string = copperColor(light: Color(hex: 0xD12F1B), dark: Color(hex: 0xFC6A5D))
-        p.number = copperColor(light: Color(hex: 0x272AD8), dark: Color(hex: 0xD0BF69))
-        p.type = copperColor(light: Color(hex: 0x0B4F79), dark: Color(hex: 0x5DD8FF))
-        p.call = copperColor(light: Color(hex: 0x326D74), dark: Color(hex: 0x67B7A4))
-        p.comment = copperColor(light: Color(hex: 0x707F8C), dark: Color(hex: 0x7F8C98))
-        p.punctuation = copperColor(light: Color(hex: 0x68696B), dark: Color(hex: 0xDEDEDE))
-        return p
-    }()
-
     init() {}
-}
-
-/// Resolves to a different colour per appearance, so one theme works in both.
-func copperColor(light: Color, dark: Color) -> Color {
-    let lightColor = NSColor(light).usingColorSpace(.sRGB) ?? .textColor
-    let darkColor = NSColor(dark).usingColorSpace(.sRGB) ?? .textColor
-    return Color(nsColor: NSColor(name: nil) { appearance in
-        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        return isDark ? darkColor : lightColor
-    })
 }
 
 extension Color {

@@ -11,6 +11,8 @@ struct MarkdownView: View {
     let text: String
     let fontSize: CGFloat
     var isStreaming: Bool = false
+    /// R33: case-insensitive find query tinted on every text run.
+    var highlight: String = ""
 
     @Environment(\.theme) private var theme
 
@@ -27,7 +29,12 @@ struct MarkdownView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.zero) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, child in
-                MarkdownBlockView(node: child, fontSize: fontSize, dimmed: false)
+                MarkdownBlockView(
+                    node: child,
+                    fontSize: fontSize,
+                    dimmed: false,
+                    highlight: highlight
+                )
                     .padding(.top, index == 0 ? Spacing.zero : MarkdownBlockView.gap(after: blocks[index - 1], before: child))
             }
         }
@@ -83,6 +90,7 @@ struct MarkdownBlockView: View {
     let fontSize: CGFloat
     var dimmed: Bool = false
     var depth: Int = 0
+    var highlight: String = ""
 
     @Environment(\.theme) private var theme
 
@@ -209,7 +217,7 @@ struct MarkdownBlockView: View {
         VStack(alignment: .leading, spacing: Spacing.zero) {
             let children = Array(node.children)
             ForEach(Array(children.enumerated()), id: \.offset) { index, child in
-                MarkdownBlockView(node: child, fontSize: fontSize, dimmed: true, depth: depth)
+                MarkdownBlockView(node: child, fontSize: fontSize, dimmed: true, depth: depth, highlight: highlight)
                     .padding(.top, index == 0 ? Spacing.zero : Self.gap(after: children[index - 1], before: child))
             }
         }
@@ -239,7 +247,7 @@ struct MarkdownBlockView: View {
                     VStack(alignment: .leading, spacing: Spacing.zero) {
                         let children = Array(item.children)
                         ForEach(Array(children.enumerated()), id: \.offset) { childIndex, child in
-                            MarkdownBlockView(node: child, fontSize: fontSize, dimmed: dimmed, depth: depth + 1)
+                            MarkdownBlockView(node: child, fontSize: fontSize, dimmed: dimmed, depth: depth + 1, highlight: highlight)
                                 .padding(.top, childIndex == 0 ? Spacing.zero : Self.gap(after: children[childIndex - 1], before: child))
                         }
                     }
@@ -258,7 +266,7 @@ struct MarkdownBlockView: View {
             let children = Array(node.children)
             VStack(alignment: .leading, spacing: Spacing.zero) {
                 ForEach(Array(children.enumerated()), id: \.offset) { index, child in
-                    MarkdownBlockView(node: child, fontSize: fontSize, dimmed: dimmed, depth: depth)
+                    MarkdownBlockView(node: child, fontSize: fontSize, dimmed: dimmed, depth: depth, highlight: highlight)
                         .padding(.top, index == 0 ? Spacing.zero : Self.gap(after: children[index - 1], before: child))
                 }
             }
@@ -434,6 +442,13 @@ extension MarkdownBlockView {
             fragment.foregroundColor = theme.accent
         }
 
-        return fragment
+        // R33: the find bar tints hits after every other attribute is set, so a match
+        // stays visible inside code, links and emphasis alike.
+        return SearchHighlight.applying(
+            fragment,
+            source: string,
+            query: highlight,
+            color: theme.accent.opacity(0.28)
+        )
     }
 }

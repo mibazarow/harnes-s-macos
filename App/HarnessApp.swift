@@ -46,6 +46,34 @@ struct HarnessApp: App {
                     model.chat.clearView()
                 }
                 .keyboardShortcut("k", modifiers: [.command, .shift])
+
+                Divider()
+
+                // R33: find over the visible transcript.
+                Button("Найти в чате") {
+                    model.chat.search.present()
+                }
+                .keyboardShortcut("f", modifiers: .command)
+
+                Button("Найти следующее") {
+                    model.chat.search.next()
+                }
+                .keyboardShortcut("g", modifiers: .command)
+                .disabled(!model.chat.search.hasMatches)
+
+                Button("Найти предыдущее") {
+                    model.chat.search.previous()
+                }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .disabled(!model.chat.search.hasMatches)
+
+                Divider()
+
+                // R34: the command palette.
+                Button("Палитра команд") {
+                    model.chat.palette.toggle()
+                }
+                .keyboardShortcut("k", modifiers: .command)
             }
         }
 

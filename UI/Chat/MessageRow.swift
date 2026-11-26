@@ -7,6 +7,8 @@ struct MessageRow: View, Equatable {
     let showTimestamp: Bool
     /// New answers receive a brief opacity transition; history appears immediately.
     var animateReveal: Bool = false
+    /// R33: the active find query; matching runs are tinted in every text surface.
+    var searchQuery: String = ""
 
     @Environment(\.theme) private var theme
 
@@ -18,6 +20,7 @@ struct MessageRow: View, Equatable {
             && lhs.fontSize == rhs.fontSize
             && lhs.showTimestamp == rhs.showTimestamp
             && lhs.animateReveal == rhs.animateReveal
+            && lhs.searchQuery == rhs.searchQuery
     }
 
     private var isUser: Bool { message.role == .user }
@@ -55,12 +58,16 @@ struct MessageRow: View, Equatable {
             roleLine
 
             if !message.tools.isEmpty {
-                ToolTraceList(traces: message.tools, fontSize: fontSize)
+                ToolTraceList(traces: message.tools, fontSize: fontSize, searchQuery: searchQuery)
             }
 
             if isUser {
                 if !message.text.isEmpty {
-                    Text(message.text)
+                    Text(SearchHighlight.attributed(
+                        message.text,
+                        query: searchQuery,
+                        color: theme.accent.opacity(0.28)
+                    ))
                         .font(AppFont.ui(fontSize))
                         .foregroundStyle(theme.labelPrimary)
                         .lineSpacing(AppFont.lineSpacing(for: fontSize))
@@ -76,7 +83,8 @@ struct MessageRow: View, Equatable {
                     ReasoningBlock(
                         text: reasoning,
                         fontSize: fontSize,
-                        isStreaming: message.state == .streaming
+                        isStreaming: message.state == .streaming,
+                        searchQuery: searchQuery
                     )
                 }
 
@@ -85,7 +93,8 @@ struct MessageRow: View, Equatable {
                         text: message.text,
                         fontSize: fontSize,
                         animate: animateReveal,
-                        isStreaming: message.state == .streaming
+                        isStreaming: message.state == .streaming,
+                        searchQuery: searchQuery
                     )
                 } else if message.state == .streaming,
                           message.tools.isEmpty,
@@ -263,6 +272,7 @@ private func symbol(for kind: ChatAttachment.Kind) -> String {
 struct ToolTraceList: View {
     let traces: [ToolTrace]
     let fontSize: CGFloat
+    var searchQuery: String = ""
 
     @Environment(\.theme) private var theme
 
@@ -281,7 +291,11 @@ struct ToolTraceList: View {
                             .font(AppFont.mono(max(fontSize - 2, FontSize.minReadable)))
                             .foregroundStyle(theme.labelSecondary)
 
-                        Text(ToolTrace.summaryText(for: trace))
+                        Text(SearchHighlight.attributed(
+                            ToolTrace.summaryText(for: trace),
+                            query: searchQuery,
+                            color: theme.accent.opacity(0.28)
+                        ))
                             .foregroundStyle(theme.labelTertiary)
                             .lineLimit(2)
                             .truncationMode(.middle)
@@ -360,6 +374,7 @@ struct ReasoningBlock: View {
     let text: String
     let fontSize: CGFloat
     var isStreaming: Bool = false
+    var searchQuery: String = ""
 
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -392,7 +407,11 @@ struct ReasoningBlock: View {
             .accessibilityLabel(expanded ? "Свернуть размышления" : "Показать размышления")
 
             if expanded {
-                Text(text)
+                Text(SearchHighlight.attributed(
+                    text,
+                    query: searchQuery,
+                    color: theme.accent.opacity(0.28)
+                ))
                     .font(AppFont.ui(fontSize))
                     .foregroundStyle(theme.labelSecondary)
                     .lineSpacing(AppFont.lineSpacing(for: fontSize))
@@ -412,12 +431,18 @@ struct AnswerText: View {
     let fontSize: CGFloat
     var animate: Bool = false
     var isStreaming: Bool = false
+    var searchQuery: String = ""
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
 
     var body: some View {
-        MarkdownView(text: text, fontSize: fontSize, isStreaming: isStreaming)
+        MarkdownView(
+            text: text,
+            fontSize: fontSize,
+            isStreaming: isStreaming,
+            highlight: searchQuery
+        )
             .opacity(appeared || !animate || reduceMotion ? 1 : 0.85)
             .onAppear {
                 withAnimation(reduceMotion || !animate ? nil : .easeOut(duration: 0.16)) {

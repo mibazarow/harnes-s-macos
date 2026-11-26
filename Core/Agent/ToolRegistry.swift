@@ -130,8 +130,6 @@ struct ToolRegistry: Sendable {
     /// R30.2: the user's message for this turn — the only text memory may cite.
     var currentUserMessage: String?
     var currentUserMessageID: Int64?
-    /// R30.4: a subagent may read learned skills and report them, never write.
-    var isSubagent: Bool = false
     /// R30.5: the operations ledger, present in the app and absent in pure tests.
     var operations: OperationLedger?
     /// R30.6: the action journal behind the `activity` tool.
@@ -148,9 +146,8 @@ struct ToolRegistry: Sendable {
     let todos: TodoStore?
     let processes: BackgroundProcessService?
     let readOnly: Bool
-    let subagent: (@Sendable (String, Bool, SubagentDelivery, String, String) async -> SubagentOutcome)?
     /// Session-scoped read state. Shared across turns so "read it first" survives the
-    /// step boundary; a subagent gets its own because it has its own context.
+    /// step boundary.
     let ledger: FileReadingLedger
     /// Restriction declared by the last skill that was read.
     let skillScope: ActiveSkillScope?
@@ -166,17 +163,12 @@ struct ToolRegistry: Sendable {
     let cancel: AgentAbortSignal
     /// R32.3: per-turn count of memory lookups, logged once at the end of the turn.
     let memoryUsage: MemoryUsageCounter?
-    /// D8: children of this registry. Nil for a registry that cannot spawn.
-    let subagents: SubagentRegistry?
-    /// Name of the agent owning this registry: `lead` or `agent-N`.
-    let callerID: String
 
     init(
         workspace: URL,
         workspaceState: WorkspaceState? = nil,
         currentUserMessage: String? = nil,
         currentUserMessageID: Int64? = nil,
-        isSubagent: Bool = false,
         operations: OperationLedger? = nil,
         actions: ActionJournal? = nil,
         memory: MemoryService?,
@@ -190,7 +182,6 @@ struct ToolRegistry: Sendable {
         fileSafety: FileSafetyService? = nil,
         todos: TodoStore? = nil,
         readOnly: Bool = false,
-        subagent: (@Sendable (String, Bool, SubagentDelivery, String, String) async -> SubagentOutcome)? = nil,
         ledger: FileReadingLedger? = nil,
         skillScope: ActiveSkillScope? = nil,
         interceptors: ToolInterceptorChain = ToolInterceptorChain(),
@@ -198,14 +189,11 @@ struct ToolRegistry: Sendable {
         processes: BackgroundProcessService? = nil,
         repeatGuard: ToolRepeatGuard = ToolRepeatGuard(),
         cancel: AgentAbortSignal = .shared,
-        memoryUsage: MemoryUsageCounter? = nil,
-        subagents: SubagentRegistry? = nil,
-        callerID: String = SubagentRegistry.root
+        memoryUsage: MemoryUsageCounter? = nil
     ) {
         self.workspaceState = workspaceState ?? WorkspaceState(workspace)
         self.currentUserMessage = currentUserMessage
         self.currentUserMessageID = currentUserMessageID
-        self.isSubagent = isSubagent
         self.operations = operations
         self.actions = actions
         self.memory = memory
@@ -220,7 +208,6 @@ struct ToolRegistry: Sendable {
         self.todos = todos
         self.processes = processes
         self.readOnly = readOnly
-        self.subagent = subagent
         self.ledger = ledger ?? FileReadingLedger()
         self.skillScope = skillScope
         self.interceptors = interceptors
@@ -228,8 +215,6 @@ struct ToolRegistry: Sendable {
         self.repeatGuard = repeatGuard
         self.cancel = cancel
         self.memoryUsage = memoryUsage
-        self.subagents = subagents
-        self.callerID = callerID
     }
 
     static let mutatingTools: Set<String> = [
@@ -478,8 +463,6 @@ struct ToolRegistry: Sendable {
             case "restore_trashed": return try await restoreTrashed(args)
             case "file_versions": return try await fileVersions(args)
             case "restore_version": return try await restoreVersion(args)
-            case "task": return await runSubagent(args)
-            case "subagent_status": return await subagentStatus(args)
             case "todowrite": return todoWrite(args)
             case "todo_read": return todoRead()
             case "git": return await gitTool(args)

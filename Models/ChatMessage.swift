@@ -169,27 +169,8 @@ struct ToolTrace: Identifiable, Sendable, Equatable {
     static func summaryText(for trace: ToolTrace) -> String {
         let value = trace.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         if !value.isEmpty { return value }
-        // S8: a `task` call carries the child's whole brief in `prompt`. The user wants
-        // the result, not the brief: show the title only.
-        if trace.name == "task" {
-            return taskLine(from: trace.arguments)
-        }
         let call = preview(of: trace.arguments)
         return call.isEmpty ? "…" : call
-    }
-
-    /// `Подагент · <title>`, never the prompt body.
-    static func taskLine(from arguments: String) -> String {
-        guard let data = arguments.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return "Подагент"
-        }
-        if let target = object["interrupt"] as? String, !target.isEmpty {
-            return "Подагент · остановка \(target)"
-        }
-        let title = (object["title"] as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return title.isEmpty ? "Подагент" : "Подагент · \(title)"
     }
 
     /// One short line of the arguments, for the frame before the result arrives.
@@ -383,20 +364,6 @@ extension ChatMessage {
     var isPruneNotice: Bool {
         role == .system
             && text.hasPrefix("Результаты инструментов убраны из запроса:")
-    }
-
-    /// S1: a background child's report is a `.system` row that starts with this marker.
-    /// `.system` never reaches the provider, so the report cannot leak into the parent's
-    /// context; the model reads it through `subagent_status`.
-    static func subagentReportMarker(_ id: String) -> String {
-        "subagentReport(\(id))"
-    }
-
-    var subagentReportID: String? {
-        guard role == .system, text.hasPrefix("subagentReport("),
-              let close = text.firstIndex(of: ")") else { return nil }
-        let start = text.index(text.startIndex, offsetBy: "subagentReport(".count)
-        return String(text[start..<close])
     }
 
     /// Collapses runs of tool-only steps into one message for display.

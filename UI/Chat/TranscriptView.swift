@@ -50,7 +50,8 @@ struct TranscriptView: View {
                             message: message,
                             fontSize: fontSize,
                             showTimestamp: showTimestamps,
-                            animateReveal: chat.isStreaming || chat.revealID == message.id
+                            animateReveal: chat.isStreaming || chat.revealID == message.id,
+                            searchQuery: chat.search.query
                         )
                         .equatable()
                         .id(message.id)
@@ -127,6 +128,20 @@ struct TranscriptView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
                 }
             }
+            // R33: the find bar floats over the transcript; opening it moves nothing.
+            .overlay(alignment: .top) {
+                if chat.search.isPresented {
+                    TranscriptSearchBar(search: chat.search)
+                        .padding(.top, Spacing.small)
+                }
+            }
+            .onChange(of: chat.search.query) {
+                chat.search.update(displayed)
+                scrollToMatch(proxy)
+            }
+            .onChange(of: chat.search.scrollToken) {
+                scrollToMatch(proxy)
+            }
             .onChange(of: chat.messages.count) {
                 // A message the user just sent always brings the view back down.
                 if chat.messages.last?.role == .user {
@@ -184,6 +199,17 @@ struct TranscriptView: View {
 
     private func refreshDisplay() {
         displayedCache = ChatMessage.groupedForDisplay(chat.messages).filter { !$0.isPruneNotice }
+        chat.search.update(displayedCache)
+    }
+
+    /// R33: bring the current hit into view and stop following the tail, otherwise the
+    /// next streaming chunk would pull the view straight back down.
+    private func scrollToMatch(_ proxy: ScrollViewProxy) {
+        guard let id = chat.search.currentMessageID else { return }
+        follow = false
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+            proxy.scrollTo(id, anchor: .center)
+        }
     }
 
     /// Anything that changes the height of the newest message.

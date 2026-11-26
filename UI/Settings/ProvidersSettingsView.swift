@@ -186,18 +186,7 @@ struct ProvidersSettingsView: View {
                 }
             }
 
-            Picker("Модель субагентов", selection: subagentModelBinding) {
-                Text("как основная").tag("")
-                ForEach(choices) { choice in
-                    Text(choice.label).tag(choice.id)
-                }
-            }
-            .pickerStyle(.menu)
-            .onChange(of: settings.subagentModel) { _, _ in
-                Task { await directory.reload() }
-            }
-
-            Text("Основная — для чата и сжатия. Субагенты — для фоновых задач; пусто значит «как основная».")
+            Text("Основная — для чата и сжатия.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -217,16 +206,6 @@ struct ProvidersSettingsView: View {
                 )
             },
             set: { settings.mainModel = $0 }
-        )
-    }
-
-    private var subagentModelBinding: Binding<String> {
-        Binding(
-            get: {
-                ModelSelection.resolve(settings.subagentModel, in: providers) == nil
-                    ? "" : settings.subagentModel
-            },
-            set: { settings.subagentModel = $0 }
         )
     }
 
@@ -372,55 +351,13 @@ struct ProviderEditorView: View {
                         .font(.caption)
                     }
 
-                    // S7.2: the subagent window is its own number. A child usually runs
-                    // on a different model, so the main window would be the wrong budget.
-                    let subagentName = subagentModelName
-                    let subagentResolution = ModelContextPreferences.resolve(
-                        providerID: provider.id,
-                        model: subagentName,
-                        providerWindow: provider.contextWindow,
-                        scope: .subagent
-                    )
-                    let subagentBudget = ContextComposer().budget(
-                        for: subagentResolution.window,
-                        thresholdPercent: settings.compactionThresholdPercent
-                    )
-                    HStack(spacing: 10) {
-                        Text("Окно контекста подагентов")
-                        TextField("", value: subagentWindowBinding(model: subagentName), format: .number)
-                            .frame(width: Spacing.offGrid32 * 3 + Spacing.offGrid14)
-                            .multilineTextAlignment(.trailing)
-                            .font(AppFont.mono(FontSize.transcriptDefault))
-                        Stepper("", value: subagentWindowBinding(model: subagentName),
-                                in: 2_000...4_000_000, step: 8_000)
-                            .labelsHidden()
-                        Text("токенов")
-                            .foregroundStyle(.secondary)
-                    }
-                    Text("Подагенты: \(subagentResolution.window.formatted()) · бюджет "
-                        + "\(subagentBudget.usable.formatted()) (источник: "
-                        + "\(subagentResolution.source.label)) · сжатие на "
-                        + "\(subagentBudget.thresholdTokens.formatted())")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if ModelContextPreferences.manualWindow(
-                        providerID: provider.id, model: subagentName, scope: .subagent
-                    ) != nil {
-                        Button("Сбросить окно подагентов") {
-                            ModelContextPreferences.setManualWindow(
-                                nil, providerID: provider.id, model: subagentName, scope: .subagent
-                            )
-                        }
-                        .font(.caption)
-                    }
-
                     if provider.contextWindow > 300_000 {
                         Label(
                             "Такое окно есть у считанных моделей. Если оно завышено, компактация не включится никогда: она ждёт \(Int(settings.compactionThresholdPercent))% от этого числа. Типичные значения: 128 000 у DeepSeek и большинства Qwen, 200 000 у Claude, 1 000 000 у Gemini.",
                             systemImage: "exclamationmark.triangle"
                         )
                         .font(.caption)
-                        .foregroundStyle(settings.theme.tokens.warning)
+                        .foregroundStyle(ThemeTokens.copper.warning)
                     }
 
                     Picker("Уровень размышлений", selection: $provider.reasoningLevel) {
@@ -507,31 +444,6 @@ struct ProviderEditorView: View {
         Binding(
             get: { provider.defaultModel ?? provider.models.first ?? "" },
             set: { provider.defaultModel = $0 }
-        )
-    }
-
-    /// The model this provider's subagents actually run on: the app-wide subagent
-    /// choice when it points here, otherwise this provider's own fallback.
-    private var subagentModelName: String {
-        if let choice = ModelSelection.resolve(settings.subagentModel, in: [provider]) {
-            return choice.model
-        }
-        return provider.defaultModel ?? provider.models.first ?? ""
-    }
-
-    private func subagentWindowBinding(model: String) -> Binding<Int> {
-        Binding(
-            get: {
-                ModelContextPreferences.resolve(
-                    providerID: provider.id, model: model,
-                    providerWindow: provider.contextWindow, scope: .subagent
-                ).window
-            },
-            set: {
-                ModelContextPreferences.setManualWindow(
-                    $0, providerID: provider.id, model: model, scope: .subagent
-                )
-            }
         )
     }
 

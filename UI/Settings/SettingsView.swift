@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SettingsView: View {
     let services: AppServices?
-    @Environment(AppSettings.self) private var settings
 
     @State private var tab = Tab.general
 
@@ -27,9 +26,9 @@ struct SettingsView: View {
         // The native settings window sizes itself; a fixed frame breaks it when the
         // system font changes.
         .frame(minWidth: Layout.settingsWidth, minHeight: Layout.settingsHeight)
-        .theme(settings.theme.tokens)
-        .tint(settings.theme.tokens.accent)
-        .preferredColorScheme(settings.theme.tokens.scheme)
+        .theme(ThemeTokens.copper)
+        .tint(ThemeTokens.copper.accent)
+        .preferredColorScheme(ThemeTokens.copper.scheme)
     }
 }
 
@@ -41,12 +40,6 @@ struct GeneralSettingsView: View {
 
         Form {
             Section {
-                Picker("Тема", selection: $settings.theme) {
-                    ForEach(AppTheme.allCases, id: \.self) { theme in
-                        Text(theme.title).tag(theme)
-                    }
-                }
-
                 Toggle("Моноширинный интерфейс", isOn: $settings.monoInterface)
                 Text("По умолчанию интерфейс набран системным SF Pro; код и пути всегда моноширинные. Включите, чтобы вернуть Nordwand Mono всему интерфейсу.")
                     .font(.caption)

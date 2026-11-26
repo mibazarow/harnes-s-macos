@@ -6,13 +6,15 @@ struct RootView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(ChatStore.self) private var chat
     @Environment(ProviderDirectory.self) private var providerDirectory
+    @Environment(\.openSettings) private var openSettings
     @State private var draft = ""
     @State private var composerHeight: CGFloat = Size.composerMin
     @State private var attachments: [ChatAttachment] = []
     /// Set while the user drags a window edge; rows drop text selection for the drag.
     @State private var liveResize = LiveResizeState()
 
-    private var tokens: ThemeTokens { settings.theme.tokens }
+    /// One theme: Copper, always dark. There is no appearance setting to read here.
+    private var tokens: ThemeTokens { .copper }
 
     var body: some View {
         // The context numbers come from a snapshot, not from the plan: reading the plan
@@ -62,6 +64,12 @@ struct RootView: View {
         .navigationTitle("HARNES-S")
         .navigationSubtitle(providerDirectory.label)
         .toolbar { toolbarContent }
+        // R34: the palette is an overlay over the content, never part of the layout.
+        .overlay {
+            if chat.palette.isPresented {
+                CommandPaletteOverlay(palette: chat.palette, actions: paletteActions)
+            }
+        }
         // The navigation layer is glass; the content layer stays solid.
         .toolbarBackground(.ultraThinMaterial, for: .windowToolbar)
         .task {
@@ -111,12 +119,6 @@ struct RootView: View {
     /// and Stage Manager work without a hand-drawn header.
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .principal) {
-            // S4: only the fact that a child is working. Finished children lose their
-            // pill immediately; the report arrives in the transcript.
-            SubagentPills(agents: chat.runningSubagents)
-        }
-
         ToolbarItemGroup(placement: .primaryAction) {
             if chat.isStreaming {
                 Button {
@@ -209,6 +211,64 @@ struct RootView: View {
             return "\(value / 1_000)k"
         }
         return "\(value)"
+    }
+
+    /// R34: the palette lists existing commands only; nothing here is a new capability.
+    private var paletteActions: [PaletteAction] {
+        [
+            PaletteAction(
+                id: "stop",
+                title: "Остановить агента",
+                systemImage: "stop.fill",
+                isEnabled: chat.isStreaming
+            ) {
+                chat.stop()
+            },
+            PaletteAction(
+                id: "plan",
+                title: chat.isPlanMode ? "Выключить режим плана" : "Включить режим плана",
+                systemImage: chat.isPlanMode ? "eye.slash" : "eye"
+            ) {
+                chat.setPlanMode(!chat.isPlanMode)
+            },
+            PaletteAction(
+                id: "clear",
+                title: "Очистить вид",
+                systemImage: "rectangle.slash"
+            ) {
+                chat.clearView()
+            },
+            PaletteAction(
+                id: "model",
+                title: "Сменить основную модель",
+                systemImage: "arrow.triangle.2.circlepath"
+            ) {
+                cycleMainModel()
+            },
+            PaletteAction(
+                id: "settings",
+                title: "Настройки",
+                systemImage: "gearshape"
+            ) {
+                openSettings()
+            }
+        ]
+    }
+
+    /// The next model in the saved list, exactly what the picker in Providers does.
+    private func cycleMainModel() {
+        guard let services else { return }
+        Task {
+            let providers = (try? await services.providers.list()) ?? []
+            let choices = ModelSelection.choices(providers)
+            guard !choices.isEmpty else { return }
+            let current = ModelSelection.resolve(settings.mainModel, in: providers).map {
+                ModelSelection.raw(providerID: $0.provider.id, model: $0.model)
+            }
+            let index = choices.firstIndex(where: { $0.id == current }) ?? -1
+            settings.mainModel = choices[(index + 1) % choices.count].id
+            await providerDirectory.reload()
+        }
     }
 
     private func send() {

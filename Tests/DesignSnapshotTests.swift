@@ -4,8 +4,8 @@ import XCTest
 @testable import Harness
 
 /// Renders the transcript column to PNG for visual review. No pixel comparison: the
-/// point is evidence that the views produce a real image in each theme, which is what a
-/// reviewer looks at instead of reading colour literals.
+/// point is evidence that the view produces a real image in the app's only theme,
+/// which is what a reviewer looks at instead of reading colour literals.
 @MainActor
 final class DesignSnapshotTests: XCTestCase {
     private let assistant = ChatMessage(
@@ -47,43 +47,38 @@ final class DesignSnapshotTests: XCTestCase {
         .padding(Spacing.offGrid20)
     }
 
-    func testRenderThemesToPNG() throws {
+    func testRenderThemeToPNG() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("harness-design")
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        for (name, tokens) in [
-            ("system-light", ThemeTokens.systemLight),
-            ("system-dark", ThemeTokens.systemDark),
-            ("copper", ThemeTokens.copper)
-        ] {
-            let host = NSHostingView(rootView: column
-                .environment(LiveResizeState())
-                .environment(\.theme, tokens)
-                .background(tokens.contentBackground)
-                .preferredColorScheme(tokens.scheme)
-            )
-            // A concrete width first, then the height the column actually needs: fitting
-            // size at an unconstrained width reports one long line.
-            host.frame = NSRect(origin: .zero, size: NSSize(width: Layout.chatContainer, height: 1200))
-            host.layoutSubtreeIfNeeded()
-            let needed = host.fittingSize
-            host.frame = NSRect(origin: .zero, size: NSSize(width: Layout.chatContainer, height: max(needed.height, 200)))
-            host.layoutSubtreeIfNeeded()
+        let tokens = ThemeTokens.copper
+        let host = NSHostingView(rootView: column
+            .environment(LiveResizeState())
+            .environment(\.theme, tokens)
+            .background(tokens.contentBackground)
+            .preferredColorScheme(tokens.scheme)
+        )
+        // A concrete width first, then the height the column actually needs: fitting
+        // size at an unconstrained width reports one long line.
+        host.frame = NSRect(origin: .zero, size: NSSize(width: Layout.chatContainer, height: 1200))
+        host.layoutSubtreeIfNeeded()
+        let needed = host.fittingSize
+        host.frame = NSRect(origin: .zero, size: NSSize(width: Layout.chatContainer, height: max(needed.height, 200)))
+        host.layoutSubtreeIfNeeded()
 
-            let window = NSWindow(contentRect: host.frame, styleMask: [.borderless],
-                                  backing: .buffered, defer: false)
-            window.appearance = NSAppearance(named: tokens.scheme == .dark ? .darkAqua : .aqua)
-            window.contentView = host
-            host.layoutSubtreeIfNeeded()
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
 
-            let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-            host.cacheDisplay(in: host.bounds, to: rep)
-            let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
-            let url = directory.appendingPathComponent("\(name).png")
-            try data.write(to: url)
-            XCTAssertGreaterThan(data.count, 10_000, name)
-            print("SNAPSHOT \(url.path)")
-            window.contentView = nil
-        }
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        let url = directory.appendingPathComponent("copper.png")
+        try data.write(to: url)
+        XCTAssertGreaterThan(data.count, 10_000, "copper")
+        print("SNAPSHOT \(url.path)")
+        window.contentView = nil
     }
 }

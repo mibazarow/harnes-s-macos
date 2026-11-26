@@ -53,16 +53,6 @@ final class ChatStore {
     var compactionCooldownUntil: Date?
     /// Calibration of the local token estimate against provider-reported usage.
     let calibration: TokenCalibration
-    /// D8: named, bounded children of this store. Shared by the parent and any child
-    /// registry so depth and interrupts see the same tree.
-    let subagents = SubagentRegistry()
-    /// S1: background children, so the parent turn can return at once.
-    let subagentRunner = SubagentRunner()
-    /// S2/S4: what the header shows. The registry is an actor SwiftUI cannot observe, so
-    /// this snapshot is refreshed on start and on finish.
-    private(set) var runningSubagents: [SubagentInfo] = []
-    /// S6: installed once, fires on every stop. A second Esc must also reach children.
-    private var abortCascadeInstalled = false
     /// Scale applied to every "does it fit" decision, refreshed from `calibration`.
     var estimateScale: Double = 1
     /// What the composer shows about the context window. Snapshotted once per request
@@ -79,15 +69,19 @@ final class ChatStore {
     /// bubbles are rendered immediately. `isStreaming` alone is not a signal — the final
     /// answer settles in the same runloop turn that clears it.
     var revealID: UUID?
+    /// R33: ⌘F search over the visible transcript.
+    let search = TranscriptSearch()
+    /// R34: ⌘K command palette.
+    let palette = CommandPaletteState()
     /// Serialized tool catalog price for the current run, counted against the window.
     var schemaTokens: Int = 0
     /// M39: fingerprint of the system prompt plus the tool catalog for the request in
     /// flight. Logged next to `prompt_tokens` so a cold prefix is visible as a change,
     /// not guessed from a low cache ratio.
     var prefixHash: String = "-"
-    /// Session-scoped catalog expansions; shared by the main loop and subagents.
+    /// Session-scoped catalog expansions, shared across turns.
     let toolCatalog = ToolCatalogState()
-    /// Background children survive turns; the registry is rebuilt per turn, this is not.
+    /// Background processes survive turns; the registry is rebuilt per turn, this is not.
     let backgroundProcesses = BackgroundProcessService()
     /// R18.11: per-turn GUI budget, abort flag and focus bookkeeping.
     let guiSession = GUIControlSession()
@@ -592,414 +586,14 @@ final class ChatStore {
         }
     }
 
-    /// Aggressive compaction after the provider itself said the prompt is too long.
-    /// The threshold drops so the retry has real headroom, not just a few tokens.
-    private func runSubagent(
-        prompt: String,
-        readOnly: Bool,
-        provider: ProviderModel,
-        model: String,
-        services: AppServices,
-        trustCandidates: [TrustCandidate],
-        delivery: SubagentDelivery,
-        childID: String,
-        title: String
-    ) async -> SubagentOutcome {
-        // A subagent is its own turn for the GUI budget, but shares the abort flag: the
-        // stop hotkey must kill a runaway child too.
-        let subagentSession = GUIControlSession()
-        subagentSession.beginTurn(
-            originalFrontmost: NSWorkspace.shared.frontmostApplication?.processIdentifier
-        )
-        // R30.7: a subagent's authority is the user's words that started the parent turn,
-        // not the prompt the parent model wrote. Its own budget of twenty checks.
-        let subagentTrust = TrustCheckSession()
-        subagentTrust.beginTurn()
-        defer {
-            let current = NSWorkspace.shared.frontmostApplication?.processIdentifier
-            if let pid = subagentSession.restoreTarget(current: current) {
-                NSRunningApplication(processIdentifier: pid)?.activate()
-            }
-        }
-        let registry = ToolRegistry(
-            workspace: AppPaths.workspaceDirectory,
-            workspaceState: services.workspaceState,
-            isSubagent: true,
-            operations: services.operations,
-            actions: services.actions,
-            memory: services.memory,
-            embeddings: services.embeddings,
-            secrets: nil,
-            skills: services.skills,
-            mcp: services.mcp,
-            mcpManager: services.mcpManager,
-            indexer: nil,
-            scheduler: nil,
-            fileSafety: services.fileSafety,
-            todos: nil,
-            readOnly: readOnly,
-            subagent: nil,
-            interceptors: ToolInterceptorChain(
-                Self.guards(
-                    gui: GUIControlGuardInterceptor(session: subagentSession),
-                    trust: TrustCheckInterceptor(
-                        session: subagentTrust,
-                        candidates: trustCandidates,
-                        instructions: [],
-                        asker: TrustModelAsker(provider: provider, model: model)
-                    ),
-                    autopilot: autopilot,
-                    auditSession: subagentTrust
-                ),
-                log: { line in ChatStore.logLatency(line) }
-            ),
-            catalog: toolCatalog,
-            processes: backgroundProcesses,
-            subagents: subagents,
-            callerID: childID
-        )
-
-        // S3: the child works in English; the interface and the pill title stay Russian.
-        let system = Prompts.system + "\n\n" + Prompts.subagent
-
-        // S5: explicit subagent model → cheap (read-only only) → main.
-        // S7.1: the child's window is the window of the model it will actually use.
-        // Taking the parent's number gives gemma (8k) a 128k budget.
-        let subagentWindow = window(for: provider, model: model, scope: .subagent).window
-        let composer = ContextComposer()
-        let schemaTokens = await registry.schemaTokenCost()
-        var context = SubagentContext(prompt: prompt, baseSystem: system)
-
-        var answer = ""
-        var lastError: String?
-        var steps = 0
-        var callsUsed = 0
-        var budget = SubagentBudget()
-        var truncated = false
-
-        /// S7.3: prune, then fold, then check. Pruning is free; a fold costs a request,
-        /// so it only runs when the cheaper pass did not buy enough room.
-        func prepare() async -> [ProviderMessage]? {
-            func makePlan() -> ContextPlan {
-                composer.plan(
-                    systemPrompt: context.system,
-                    messages: context.contextMessages(),
-                    contextWindow: subagentWindow,
-                    thresholdPercent: compactionThreshold,
-                    summaryTokens: TokenEstimator.tokens(in: context.summary),
-                    toolTokens: schemaTokens
-                )
-            }
-            var plan = makePlan()
-            if plan.isOverThreshold {
-                let prune = ToolOutputPruner.plan(
-                    messages: context.journal,
-                    mode: .always,
-                    compactionHappened: true,
-                    threshold: Tuning.toolOutputPruneBatchTokens,
-                    protectedSteps: SubagentContext.protectedSteps
-                )
-                if !prune.isEmpty {
-                    context.applyPrune(prune.replacements)
-                    Self.logLatency("subagent id=\(childID) prune results=\(prune.replacements.count) "
-                        + "chars=\(prune.cutChars)")
-                    plan = makePlan()
-                }
-            }
-            while plan.isOverThreshold, context.folds < SubagentContext.maxFolds {
-                let ids = Set(plan.compacted.map(\.id)).filter { $0 > 0 }
-                guard !ids.isEmpty else { break }
-                guard let merged = await foldSubagentSummary(
-                    previous: context.summary, text: context.foldText(ids: ids),
-                    provider: provider, model: model
-                ) else { break }
-                context.applyFold(ids: ids, summary: merged)
-                Self.logLatency("subagent id=\(childID) fold=\(context.folds) "
-                    + "window=\(subagentWindow) summary_chars=\(merged.count)")
-                plan = makePlan()
-            }
-            guard !plan.isOverThreshold else {
-                truncated = true
-                lastError = "контекст кончился: окно \(subagentWindow), свёрток \(context.folds)"
-                return nil
-            }
-            return context.messages(included: plan.included.map(\.id))
-        }
-
-        loop: for _ in 0..<Tuning.subagentSteps {
-            // D8: an interrupt from the parent (or the user) stops before the next
-            // round instead of after the child's own budget runs out.
-            if await subagents.isCancelled(childID) {
-                truncated = true
-                lastError = "подагент остановлен родителем"
-                break loop
-            }
-            // S0.7: Esc must stop a background child too; the child loop used to check
-            // only the registry, so a stop left it running in the background.
-            if let reason = AgentAbortSignal.shared.current {
-                truncated = true
-                lastError = "аварийный стоп: \(reason)"
-                break loop
-            }
-            steps += 1
-            await subagents.update(childID, step: steps, maxSteps: Tuning.subagentSteps)
-            guard var history = await prepare() else { break loop }
-            var streamed = ""
-            var calls: [ToolCall] = []
-            var attempt = 0
-
-            while true {
-                do {
-                    streamed = ""
-                    calls = []
-                    for try await event in client.stream(
-                        provider: provider,
-                        model: model,
-                        messages: history,
-                        tools: await registry.schemas(),
-                        cacheKey: promptCacheKey
-                    ) {
-                        switch event {
-                        case .delta(let chunk):
-                            streamed += chunk
-                        case .toolCall(let call):
-                            calls.append(call)
-                        default:
-                            break
-                        }
-                    }
-                    break
-                } catch let error as ProviderError where error.isContextOverflow
-                    && attempt < Self.overflowShrinkSteps.count {
-                    // S7.4: same ladder as the parent. One 400 used to end the run.
-                    let fraction = Self.overflowShrinkSteps[attempt]
-                    attempt += 1
-                    let ids = context.shrinkIDs(fraction: fraction, window: subagentWindow)
-                    guard !ids.isEmpty,
-                          let merged = await foldSubagentSummary(
-                              previous: context.summary, text: context.foldText(ids: ids),
-                              provider: provider, model: model
-                          ) else {
-                        lastError = "ошибка стрима: \(error.localizedDescription)"
-                        break
-                    }
-                    context.applyFold(ids: ids, summary: merged)
-                    Self.logLatency("subagent id=\(childID) overflow_retry fraction=\(fraction) "
-                        + "folds=\(context.folds)")
-                    guard let rebuilt = await prepare() else { break }
-                    history = rebuilt
-                } catch {
-                    lastError = "ошибка стрима: \(error.localizedDescription)"
-                    answer += streamed
-                    break loop
-                }
-            }
-            if lastError != nil { break loop }
-
-            answer += streamed
-
-            if calls.isEmpty { break }
-
-            switch budget.record(calls.count) {
-            case .stop:
-                truncated = true
-                break loop
-            case .wrapUp:
-                context.append(ChatMessage(role: .user, text: budget.wrapUpInstruction))
-            case .proceed:
-                break
-            }
-
-            callsUsed += calls.count
-            var exchanges: [ToolExchange] = []
-            for call in calls {
-                await subagents.update(childID, calls: callsUsed, lastTool: call.name)
-                let result = await registry.execute(call)
-                exchanges.append(ToolExchange(
-                    callID: call.id,
-                    name: call.name,
-                    arguments: call.arguments,
-                    output: String(result.output.prefix(10_000)),
-                    isError: result.isError
-                ))
-            }
-            context.append(ChatMessage(role: .assistant, text: streamed, exchanges: exchanges))
-        }
-
-        // Models often end on a tool call and never say anything. One request without
-        // tools forces a textual summary from what was already gathered.
-        var text = answer.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.isEmpty {
-            context.append(ChatMessage(
-                role: .user,
-                text: "Summarize what you already did: facts and paths, no new tool calls."
-            ))
-            do {
-                var summary = ""
-                for try await event in client.stream(
-                    provider: provider, model: model,
-                    messages: context.messages(included: context.contextMessages().map(\.id)),
-                    tools: [],
-                    cacheKey: promptCacheKey
-                ) {
-                    if case .delta(let chunk) = event { summary += chunk }
-                }
-                text = summary.trimmingCharacters(in: .whitespacesAndNewlines)
-            } catch {
-                lastError = lastError ?? "итоговый запрос: \(error.localizedDescription)"
-            }
-        }
-
-        // The parent asked for findings; a wall of process narration is not one.
-        var findings = SubagentOutput.findings(text)
-        if truncated, findings.count == text.count {
-            findings += "\n…[обрезано по бюджету: остановлен после \(callsUsed) вызовов]"
-        }
-        if truncated, let lastError, findings.isEmpty {
-            findings = lastError
-        }
-
-        Self.logLatency("subagent id=\(childID) steps=\(steps) calls=\(callsUsed) "
-            + "truncated=\(truncated) folds=\(context.folds) empty=\(findings.isEmpty) "
-            + "error=\(lastError ?? "-")")
-        return SubagentOutcome(
-            text: findings, error: lastError, steps: steps, calls: callsUsed, truncated: truncated
-        )
-    }
-
-    /// S7.3: merges new work into the existing summary instead of replacing it, so a
-    /// second fold never loses the first half of the task.
-    private func foldSubagentSummary(
-        previous: String,
-        text: String,
-        provider: ProviderModel,
-        model: String
-    ) async -> String? {
-        guard !text.isEmpty else { return previous.isEmpty ? nil : previous }
-        let body = SubagentContext.mergeBody(previous: previous, text: text)
-        let history = [
-            ProviderMessage(role: .system, content: Prompts.subagentFold),
-            ProviderMessage(role: .user, content: body)
-        ]
-        do {
-            var out = ""
-            for try await event in client.stream(
-                provider: provider, model: model, messages: history, tools: [],
-                cacheKey: promptCacheKey
-            ) {
-                if case .delta(let chunk) = event { out += chunk }
-            }
-            let trimmed = out.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? (previous.isEmpty ? nil : previous) : trimmed
-        } catch {
-            Self.logLatency("subagent fold failed: \(error.localizedDescription)")
-            return nil
-        }
-    }
-
-    /// S6: Esc stops background children too. Registered once per store, not per turn:
-    /// one-shot handlers are cleared by the first abort.
-    private func installAbortCascade() {
-        guard !abortCascadeInstalled else { return }
-        abortCascadeInstalled = true
-        let runner = subagentRunner
-        AgentAbortSignal.shared.onAbortAlways {
-            Task { await runner.cancelAll() }
-        }
-    }
-
-    /// S1: `caller` keeps the old synchronous shape; `parent` starts the child in the
-    /// background and returns a launch line at once. Provider, model and services are
-    /// captured by value, so a settings switch does not change a running child.
-    private func handleSubagent(
-        prompt: String,
-        readOnly: Bool,
-        delivery: SubagentDelivery,
-        childID: String,
-        title: String,
-        provider: ProviderModel,
-        model: String,
-        services: AppServices,
-        trustCandidates: [TrustCandidate]
-    ) async -> SubagentOutcome {
-        installAbortCascade()
-        // The child may run on another provider entirely: resolve before the turn is
-        // handed to a background Task, so a later settings change cannot move it.
-        let child = await resolvedSubagent(
-            main: provider, model: model, readOnly: readOnly, services: services
-        )
-        if delivery == .caller {
-            return await runSubagent(
-                prompt: prompt, readOnly: readOnly,
-                provider: child.provider, model: child.model,
-                services: services, trustCandidates: trustCandidates,
-                delivery: .caller, childID: childID, title: title
-            )
-        }
-
-        let runner = subagentRunner
-        let registry = subagents
-        await runner.start(
-            id: childID,
-            onTimeout: {
-                // S6: the ceiling is the runner's, so a child parked in a long tool is
-                // still stopped and its report says why.
-                await registry.interrupt(target: childID, by: "user", reason: "timeout")
-            }
-        ) { [weak self] in
-            guard let self else {
-                ChatStore.logLatency("subagent id=\(childID) report dropped: store released")
-                return
-            }
-            let outcome = await self.runSubagent(
-                prompt: prompt, readOnly: readOnly,
-                provider: child.provider, model: child.model,
-                services: services, trustCandidates: trustCandidates,
-                delivery: .parent, childID: childID, title: title
-            )
-            await self.subagents.end(childID, outcome: ChatStore.subagentSummary(outcome))
-            await self.publishSubagentReport(childID: childID, title: title, outcome: outcome)
-            await runner.finished(childID)
-        }
-        await refreshRunningSubagents()
-        return SubagentOutcome(
-            text: "Подагент \(childID) запущен: \(title). Отчёт придёт в чат; статус — subagent_status.",
-            launched: true
-        )
-    }
-
-    /// S2: the one line the archive keeps. The full text lives in the transcript.
-    nonisolated static func subagentSummary(_ outcome: SubagentOutcome) -> String {
-        let source = outcome.text.isEmpty ? (outcome.error ?? "") : outcome.text
-        let first = source.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
-        return first.count > 200 ? String(first.prefix(200)) + "…" : first
-    }
-
-    /// S6: the report is a `.system` row with a marker. `.system` is filtered out of
-    /// `promptMessages`, so ten reports never leak into the parent's context; the model
-    /// reads them through `subagent_status`.
-    func publishSubagentReport(childID: String, title: String, outcome: SubagentOutcome) async {
-        let body = outcome.text.isEmpty ? (outcome.error ?? "нет результата") : outcome.text
-        let head = ChatMessage.subagentReportMarker(childID) + (title.isEmpty ? "" : " · " + title)
-        notice(head + "\n" + SubagentOutput.findings(body))
-        await refreshRunningSubagents()
-    }
-
-    /// S4: refreshed on start and on finish; the header renders this, never the actor.
-    func refreshRunningSubagents() async {
-        runningSubagents = await subagents.snapshot().map(SubagentInfo.init)
-    }
-
     /// R34.2: the window actually used for budgets. A known model name wins over the
     /// stored number unless the person set the number explicitly.
     func window(
         for provider: ProviderModel,
-        model: String,
-        scope: ModelContextPreferences.Scope = .main
+        model: String
     ) -> ContextWindowResolution {
         ModelContextPreferences.resolve(
-            providerID: provider.id, model: model, providerWindow: provider.contextWindow,
-            scope: scope
+            providerID: provider.id, model: model, providerWindow: provider.contextWindow
         )
     }
 
@@ -1115,24 +709,6 @@ final class ChatStore {
             modelDefaults.string(forKey: ModelSelection.mainModelKey) ?? "",
             in: providers
         )
-    }
-
-    /// S5 + the app-wide selector: an explicit subagent model wins, then the provider's
-    /// own subagent field, then the cheap model for read-only work, then the main model.
-    func resolvedSubagent(
-        main provider: ProviderModel,
-        model mainModel: String,
-        readOnly: Bool,
-        services: AppServices
-    ) async -> (provider: ProviderModel, model: String) {
-        let providers = (try? await services.providers.list()) ?? []
-        if let choice = ModelSelection.resolve(
-            modelDefaults.string(forKey: ModelSelection.subagentModelKey) ?? "",
-            in: providers
-        ) {
-            return choice
-        }
-        return (provider, provider.resolvedSubagentModel(readOnly: readOnly, main: mainModel))
     }
 
     func buildSystemPrompt(services: AppServices?) async -> String {
@@ -1457,14 +1033,6 @@ final class ChatStore {
             fileSafety: services.fileSafety,
             todos: services.todos,
             readOnly: planMode,
-            subagent: { [weak self] prompt, readOnly, delivery, childID, title in
-                await self?.handleSubagent(
-                    prompt: prompt, readOnly: readOnly, delivery: delivery,
-                    childID: childID, title: title,
-                    provider: provider, model: model, services: services,
-                    trustCandidates: trustCandidates
-                ) ?? SubagentOutcome(text: "", error: "сессия закрыта")
-            },
             ledger: services.fileLedger,
             skillScope: services.skillScope,
             interceptors: ToolInterceptorChain(
@@ -1483,9 +1051,7 @@ final class ChatStore {
             ),
             catalog: toolCatalog,
             processes: backgroundProcesses,
-            memoryUsage: memoryUsage,
-            subagents: subagents,
-            callerID: SubagentRegistry.root
+            memoryUsage: memoryUsage
         )
     }
 

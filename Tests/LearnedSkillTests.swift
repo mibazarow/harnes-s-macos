@@ -17,10 +17,10 @@ final class LearnedSkillTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
-    private func registry(isSubagent: Bool = false, userMessage: String? = "Сделай это",
+    private func registry(userMessage: String? = "Сделай это",
                           secrets: SecretsService? = nil) -> ToolRegistry {
         ToolRegistry(
-            workspace: directory, currentUserMessage: userMessage, isSubagent: isSubagent,
+            workspace: directory, currentUserMessage: userMessage,
             memory: nil, embeddings: nil, secrets: secrets, skills: nil, mcp: nil
         )
     }
@@ -70,14 +70,6 @@ final class LearnedSkillTests: XCTestCase {
         XCTAssertTrue(file.contains("<email>"), file)
         XCTAssertTrue(file.contains("<number>"), file)
         XCTAssertFalse(file.contains("lena@example.com"), file)
-    }
-
-    func testSubagentCannotSave() async {
-        let result = await registry(isSubagent: true).skillLearnTool([
-            "action": "save", "name": "x", "description": "X", "body": "step"
-        ])
-        XCTAssertTrue(result.isError)
-        XCTAssertTrue(result.output.contains("Сабагент"), result.output)
     }
 
     func testSaveWithoutAUserMessageIsRefused() async {

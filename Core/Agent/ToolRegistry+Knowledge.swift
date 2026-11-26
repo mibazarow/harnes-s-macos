@@ -87,7 +87,7 @@ extension ToolRegistry {
         // the only text checked is the user's own message for this turn.
         guard let userMessage = currentUserMessage, !userMessage.isEmpty else {
             return .fail("Память пишется только в ходе, начатом сообщением пользователя. "
-                + "В фоновом прогоне или сабагенте источник цитаты отсутствует.")
+                + "В фоновом прогоне источник цитаты отсутствует.")
         }
         if let source = args["source_message_id"] {
             let given = (source as? Int64).map(String.init) ?? (source as? Int).map(String.init)

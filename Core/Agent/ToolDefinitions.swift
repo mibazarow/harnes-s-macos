@@ -564,29 +564,6 @@ extension ToolRegistry {
             ], required: ["action"])
         ),
         ToolDefinition(
-            name: "task",
-            exposure: .core,
-            description: "Delegate a self-contained job to a fresh subagent; pass known paths so it does not search again. prompt: write in English, the subagent answers in English. parent runs in the background and reports later; caller waits for the answer.",
-            parameters: schema([
-                "prompt": ["type": "string", "description": "Full self-contained instruction"],
-                "read_only": ["type": "boolean", "description": "true = investigation only, no edits"],
-                "paths": ["type": "array", "items": ["type": "string"], "description": "Files or folders to include verbatim so the subagent does not search again"],
-                "title": ["type": "string", "description": "Short Russian label for the UI pill, up to 40 chars"],
-                "delivery": ["type": "string", "enum": ["parent", "caller"], "description": "parent (default) runs in the background and reports later; caller waits and returns the result in this step"],
-                "interrupt": ["type": "string", "description": "Name of a running child (agent-N) to stop instead of starting a new one"],
-                "reason": ["type": "string", "description": "Why the child is stopped"]
-            ], required: ["prompt"])
-        ),
-        ToolDefinition(
-            name: "subagent_status",
-            exposure: .core,
-            description: "Status of subagents: step, last tool, elapsed. id = one agent; include_finished adds recent finished ones.",
-            parameters: schema([
-                "id": ["type": "string", "description": "agent-N; omit for all"],
-                "include_finished": ["type": "boolean", "description": "include recently finished agents"]
-            ], required: [])
-        ),
-        ToolDefinition(
             name: "todowrite",
             exposure: .core,
             description: "Publish, update or complete the visible plan: items replaces, update patches, complete ticks. 1-based.",
