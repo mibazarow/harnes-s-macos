@@ -22,6 +22,9 @@ struct RootView: View {
         // to `messages`, and every paint tick re-evaluated it.
         let usage = chat.statusPressure()
 
+        // The chat column is capped at 1100 pt and centred: the window may grow wider,
+        // but the conversation does not. Outside the cap the same paper background
+        // continues — no side bands, no rules.
         VStack(spacing: Spacing.zero) {
             TranscriptView(
                 fontSize: settings.fontSize,
@@ -49,6 +52,8 @@ struct RootView: View {
                 onStop: chat.stop
             )
         }
+        .frame(maxWidth: Layout.chatContainer, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(tokens.contentBackground)
         .background(
             WindowResizeBridge(state: liveResize)

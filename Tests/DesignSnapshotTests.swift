@@ -86,4 +86,46 @@ final class DesignSnapshotTests: XCTestCase {
         print("SNAPSHOT \(url.path)")
         window.contentView = nil
     }
+
+    /// A 1600 pt window: the chat column stays at 1100 pt, centred, and the same paper
+    /// background continues on both sides — no bands, no rules.
+    func testWideWindowKeepsTheColumnAt1100() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("harness-design")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let tokens = ThemeTokens.copper
+        let windowWidth: CGFloat = 1_600
+        let view = column
+            .frame(maxWidth: Layout.chatContainer, maxHeight: .infinity)
+            .frame(width: windowWidth, height: 1_100)
+            .background(tokens.contentBackground)
+            .environment(LiveResizeState())
+            .environment(\.theme, tokens)
+            .preferredColorScheme(tokens.scheme)
+
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(origin: .zero, size: NSSize(width: windowWidth, height: 1_100))
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: .aqua)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        let url = directory.appendingPathComponent("bubbles-wide.png")
+        try data.write(to: url)
+        XCTAssertGreaterThan(data.count, 10_000, "bubbles-wide")
+        print("SNAPSHOT \(url.path)")
+
+        // 40 pt from the edge must be the chat paper: the cap adds no side band.
+        let left = try XCTUnwrap(rep.colorAt(x: 40, y: rep.pixelsHigh / 2)?.usingColorSpace(.sRGB))
+        let paper = try XCTUnwrap(NSColor(tokens.contentBackground).usingColorSpace(.sRGB))
+        XCTAssertEqual(left.redComponent, paper.redComponent, accuracy: 0.04)
+        XCTAssertEqual(left.greenComponent, paper.greenComponent, accuracy: 0.04)
+        XCTAssertEqual(left.blueComponent, paper.blueComponent, accuracy: 0.04)
+
+        window.contentView = nil
+    }
 }

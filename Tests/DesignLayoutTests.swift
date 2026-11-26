@@ -54,6 +54,30 @@ final class DesignLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(Layout.chatContainer, 1_100)
     }
 
+    func testTheWholeChatColumnIsCappedInRootView() throws {
+        // The window may grow past 1100 pt, the conversation may not. Outside the cap
+        // the same paper background continues: no side bands and no rules.
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("App/RootView.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            source.contains(".frame(maxWidth: Layout.chatContainer"),
+            "колонка чата должна упираться в 1100 pt"
+        )
+        XCTAssertFalse(
+            source.contains("tokens.windowBackground"),
+            "за колонкой не должно быть отдельного фона"
+        )
+    }
+
+    func testWindowBackdropIsTheChatPaper() {
+        XCTAssertEqual(ThemeTokens.copper.windowBackground, ThemeTokens.copper.contentBackground)
+    }
+
     func testCodeBlockLaysOutWithAVeryLongLine() throws {
         let longLine = "let value = \"" + String(repeating: "x", count: 400) + "\""
         let assistant = ChatMessage(role: .assistant, text: "```swift\n\(longLine)\n```")
