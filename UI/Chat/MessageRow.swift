@@ -23,10 +23,31 @@ struct MessageRow: View, Equatable {
     private var isUser: Bool { message.role == .user }
 
     var body: some View {
-        // No bubble: role, text and space. The container is only a symmetric inset.
-        content
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Spacing.offGrid15)
+        // The assistant answers are prose on the page. The user's own words get a quiet
+        // plate of a slightly different shade, so "where I wrote" is obvious without
+        // reading the role line.
+        Group {
+            if isUser {
+                content
+                    .padding(.horizontal, Spacing.medium)
+                    .padding(.vertical, Spacing.small)
+                    // A bubble, not a banner: it stops at the prose column instead of
+                    // stretching across the whole container.
+                    .frame(maxWidth: Layout.textColumn, alignment: .leading)
+                    .background(
+                        theme.userBubble,
+                        in: RoundedRectangle(cornerRadius: Radius.panel)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.panel)
+                            .stroke(theme.separator.opacity(0.55), lineWidth: Spacing.hairline)
+                    )
+            } else {
+                content
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Spacing.offGrid15)
     }
 
     private var content: some View {

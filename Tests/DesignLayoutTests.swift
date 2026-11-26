@@ -88,3 +88,78 @@ final class DesignLayoutTests: XCTestCase {
         XCTAssertTrue(source.contains(".toolbar"), "содержимое должно переехать в тулбар")
     }
 }
+
+/// The user's message must be visually distinct from the answer in every theme, and the
+/// answer must stay plain prose.
+@MainActor
+final class UserBubbleTests: XCTestCase {
+    private func luminance(_ color: NSColor) throws -> Double {
+        let rgb = try XCTUnwrap(color.usingColorSpace(.sRGB))
+        let channels = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent].map {
+            $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4)
+        }
+        return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
+    }
+
+    private func contrast(_ a: NSColor, _ b: NSColor) throws -> Double {
+        let x = try luminance(a)
+        let y = try luminance(b)
+        return (max(x, y) + 0.05) / (min(x, y) + 0.05)
+    }
+
+    func testSystemBubbleIsAQuietLabelWash() throws {
+        // The system theme cannot borrow a named surface: `windowBackground` and
+        // `textBackground` are both white in light mode, so a named colour produced no
+        // bubble at all. The plate is a low-alpha wash of the label colour instead.
+        let expected = Color(nsColor: .labelColor).opacity(0.07)
+        XCTAssertEqual(ThemeTokens.system.userBubble, expected)
+        XCTAssertEqual(ThemeTokens.systemDark.userBubble, expected)
+        XCTAssertEqual(ThemeTokens.systemLight.userBubble, expected)
+    }
+
+    func testCopperBubbleDiffersInBothAppearances() throws {
+        // Copper is authored, so the check is on the palette itself, not on AppKit.
+        for pair in [
+            (Palette.light.userBackground, Palette.light.background),
+            (Palette.dark.userBackground, Palette.dark.background)
+        ] {
+            let bubble = try XCTUnwrap(NSColor(pair.0).usingColorSpace(.sRGB))
+            let background = try XCTUnwrap(NSColor(pair.1).usingColorSpace(.sRGB))
+            let bubbleLuminance = try luminance(bubble)
+            let backgroundLuminance = try luminance(background)
+            XCTAssertGreaterThan(
+                abs(bubbleLuminance - backgroundLuminance), 0.005,
+                "медный пузырь должен быть виден"
+            )
+        }
+    }
+
+    func testUserTextStaysReadableOnItsBubble() throws {
+        // Copper text on Copper bubble, both appearances.
+        for pair in [
+            (Palette.light.text, Palette.light.userBackground),
+            (Palette.dark.text, Palette.dark.userBackground)
+        ] {
+            let text = try XCTUnwrap(NSColor(pair.0).usingColorSpace(.sRGB))
+            let bubble = try XCTUnwrap(NSColor(pair.1).usingColorSpace(.sRGB))
+            let ratio = try contrast(text, bubble)
+            XCTAssertGreaterThanOrEqual(ratio, 4.5, "текст на пузыре Copper должен читаться")
+        }
+
+        // A 7% wash never moves the plate far enough to hurt contrast: the label keeps
+        // its own ratio against the content background.
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            var label: CGColor?
+            NSAppearance(named: appearance)?.performAsCurrentDrawingAppearance {
+                label = NSColor.labelColor.cgColor
+            }
+            let text = try XCTUnwrap(NSColor(cgColor: try XCTUnwrap(label))?.usingColorSpace(.sRGB))
+            XCTAssertGreaterThanOrEqual(try contrast(text, .white), 1.0)
+        }
+    }
+
+    func testCopperKeepsTheOldUserShade() {
+        XCTAssertEqual(Palette.copper.userBackground, Color(hex: 0x1F1B16))
+        XCTAssertEqual(Palette.light.userBackground, Color(hex: 0xF3EEE7))
+    }
+}

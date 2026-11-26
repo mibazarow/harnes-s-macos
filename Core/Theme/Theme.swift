@@ -57,6 +57,9 @@ struct ThemeTokens: Equatable, Sendable {
 
     var reasoningBackground: Color
     var codeBackground: Color
+    /// The user's own messages sit on a slightly different shade, so the transcript
+    /// makes "where I wrote" and "where it answered" obvious at a glance.
+    var userBubble: Color
     var syntax: Palette
 
     /// Text on top of `accent`, for filled buttons.
@@ -84,6 +87,11 @@ extension ThemeTokens {
         selection: Color(nsColor: .selectedContentBackgroundColor),
         reasoningBackground: Color(nsColor: .underPageBackgroundColor),
         codeBackground: Color(nsColor: .controlBackgroundColor),
+        // A quiet plate derived from the label colour. `windowBackground` and
+        // `textBackground` resolve to the same white in light mode, so a system surface
+        // colour gave no visible bubble there; a 7% label wash is one step off the
+        // content background in both appearances and still follows Increase Contrast.
+        userBubble: Color(nsColor: .labelColor).opacity(0.07),
         syntax: .xcode
     )
 
@@ -126,6 +134,7 @@ extension ThemeTokens {
             selection: pair(\.accent),
             reasoningBackground: pair(\.reasoningBackground),
             codeBackground: pair(\.codeBackground),
+            userBubble: pair(\.userBackground),
             // Syntax must follow the appearance too: dark Copper colours on the light
             // code plate were nearly unreadable.
             syntax: .copperAdaptive
