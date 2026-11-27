@@ -6,10 +6,10 @@
 <title>HARNES-S — стенд чата (светлый)</title>
 <style>
 /* ============================================================
-   Стенд окна чата. Только светлые варианты.
-   Переключалка внизу (или клавиши 1..8).
-   Медь для имён инструментов и инлайн-кода сделана поярче:
-   на светлом фоне светлый купер не читается вообще.
+   Стенд окна чата. Один вид — светлые «Пузыри».
+   Статичный макет: переключалки вариантов нет, это целевая
+   картинка. Медь для имён инструментов и инлайн-кода сделана
+   поярче: на светлом фоне светлый купер не читается вообще.
    ============================================================ */
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -359,73 +359,17 @@ th { color: var(--text-2); font-weight: 500; font-size: 11px; text-transform: up
   font-weight: 700;
 }
 
-/* ---------- Переключалка ---------- */
-.bar {
-  flex: none;
-  background: #F1EEE8;
-  border-top: 1px solid #DDD8CF;
-  padding: 10px 14px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-ui);
-}
-.bar .lbl {
-  color: #8B8478;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  margin-right: 6px;
-}
-.bar button {
-  font: inherit;
-  font-size: 12px;
-  color: #5F584F;
-  background: #FBFAF8;
-  border: 1px solid #DCD7CE;
-  border-radius: 999px;
-  padding: 5px 12px;
-  cursor: pointer;
-  transition: all .12s;
-}
-.bar button:hover { color: #23201C; border-color: #C4BDB1; }
-.bar button[aria-pressed="true"] {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #FFF;
-  font-weight: 600;
-}
-.bar kbd {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  opacity: .55;
-  margin-left: 5px;
-}
-.bar .hint {
-  width: 100%;
-  text-align: center;
-  color: #9A9286;
-  font-size: 11px;
-  margin-top: 4px;
-}
-
 /* ============================================================
-   ВАРИАНТЫ — все светлые. Каждый меняет только токены и
-   несколько правил, медь остаётся читаемой везде.
+   «Пузыри» — единственный вид. Правила варианта подняты в
+   базовые селекторы: файл показывает целевой вид без атрибута.
    ============================================================ */
 
-/* --- 1. Бумага: спокойная база, минимум оформления --- */
-body[data-v="paper"] { --msg-rule: none; }
-
-/* --- 2. Пузыри: светлые бабблы, пользователь справа --- */
-body[data-v="bubbles"] {
+:root {
   --gap: 14px;
   --msg-rule: none;
 }
-body[data-v="bubbles"] .msg { display: flex; flex-direction: column; }
-body[data-v="bubbles"] .msg .body {
+.msg { display: flex; flex-direction: column; }
+.msg .body {
   border-radius: var(--bubble-radius);
   padding: 11px 14px;
   border: 1px solid var(--bubble-bot-line);
@@ -433,239 +377,28 @@ body[data-v="bubbles"] .msg .body {
   max-width: 86%;
   box-shadow: 0 1px 1px rgba(40,32,24,.04);
 }
-body[data-v="bubbles"] .msg.user { align-items: flex-end; }
-body[data-v="bubbles"] .msg .role { display: none; }
-body[data-v="bubbles"] .msg.user .body {
+.msg.user { align-items: flex-end; }
+.msg .role { display: none; }
+.msg.user .body {
   background: var(--bubble-user-bg);
   border-color: var(--bubble-user-line);
   border-bottom-right-radius: 4px;
 }
-body[data-v="bubbles"] .msg.assistant .body {
+.msg.assistant .body {
   border-bottom-left-radius: 4px;
   max-width: calc(100% - 50px);
 }
-body[data-v="bubbles"] .tool,
-body[data-v="bubbles"] pre,
-body[data-v="bubbles"] table,
-body[data-v="bubbles"] .diff { max-width: 100%; }
-body[data-v="bubbles"] .msg code:not(pre code) { background: #FBF1E3; border-color: #EBD9BF; }
-
-/* --- 3. Плотный: меньше воздуха, больше на экран --- */
-body[data-v="dense"] {
-  --fs: 12.5px;
-  --lh: 1.42;
-  --gap: 16px;
-  --pad: 20px;
-  --col: 820px;
-}
-body[data-v="dense"] .role { margin-bottom: 3px; font-size: 10px; }
-body[data-v="dense"] pre { padding: 8px 10px; font-size: 11.5px; }
-body[data-v="dense"] .msg p { margin-bottom: 6px; }
-body[data-v="dense"] .tool .thead { padding: 5px 9px; }
-body[data-v="dense"] .tool .tbody { padding: 6px 9px; }
-body[data-v="dense"] .composer-wrap { padding: 8px var(--pad) 10px; }
-
-/* --- 4. Контрастный: чёрный текст, чёткая иерархия --- */
-body[data-v="contrast"] {
-  --bg: #FFFFFF;
-  --panel: #F7F5F1;
-  --surface: #F2EFE9;
-  --tool-body: #FAF8F4;
-  --text: #12100D;
-  --text-2: #4E4740;
-  --text-3: #7C746A;
-  --strong: #000000;
-  --line: #C9C2B7;
-  --line-soft: #DFD9CF;
-  --accent: #A24E0A;
-  --accent-strong: #8F4304;
-  --accent-tint: #FBEFDE;
-}
-body[data-v="contrast"] .msg.assistant .role { color: var(--accent-strong); font-weight: 600; }
-body[data-v="contrast"] .msg.user .body { border-color: #DCC9AE; background: #F6EBDA; }
-body[data-v="contrast"] .msg.user .role { color: var(--accent-strong); }
-body[data-v="contrast"] .tool { background: #FAF8F4; border-color: #CFC8BC; }
-body[data-v="contrast"] pre { background: #F4F1EB; border-color: #CFC8BC; }
-body[data-v="contrast"] .reasoning { border-left-color: var(--accent); color: #4E4740; }
-
-/* --- 5. Рельса: акцентная линия у каждого сообщения --- */
-body[data-v="rail"] .msg { position: relative; }
-body[data-v="rail"] .msg .body { padding-left: 16px; border-left: 2px solid var(--line); }
-body[data-v="rail"] .msg.user .body {
-  border-left-color: var(--accent);
-  background: transparent;
-  border-top: none; border-right: none; border-bottom: none;
-  border-radius: 0;
-  padding: 0 0 0 16px;
-}
-body[data-v="rail"] .msg.assistant .body { border-left-color: #D6CFC3; }
-body[data-v="rail"] .msg .role { padding-left: 16px; }
-
-/* --- 6. Машинописный: моно, минимум хрома --- */
-body[data-v="mono"] {
-  --body-font: var(--font-mono);
-  --fs: 12.5px;
-  --lh: 1.5;
-  --gap: 20px;
-  --col: 900px;
-  --bg: #FCFBF9;
-  --panel: #FCFBF9;
-  --surface: #F5F3EE;
-  --tool-body: #FAF9F6;
-  --line: #E4E0D8;
-  --text: #2A2723;
-  --text-2: #5E574E;
-  --text-3: #8E867A;
-  --accent: #A4550F;
-  --accent-strong: #97480A;
-  --accent-tint: #FAF0E2;
-}
-body[data-v="mono"] .msg .body { border: none; background: transparent; padding: 0; }
-body[data-v="mono"] .msg.user .body { background: transparent; border: none; padding: 0; }
-body[data-v="mono"] .role::before { content: "> "; color: var(--accent-strong); }
-body[data-v="mono"] .msg.user .role::before { content: "$ "; }
-body[data-v="mono"] .tool { border: none; border-left: 2px solid var(--line); border-radius: 0; background: transparent; }
-body[data-v="mono"] .tool .tbody { background: transparent; }
-body[data-v="mono"] pre { background: transparent; border: none; border-left: 2px solid var(--line); border-radius: 0; }
-body[data-v="mono"] .reasoning { border-left-color: var(--line); }
-
-/* --- 7. Широкий код: текст узкий, код и тулзы на всю ширину --- */
-body[data-v="widecode"] { --col: 760px; }
-body[data-v="widecode"] .msg { max-width: 1100px; }
-body[data-v="widecode"] .msg > .body > p,
-body[data-v="widecode"] .msg > .body > ul,
-body[data-v="widecode"] .msg > .body > ol,
-body[data-v="widecode"] .msg > .body > .role { max-width: 760px; }
-body[data-v="widecode"] pre,
-body[data-v="widecode"] .tool,
-body[data-v="widecode"] .diff,
-body[data-v="widecode"] table { max-width: 100%; }
-body[data-v="widecode"] .msg.user .body { max-width: 760px; }
-
-/* --- 8. Сепия: тёплый кремовый, мягче для глаз --- */
-body[data-v="sepia"] {
-  --outer: #E3DBCB;
-  --bg: #F6EFE1;
-  --panel: #EFE6D4;
-  --surface: #EBE1CD;
-  --tool-body: #F3EBDC;
-  --user-bg: #E9D9BF;
-  --reason-bg: #F2E9D8;
-  --text: #2C251B;
-  --text-2: #635843;
-  --text-3: #8F8270;
-  --strong: #17120B;
-  --line: #DCCFB6;
-  --line-soft: #E7DCC7;
-  --accent: #A95C14;
-  --accent-strong: #97490A;
-  --accent-tint: #F7E9D2;
-  --bubble-user-bg: #E9D8BB;
-  --bubble-user-line: #D9C3A0;
-  --bubble-bot-bg: #FBF5E9;
-  --bubble-bot-line: #E2D5BC;
-}
-
-/* --- 9. Сепия + пузыри + меди побольше: комбинация 1 и 8 --- */
-body[data-v="sepia-bubbles"] {
-  --outer: #E4E4E4;
-  --bg: #FFFFFF;
-
-  --panel: #F0E5D0;
-  --surface: #EBDFC7;
-  --tool-body: #F5ECDB;
-  --user-bg: #E9D6B6;
-  --reason-bg: #F3E9D5;
-  --text: #2B2318;
-  --text-2: #60543E;
-  --text-3: #8C7C63;
-  --strong: #150F07;
-  --line: #D9C9AA;
-  --line-soft: #E6D9BF;
-  --accent: #A85812;          /* кнопки, плашки */
-  --accent-strong: #8E4205;   /* медь для имён тулз, кода, ссылок — ярче */
-  --accent-tint: #F8E7CC;     /* подложка инлайн-кода, заметно медная */
-  --send-fg: #FFFDF8;
-  --ok: #2F7331;
-  --bad: #A8481A;
-  --tok-k: #6E3A8C;
-  --tok-s: #47621C;
-  --tok-c: #94856B;
-  --tok-f: #1E5488;
-  --tok-n: #8E4205;
-  --diff-add-bg: #E3EEDC; --diff-add-fg: #2A6329;
-  --diff-del-bg: #F6E1CE; --diff-del-fg: #86421F;
-  --diff-hunk-bg: #E7DAC2;
-  --alert-bg: #FCEEDB; --alert-line: #E3C7A1; --alert-fg: #86421F;
-  --gap: 15px;
-  --msg-rule: none;
-  --bubble-user-bg: #EFD8B4;
-  --bubble-user-line: #DBBB8C;
-  --bubble-bot-bg: #FCF6EA;
-  --bubble-bot-line: #E3D4B8;
-}
-
-/* пузыри: та же раскладка, что в варианте 1 */
-body[data-v="sepia-bubbles"] .msg { display: flex; flex-direction: column; }
-body[data-v="sepia-bubbles"] .msg .body {
-  border-radius: var(--bubble-radius);
-  padding: 11px 14px;
-  border: 1px solid var(--bubble-bot-line);
-  background: var(--bubble-bot-bg);
-  max-width: 86%;
-  box-shadow: 0 1px 2px rgba(70,52,26,.06);
-}
-body[data-v="sepia-bubbles"] .msg.user { align-items: flex-end; }
-body[data-v="sepia-bubbles"] .msg .role { display: none; }
-
-body[data-v="sepia-bubbles"] .msg.user .body {
-  background: var(--bubble-user-bg);
-  border-color: var(--bubble-user-line);
-  border-bottom-right-radius: 4px;
-}
-body[data-v="sepia-bubbles"] .msg.assistant .body {
-  border-bottom-left-radius: 4px;
-  max-width: calc(100% - 50px);
-}
-body[data-v="sepia-bubbles"] .tool,
-body[data-v="sepia-bubbles"] pre,
-body[data-v="sepia-bubbles"] table,
-body[data-v="sepia-bubbles"] .diff { max-width: 100%; }
-
-/* меди побольше: роли, тулзы, код */
-body[data-v="sepia-bubbles"] .msg .role { color: var(--accent-strong); font-weight: 600; }
-body[data-v="sepia-bubbles"] .msg code:not(pre code) {
-  background: var(--accent-tint);
-  border: 1px solid #E6CFA9;
-  color: var(--accent-strong);
-}
-body[data-v="sepia-bubbles"] .tool {
-  border-color: #DCC49C;
-  border-left: 3px solid var(--accent);
-  background: #FAF1E1;
-}
-body[data-v="sepia-bubbles"] .tool .thead { background: #F5E8D2; }
-body[data-v="sepia-bubbles"] .tool .tname { color: var(--accent-strong); font-weight: 700; }
-body[data-v="sepia-bubbles"] .tool .tbody { background: #FBF5E9; }
-body[data-v="sepia-bubbles"] .tool.failed { border-left-color: var(--bad); }
-body[data-v="sepia-bubbles"] pre {
-  background: #FAF2E3;
-  border-color: #E2D2B4;
-  border-left: 3px solid #D9C29B;
-}
-body[data-v="sepia-bubbles"] .reasoning { border-left: 2px solid #DCC7A2; background: var(--reason-bg); }
-body[data-v="sepia-bubbles"] .reasoning .rhead { color: var(--accent-strong); }
-body[data-v="sepia-bubbles"] .diff { border-color: #E2D2B4; }
-body[data-v="sepia-bubbles"] .composer { background: #FBF3E4; border-color: #DFCDAC; }
-body[data-v="sepia-bubbles"] .composer .send { background: var(--accent); color: var(--send-fg); }
-body[data-v="sepia-bubbles"] .status-line { color: var(--text-2); }
-body[data-v="sepia-bubbles"] .pulse { background: var(--accent); }
+.tool,
+pre,
+table,
+.diff { max-width: 100%; }
+.msg code:not(pre code) { background: #FBF1E3; border-color: #EBD9BF; }
 
 /* --- служебное --- */
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
 </head>
-<body data-v="bubbles">
+<body>
 
 <div class="win">
   <div class="titlebar">
@@ -816,56 +549,9 @@ $items = [
   </div>
 </div>
 
-<div class="bar" id="bar">
-  <span class="lbl">Оформление</span>
-</div>
-
 <script>
-const variants = [
-  ["bubbles",  "Пузыри"],
-  ["paper",    "Бумага"],
-  ["dense",    "Плотный"],
-  ["contrast", "Контрастный"],
-  ["rail",     "Рельса"],
-  ["mono",     "Машинописный"],
-  ["widecode", "Широкий код"],
-  ["sepia",    "Сепия"],
-  ["sepia-bubbles", "Сепия + пузыри"],
-];
-
-const bar = document.getElementById("bar");
-const hint = document.createElement("div");
-hint.className = "hint";
-hint.textContent = "Клавиши 1–9 переключают. Всё светлое; медь для тулз и инлайн-кода — --accent-strong в :root.";
-
-variants.forEach(([id, label], i) => {
-  const b = document.createElement("button");
-  b.type = "button";
-  b.innerHTML = `${label}<kbd>${i + 1}</kbd>`;
-  b.addEventListener("click", () => setVariant(id));
-  b.dataset.v = id;
-  bar.appendChild(b);
-});
-bar.appendChild(hint);
-
-function setVariant(id) {
-  document.body.dataset.v = id;
-  document.querySelectorAll(".bar button").forEach((b) => {
-    b.setAttribute("aria-pressed", String(b.dataset.v === id));
-  });
-  localStorage.setItem("stand-variant-light", id);
-}
-
-const fromUrl = new URLSearchParams(location.search).get("v");
-const saved = fromUrl || localStorage.getItem("stand-variant-light");
-setVariant(saved && variants.some(([id]) => id === saved) ? saved : "bubbles");
-
-document.addEventListener("keydown", (e) => {
-  const n = Number(e.key);
-  if (n >= 1 && n <= variants.length) setVariant(variants[n - 1][0]);
-});
-
-/* Разворачивание/сворачивание тулз и размышлений */
+/* Разворачивание/сворачивание тулз и размышлений. Это не про варианты:
+   файл статичный, но эти два блока по-прежнему кликаются. */
 document.querySelectorAll(".tool .thead").forEach((h) =>
   h.addEventListener("click", () => h.parentElement.classList.toggle("collapsed"))
 );

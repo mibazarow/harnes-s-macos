@@ -10,6 +10,13 @@ extension ChatStore {
     /// Coalesce provider chunks without holding the answer until the step finishes.
     func append(_ chunk: String, to id: UUID) {
         guard !Task.isCancelled else { return }
+        // R40: remember when the first chunk of a bubble arrived, so the gap to its
+        // first paint can be measured in `latency.log` instead of guessed.
+        if firstChunkAt == nil,
+           pendingText.isEmpty,
+           (messages.first(where: { $0.id == id })?.text ?? "").isEmpty {
+            firstChunkAt = .now
+        }
         pendingText.append(chunk)
         pendingID = id
         scheduleFlush()
@@ -17,24 +24,27 @@ extension ChatStore {
 
     /// Providers differ wildly in how they slice an answer: some send a character at
     /// a time, some send a paragraph. Appending each slice straight into `messages`
-    /// made the bubble jump — nothing for a moment, then a whole paragraph at once.
-    /// Text therefore lands in a buffer and reaches `messages` on a timer that is fast
-    /// enough not to delay the answer and slow enough that the eye sees a flow.
+    /// republishes the whole transcript per token.
     ///
-    /// The interval is a ceiling, not a sleep: a provider that streams slowly still
-    /// paints immediately, because the flush is scheduled on arrival and fires at once
-    /// once the buffer is old enough.
+    /// R40: the paint waits for the next display frame, not for a fixed sleep. Chunks
+    /// that arrive in the same frame paint together; a slow provider paints on the very
+    /// next frame. Nothing is held back and nothing is replayed to "catch up".
     func scheduleFlush() {
         guard flushTask == nil else { return }
         flushTask = Task { [weak self] in
-            // `@MainActor` is re-acquired after every await, so the buffer is only
+            // `@MainActor` is re-acquired after the await, so the buffer is only
             // touched on the main actor.
-            while let self, !self.pendingReasoning.isEmpty || !self.pendingText.isEmpty {
-                try? await Task.sleep(for: .seconds(Tuning.paintInterval))
-                guard !Task.isCancelled else { return }
-                self.flush()
+            await FramePainter.next()
+            guard let self else { return }
+            // Cleared before the cancellation check: a cancelled paint must not leave
+            // the slot busy, or the next turn would never schedule one.
+            self.flushTask = nil
+            guard !Task.isCancelled else { return }
+            self.flush()
+            // More arrived while painting: arm the next frame.
+            if !self.pendingText.isEmpty || !self.pendingReasoning.isEmpty {
+                self.scheduleFlush()
             }
-            self?.flushTask = nil
         }
     }
 
@@ -50,7 +60,15 @@ extension ChatStore {
         let chunk = String(pendingText)
         pendingText = ""
         guard let index = messages.firstIndex(where: { $0.id == pendingID }) else { return }
+        let wasEmpty = messages[index].text.isEmpty
         messages[index].text += chunk
+        if wasEmpty, let started = firstChunkAt {
+            firstChunkAt = nil
+            let elapsed = ContinuousClock.now - started
+            let millis = Int(elapsed.components.seconds * 1_000)
+                + Int(elapsed.components.attoseconds / 1_000_000_000_000_000)
+            ChatStore.logLatency("stream first paint \(millis) ms")
+        }
     }
 
     private func flushReasoning() {

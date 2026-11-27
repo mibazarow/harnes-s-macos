@@ -47,6 +47,33 @@ final class DesignLayoutTests: XCTestCase {
         XCTAssertGreaterThan(host.fittingSize.height, 0)
     }
 
+    /// R41: every service line uses one size that does not follow the transcript size.
+    /// The old mix of `.caption`, `.caption2` and `AppFont.ui(fontSize)` changed the
+    /// height of the line between states and made the answer jump.
+    func testServiceLinesShareOneStatusSize() {
+        XCTAssertEqual(AppFont.statusSize, 11)
+        // The spinner is drawn at that size, not scaled from a system control.
+        XCTAssertEqual(StatusSpinner().size, AppFont.statusSize)
+    }
+
+    func testMessageRowUsesStatusFontForServiceLines() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("UI/Chat/MessageRow.swift"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(source.contains(".font(.caption2)"), "статусы больше не caption2")
+        XCTAssertTrue(source.contains("AppFont.status()"), "у служебных строк один кегль")
+        XCTAssertTrue(source.contains("StatusSpinner()"), "крутилка своя, медная")
+        // The old scaled system spinner must be gone from the row.
+        XCTAssertFalse(
+            source.contains(".scaleEffect(0.6)"),
+            "системный ProgressView со scaleEffect убран"
+        )
+    }
+
     func testProseColumnIsNarrowerThanTheContainer() {
         // Step 6: 1100 pt container, 760 pt prose, code and tables on the full width.
         XCTAssertLessThan(Layout.textColumn, Layout.chatContainer)

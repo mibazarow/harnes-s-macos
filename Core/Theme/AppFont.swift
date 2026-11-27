@@ -65,6 +65,20 @@ enum AppFont {
         ui(size, weight: weight)
     }
 
+    /// One size for every service line: `думает…`, the reasoning header, tool traces and
+    /// state badges. It never follows the transcript size, so a status appearing never
+    /// changes the height of the answer above it.
+    static let statusSize: CGFloat = 11
+
+    static func status(weight: Font.Weight = .regular) -> Font {
+        chrome(statusSize, weight: weight)
+    }
+
+    /// Tool names are mono; the size is still the status size.
+    static func statusMono(weight: Font.Weight = .regular) -> Font {
+        mono(statusSize, weight: weight)
+    }
+
     /// Code, file paths, tool names, ids.
     static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         let family = family

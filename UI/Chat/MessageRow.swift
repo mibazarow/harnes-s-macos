@@ -97,10 +97,6 @@ struct MessageRow: View, Equatable {
                 roleLine
             }
 
-            if !message.tools.isEmpty {
-                ToolTraceList(traces: message.tools, fontSize: fontSize, searchQuery: searchQuery)
-            }
-
             if isUser {
                 if !message.text.isEmpty {
                     Text(SearchHighlight.attributed(
@@ -129,6 +125,13 @@ struct MessageRow: View, Equatable {
                     )
                 }
 
+                // R39: calls that ran before the answer read between the reasoning and
+                // the text — that is when they happened. Calls made while the answer was
+                // being written read below it.
+                if !message.tools.isEmpty, message.toolsBeforeText {
+                    traces
+                }
+
                 if !message.text.isEmpty {
                     AnswerText(
                         text: message.text,
@@ -137,16 +140,11 @@ struct MessageRow: View, Equatable {
                         isStreaming: message.state == .streaming,
                         searchQuery: searchQuery
                     )
-                } else if message.state == .streaming,
-                          message.tools.isEmpty,
-                          (message.reasoning ?? "").isEmpty {
-                    // Only before anything arrives. Once reasoning or a tool trace is on
-                    // screen it already shows that work is happening, and a second
-                    // "thinking" line under it is just noise.
-                    Text("думает…")
-                        .font(AppFont.ui(fontSize))
-                        .foregroundStyle(theme.labelTertiary)
                 }
+            }
+
+            if !isUser, !message.tools.isEmpty, !message.toolsBeforeText {
+                traces
             }
 
             if let warning = message.warning, !warning.isEmpty {
@@ -156,7 +154,9 @@ struct MessageRow: View, Equatable {
                     Text(warning)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .font(.caption)
+                // A service line like the rest: same size, so a warning appearing does
+                // not change the height of the bubble.
+                .font(AppFont.status())
                 .foregroundStyle(theme.warning)
                 .padding(.top, Spacing.offGrid2)
             }
@@ -168,25 +168,38 @@ struct MessageRow: View, Equatable {
         .accessibilityLabel(isUser ? "Сообщение пользователя" : "Ответ Харнеса")
     }
 
-    /// Only states need a line now: the role name and the time are gone. When a
-    /// message is complete there is nothing to draw, so the row does not reserve an
-    /// empty gap above the bubble.
+    private var traces: some View {
+        ToolTraceList(
+            traces: message.tools,
+            isStreaming: message.state == .streaming,
+            searchQuery: searchQuery
+        )
+    }
+
+    /// Only states need a line now: the role name and the time are gone. A streaming
+    /// bubble gets the line only while there is nothing else on screen — once reasoning
+    /// or a trace is visible, that block carries its own spinner and a second one here
+    /// would be two indicators for one process (R41).
     private var showsStateLine: Bool {
         switch message.state {
-        case .streaming, .queued, .cancelled: true
+        case .streaming: showsThinkingLabel
+        case .queued, .cancelled: true
         case .complete: false
         }
     }
 
     /// The streaming indicator and the `в очереди` / `не отправлено` badges. No role
     /// name, no timestamp: the bubble already says who wrote it.
+    ///
+    /// The spinner and the `думает…` label are one line, not two: the copper arc sits
+    /// left, the word right after it, both at the status size. Nothing here follows the
+    /// transcript size, so the line is the same height whatever the user chose.
     private var roleLine: some View {
         HStack(spacing: Spacing.offGrid6) {
-            if message.state == .streaming {
-                ProgressView()
-                    .controlSize(.mini)
-                    .scaleEffect(0.6)
-                    .frame(width: Spacing.medium, height: Spacing.medium)
+            if showsThinkingLabel {
+                StatusSpinner()
+                Text("думает…")
+                    .foregroundStyle(theme.labelTertiary)
             }
 
             switch message.state {
@@ -200,10 +213,20 @@ struct MessageRow: View, Equatable {
 
             Spacer(minLength: Spacing.zero)
         }
-        .font(.caption2)
+        .font(AppFont.status())
         .foregroundStyle(theme.labelTertiary)
+        .lineLimit(1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityRole)
+    }
+
+    /// The word is only needed while there is nothing else on screen; once reasoning or
+    /// a trace is visible, the spinner alone says the work is still going.
+    private var showsThinkingLabel: Bool {
+        message.state == .streaming
+            && message.text.isEmpty
+            && message.tools.isEmpty
+            && (message.reasoning ?? "").isEmpty
     }
 
     private var accessibilityRole: String {
@@ -250,7 +273,7 @@ struct StateBadge: View {
                 .imageScale(.small)
             Text(text)
         }
-        .font(.caption2)
+        .font(AppFont.status())
         .foregroundStyle(tone == .warning ? theme.warning : theme.labelSecondary)
         .padding(.horizontal, Spacing.offGrid6)
         .padding(.vertical, Spacing.offGrid2)
@@ -311,60 +334,149 @@ private func symbol(for kind: ChatAttachment.Kind) -> String {
     }
 }
 
+/// R39: the tool calls of one message as a single block, not a wall of lines.
+///
+/// - the header says how many calls ran, how many failed and how long they took;
+/// - while the answer is streaming the block is open, so work in progress is visible;
+/// - once the message is complete it collapses to the header plus the first few calls;
+/// - errors are never hidden: their lines stay visible even when collapsed;
+/// - an active search opens the block, so matches are never behind a closed door;
+/// - a single call without an error is one line, no header and no chevron.
 struct ToolTraceList: View {
     let traces: [ToolTrace]
-    let fontSize: CGFloat
+    var isStreaming: Bool = false
     var searchQuery: String = ""
 
     @Environment(\.theme) private var theme
+    /// `nil` means "automatic": open while streaming, closed afterwards. A click pins
+    /// the user's choice for the rest of the session.
+    @State private var userChoice: Bool?
+
+    /// How many calls the collapsed block shows before the rest hides behind the
+    /// header. Errors are added on top of this and never cut.
+    private let previewCount = 3
+
+    private var expanded: Bool {
+        if !searchQuery.isEmpty { return true }
+        if let userChoice { return userChoice }
+        return isStreaming
+    }
+
+    /// Nothing is hidden when every call already fits in the preview: a header would
+    /// only add a line that says the obvious. One call, or three, are just rows.
+    private var fitsWithoutHeader: Bool {
+        traces.count <= previewCount
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.hairline) {
-            ForEach(traces) { trace in
+        Group {
+            if fitsWithoutHeader {
                 VStack(alignment: .leading, spacing: Spacing.hairline) {
-                    HStack(alignment: .firstTextBaseline, spacing: Spacing.offGrid6) {
-                        Image(systemName: symbol(for: trace))
-                            .imageScale(.small)
-                            .foregroundStyle(trace.isError ? theme.destructive : theme.labelTertiary)
-                            .frame(width: Spacing.medium, alignment: .center)
-
-                        // Mono is for the tool name; the human line next to it is prose.
-                        // The strong copper is the readable one on light surfaces.
-                        Text(trace.name)
-                            .font(AppFont.mono(max(fontSize - 2, FontSize.minReadable)))
-                            .foregroundStyle(theme.accentStrong)
-
-                        Text(SearchHighlight.attributed(
-                            ToolTrace.summaryText(for: trace),
-                            query: searchQuery,
-                            color: theme.accent.opacity(0.28)
-                        ))
-                            .foregroundStyle(theme.labelTertiary)
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-
-                        Spacer(minLength: Spacing.zero)
-
-                        if trace.isRunning {
-                            ProgressView()
-                                .controlSize(.mini)
-                                .scaleEffect(0.6)
-                                .frame(width: Spacing.medium, height: Spacing.medium)
-                        }
-                    }
-                    .font(.caption)
-
-                    if let path = trace.imagePath {
-                        LocalChatImage(path: path)
-                            .frame(maxWidth: Spacing.offGrid32 * 13, maxHeight: Spacing.offGrid32 * 8, alignment: .leading)
-                            .clipShape(RoundedRectangle(cornerRadius: Radius.control))
-                            .padding(.leading, Spacing.offGrid20)
+                    ForEach(traces) { trace in
+                        row(trace, compact: false)
                     }
                 }
+            } else {
+                grouped
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
+    }
+
+    private var grouped: some View {
+        VStack(alignment: .leading, spacing: Spacing.offGrid6) {
+            Button {
+                userChoice = !expanded
+            } label: {
+                HStack(spacing: Spacing.offGrid6) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .imageScale(.small)
+                        .foregroundStyle(theme.labelTertiary)
+
+                    Text(header)
+                        .foregroundStyle(theme.labelSecondary)
+
+                    if traces.contains(where: { $0.isRunning }) {
+                        StatusSpinner()
+                    }
+
+                    Spacer(minLength: Spacing.zero)
+                }
+                .font(AppFont.status())
+                .lineLimit(1)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(expanded ? "Свернуть вызовы инструментов" : "Показать вызовы инструментов")
+
+            if expanded {
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
+                    ForEach(traces) { trace in
+                        row(trace, compact: false)
+                    }
+                }
+            } else {
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
+                    ForEach(collapsedTraces) { trace in
+                        row(trace, compact: true)
+                    }
+                }
+            }
+        }
+    }
+
+    /// The first few calls plus every failure, so a broken call never hides behind the
+    /// header even in the collapsed state.
+    private var collapsedTraces: [ToolTrace] {
+        let preview = traces.prefix(previewCount)
+        let failures = traces.filter(\.isError)
+        var seen = Set<UUID>()
+        return (Array(preview) + failures).filter { seen.insert($0.id).inserted }
+    }
+
+    private var header: String {
+        ToolTraceSummary(traces: traces).text
+    }
+
+    private func row(_ trace: ToolTrace, compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.hairline) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.offGrid6) {
+                Image(systemName: symbol(for: trace))
+                    .imageScale(.small)
+                    .foregroundStyle(trace.isError ? theme.destructive : theme.labelTertiary)
+                    .frame(width: Spacing.medium, alignment: .center)
+
+                // Mono is for the tool name; the human line next to it is prose.
+                // The strong copper is the readable one on light surfaces.
+                Text(trace.name)
+                    .font(AppFont.statusMono())
+                    .foregroundStyle(theme.accentStrong)
+
+                Text(SearchHighlight.attributed(
+                    ToolTrace.summaryText(for: trace),
+                    query: searchQuery,
+                    color: theme.accent.opacity(0.28)
+                ))
+                    .foregroundStyle(trace.isError ? theme.destructive : theme.labelTertiary)
+                    .lineLimit(compact ? 1 : 2)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: Spacing.zero)
+
+                if trace.isRunning {
+                    StatusSpinner()
+                }
+            }
+            .font(AppFont.status())
+
+            if !compact, let path = trace.imagePath {
+                LocalChatImage(path: path)
+                    .frame(maxWidth: Spacing.offGrid32 * 13, maxHeight: Spacing.offGrid32 * 8, alignment: .leading)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.control))
+                    .padding(.leading, Spacing.offGrid20)
+            }
+        }
     }
 
     private func symbol(for trace: ToolTrace) -> String {
@@ -435,14 +547,13 @@ struct ReasoningBlock: View {
                         .imageScale(.small)
                     Text("размышления")
                     if isStreaming {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .scaleEffect(0.6)
-                            .frame(width: Spacing.medium, height: Spacing.medium)
+                        StatusSpinner()
                     }
                     Spacer(minLength: Spacing.zero)
                 }
-                .font(.caption)
+                // R41: the same size as every other service line, so opening the block
+                // never changes the height of the answer above it.
+                .font(AppFont.status())
                 .foregroundStyle(theme.labelSecondary)
                 .contentShape(Rectangle())
             }

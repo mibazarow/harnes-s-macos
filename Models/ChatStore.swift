@@ -15,6 +15,9 @@ final class ChatStore {
 
     private var streamTask: Task<Void, Never>?
     var commandTask: Task<Void, Never>?
+    /// R39: when each running tool call started, keyed by trace id. Used once to fill
+    /// `ToolTrace.duration` when the call finishes; nothing is persisted from here.
+    private var toolStartedAt: [UUID: Date] = [:]
 
     /// Text that arrived from the provider but is not painted yet. See `scheduleFlush`.
     var pendingText = ""
@@ -25,6 +28,9 @@ final class ChatStore {
     var pendingReasoning = ""
     var pendingReasoningID = UUID()
     var flushTask: Task<Void, Never>?
+    /// R40: arrival of the first chunk of the current bubble. Cleared once it is
+    /// painted; the difference goes to `latency.log`.
+    @ObservationIgnored var firstChunkAt: ContinuousClock.Instant?
 
     private var replyIndex = 0
     let services: AppServices?
@@ -185,7 +191,9 @@ final class ChatStore {
     }
 
     private func start(_ text: String, attachments: [ChatAttachment]) {
-        if attachments.isEmpty, text.hasPrefix("/") {
+        // R42: only a known command name in the first token runs a command. A path
+        // like `/Users/mb/...` is ordinary text and goes to the model.
+        if attachments.isEmpty, CommandCatalog.isCommand(text) {
             runCommand(text)
             return
         }
@@ -204,6 +212,8 @@ final class ChatStore {
     func appendAssistant() -> UUID {
         let message = ChatMessage(role: .assistant, text: "", state: .streaming)
         messages.append(message)
+        // A fresh bubble starts its own paint measurement (R40).
+        firstChunkAt = nil
         return messages[messages.count - 1].id
     }
 
@@ -1143,6 +1153,8 @@ final class ChatStore {
         queuedMessages.removeAll()
         queuedCount = 0
         isStreaming = false
+        // Calls cut off by Stop have no duration to report.
+        toolStartedAt.removeAll()
 
         if dropped > 0 {
             notice("Очередь очищена: \(dropped) сообщений не отправлено.")
@@ -1171,7 +1183,16 @@ final class ChatStore {
 
     private func addTool(name: String, summary: String, running: Bool, to id: UUID) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index].tools.append(ToolTrace(name: name, summary: summary, isRunning: running))
+        let trace = ToolTrace(name: name, summary: summary, isRunning: running)
+        if running { toolStartedAt[trace.id] = Date() }
+        // R39: a call made while the bubble is still empty ran before any answer text;
+        // a call made after text arrived was made mid-answer and reads below it.
+        if messages[index].tools.isEmpty {
+            messages[index].toolsBeforeText = messages[index].text
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+        }
+        messages[index].tools.append(trace)
     }
 
     private func recordExchange(
@@ -1211,7 +1232,17 @@ final class ChatStore {
             messages[index].tools[toolIndex].callID = callID
             messages[index].tools[toolIndex].arguments = arguments
             messages[index].tools[toolIndex].originalLength = originalLength
+            // R39: the grouped header shows how long the calls took. Measured live only;
+            // a trace replayed from storage keeps whatever it was written with.
+            if let started = toolStartedAt.removeValue(forKey: messages[index].tools[toolIndex].id) {
+                messages[index].tools[toolIndex].duration = Date().timeIntervalSince(started)
+            }
         } else {
+            if messages[index].tools.isEmpty {
+                messages[index].toolsBeforeText = messages[index].text
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty
+            }
             messages[index].tools.append(ToolTrace(
                 name: name,
                 summary: summary,
@@ -1527,17 +1558,22 @@ final class ChatStore {
     var spent: Double = 0
 
     private func runCommand(_ input: String) {
-        if input == "/clear" {
+        // Commands are case-insensitive: `/CLEAR` is `/clear`. The name comes from the
+        // same helper `start` used, so the two cannot disagree about what is a command.
+        let name = CommandCatalog.commandName(of: input) ?? ""
+        let bare = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if name == "/clear", bare == "/clear" {
             clearView()
             return
         }
 
-        if input == "/compact" {
+        if name == "/compact", bare == "/compact" {
             runCompaction()
             return
         }
 
-        if input == "/checkpoint" {
+        if name == "/checkpoint", bare == "/checkpoint" {
             // Close the current task by hand: its finished tool output leaves the next
             // request, and a long task is folded into the checkpoint once.
             recordTaskBoundary(services: services)
@@ -1545,7 +1581,7 @@ final class ChatStore {
             return
         }
 
-        if input == "/stats" {
+        if name == "/stats", bare == "/stats" {
             let stats = ToolUsageStats.analyze(messages)
             messages.append(ChatMessage(role: .assistant, text: stats.summary))
             return

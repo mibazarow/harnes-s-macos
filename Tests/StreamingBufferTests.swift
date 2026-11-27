@@ -70,6 +70,41 @@ final class StreamingBufferTests: XCTestCase {
         XCTAssertNil(store.flushTask)
     }
 
+    /// R40: the paint waits for a display frame, not for a 60 ms sleep. A chunk that
+    /// arrives alone must be on screen well inside one frame's budget, not after the
+    /// old fixed interval.
+    func testFirstChunkPaintsWithinAFrame() async throws {
+        let store = ChatStore()
+        let id = store.appendAssistant()
+        let start = ContinuousClock.now
+        store.append("первый", to: id)
+
+        var elapsed = ContinuousClock.now - start
+        while (store.messages.last?.text ?? "").isEmpty, elapsed < .milliseconds(400) {
+            try await Task.sleep(for: .milliseconds(2))
+            elapsed = ContinuousClock.now - start
+        }
+
+        XCTAssertEqual(store.messages.last?.text, "первый")
+        XCTAssertLessThan(
+            elapsed, .milliseconds(80),
+            "первый чанк должен появиться в пределах кадра, а не через старый интервал"
+        )
+    }
+
+    /// Two chunks that arrive before the same frame paint together and the bubble grows
+    /// once, not twice.
+    func testChunksInOneFrameAreOnePaint() async throws {
+        let store = ChatStore()
+        let id = store.appendAssistant()
+        store.append("первая ", to: id)
+        store.append("часть", to: id)
+
+        try await Task.sleep(for: .milliseconds(60))
+        XCTAssertEqual(store.messages.last?.text, "первая часть")
+        XCTAssertTrue(store.pendingText.isEmpty)
+    }
+
     func testPendingTextIsPartOfTheAnswerBeforePaint() {
         let store = ChatStore()
         let id = store.appendAssistant()

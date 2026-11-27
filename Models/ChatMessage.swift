@@ -143,6 +143,9 @@ struct ToolTrace: Identifiable, Sendable, Equatable {
     var arguments: String
     /// Result length before the history cut, when known.
     var originalLength: Int?
+    /// How long the call took, when it was measured live. Not persisted as a column:
+    /// it rides inside the tools JSON, and rows written before it decode as `nil`.
+    var duration: TimeInterval?
 
     init(
         name: String,
@@ -152,7 +155,8 @@ struct ToolTrace: Identifiable, Sendable, Equatable {
         imagePath: String? = nil,
         callID: String = "",
         arguments: String = "",
-        originalLength: Int? = nil
+        originalLength: Int? = nil,
+        duration: TimeInterval? = nil
     ) {
         self.id = UUID()
         self.name = name
@@ -163,6 +167,7 @@ struct ToolTrace: Identifiable, Sendable, Equatable {
         self.callID = callID
         self.arguments = arguments
         self.originalLength = originalLength
+        self.duration = duration
     }
 
     /// Pure: depends only on the trace data, never on store state or wall-clock.
@@ -315,6 +320,10 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
     var warning: String?
     let date: Date
     var state: State
+    /// R39: whether the calls were made before the answer text started. Tools that ran
+    /// first read above the text, calls made mid-answer read below it. Display only;
+    /// not persisted, and a message built with tools defaults to "before".
+    var toolsBeforeText = true
 
     init(
         role: Role,
@@ -325,7 +334,8 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
         exchanges: [ToolExchange] = [],
         warning: String? = nil,
         date: Date = .now,
-        state: State = .complete
+        state: State = .complete,
+        toolsBeforeText: Bool = true
     ) {
         self.id = UUID()
         self.role = role
@@ -337,6 +347,7 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
         self.warning = warning
         self.date = date
         self.state = state
+        self.toolsBeforeText = toolsBeforeText
     }
 }
 

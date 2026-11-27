@@ -51,4 +51,50 @@ final class CommandCatalogTests: XCTestCase {
             }
         }
     }
+
+    /// R42: a slash is a command only when the first token is exactly a known name.
+    /// Paths, API paths and a slash in the middle of a phrase are ordinary text.
+    func testOnlyKnownFirstTokenIsACommand() {
+        let commands = [
+            "/help",
+            "/HELP",
+            "/search запрос",
+            "/clear",
+            "/memory list"
+        ]
+        for text in commands {
+            XCTAssertTrue(CommandCatalog.isCommand(text), "должно быть командой: \(text)")
+        }
+
+        let plain = [
+            "/Users/mb/x.swift",
+            "/usr/local/bin",
+            "/api/v1/users",
+            "текст /посередине",
+            "/",
+            "//",
+            "/helpme",
+            "/ ",
+            "",
+            "привет"
+        ]
+        for text in plain {
+            XCTAssertFalse(CommandCatalog.isCommand(text), "не должно быть командой: \(text)")
+        }
+    }
+
+    func testCommandNameIsTheLowercasedFirstToken() {
+        XCTAssertEqual(CommandCatalog.commandName(of: "/HELP"), "/help")
+        XCTAssertEqual(CommandCatalog.commandName(of: "/search запрос"), "/search")
+        // Leading whitespace is skipped: `send` trims the text before this is called.
+        XCTAssertEqual(CommandCatalog.commandName(of: "  /help"), "/help")
+        XCTAssertEqual(CommandCatalog.commandName(of: "/Users/mb"), "/users/mb")
+        XCTAssertEqual(CommandCatalog.commandName(of: "/"), nil)
+    }
+
+    func testPathGetsNoSuggestions() {
+        XCTAssertTrue(CommandCatalog.suggestions(for: "/Users/mb/x.swift").isEmpty)
+        XCTAssertTrue(CommandCatalog.suggestions(for: "/usr").isEmpty)
+        XCTAssertTrue(CommandCatalog.suggestions(for: "/api/v1/users").isEmpty)
+    }
 }

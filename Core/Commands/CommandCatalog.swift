@@ -67,8 +67,25 @@ enum CommandCatalog {
         ])
     ]
 
-    /// Suggestions for the current composer text. Empty unless the text is a single
-    /// line that starts with a slash.
+    /// The first token of the input, lowercased, when it looks like a slash command.
+    /// `/Users/mb/x.swift` is a path, not a command: only the exact first token counts.
+    static func commandName(of text: String) -> String? {
+        let token = text.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" })
+            .first
+            .map(String.init) ?? ""
+        guard token.count > 1, token.hasPrefix("/") else { return nil }
+        return token.lowercased()
+    }
+
+    /// True only when the first token is exactly a known command name. A path, a URL
+    /// path or a slash in the middle of a phrase is ordinary text and goes to the model.
+    static func isCommand(_ text: String) -> Bool {
+        guard let name = commandName(of: text) else { return false }
+        return all.contains { $0.name == name }
+    }
+
+    /// Suggestions for the current composer text. Empty unless the first token is a
+    /// prefix of a known command: `/Us` gets nothing, and that is correct.
     static func suggestions(for text: String, limit: Int = 12) -> [CommandSuggestion] {
         guard text.hasPrefix("/"), !text.contains("\n") else { return [] }
 
@@ -76,8 +93,13 @@ enum CommandCatalog {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
 
         if parts.count <= 1 {
+            let token = (parts.first ?? "/").lowercased()
+            // A single `/` opens the whole list; anything longer must be a real prefix.
+            guard token == "/" || all.contains(where: { $0.name.hasPrefix(token) }) else {
+                return []
+            }
             return all
-                .filter { $0.name.hasPrefix((parts.first ?? "/").lowercased()) }
+                .filter { $0.name.hasPrefix(token) }
                 .map { command in
                     CommandSuggestion(
                         insert: command.name + (command.wantsTrailingSpace ? " " : ""),

@@ -3,11 +3,7 @@ import Foundation
 /// Timing and budget numbers that used to be literals in the streaming, markdown and
 /// guard code. One place, each with the reason it holds that value.
 enum Tuning {
-    /// How often streamed reasoning reaches the bubble. Answer text does not use it:
-    /// the answer is painted whole when the step settles, so there is nothing to pace.
-    static let paintInterval: TimeInterval = 0.06
-
-    /// Markdown re-parse cadence while streaming. Slower than the paint interval on
+    /// Markdown re-parse cadence while streaming. Slower than a display frame on
     /// purpose: parsing re-renders every block and re-runs text layout, and doing that
     /// sixteen times a second kept the main thread busy enough to starve animations.
     /// Formatting lagging the words by a tenth of a second is invisible; a frozen

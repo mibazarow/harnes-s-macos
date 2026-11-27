@@ -99,6 +99,8 @@ actor ChatHistoryService {
         let callID: String?
         let arguments: String?
         let originalLength: Int?
+        /// Optional on purpose: rows written before the field existed decode as `nil`.
+        let duration: Double?
     }
 
     static func encodeTools(_ tools: [ToolTrace]) -> String? {
@@ -111,7 +113,8 @@ actor ChatHistoryService {
                 imagePath: $0.imagePath,
                 callID: $0.callID,
                 arguments: $0.arguments,
-                originalLength: $0.originalLength
+                originalLength: $0.originalLength,
+                duration: $0.duration
             )
         }
         guard let data = try? JSONEncoder().encode(rows) else { return nil }
@@ -130,7 +133,8 @@ actor ChatHistoryService {
                 imagePath: $0.imagePath,
                 callID: $0.callID ?? "",
                 arguments: $0.arguments ?? "",
-                originalLength: $0.originalLength
+                originalLength: $0.originalLength,
+                duration: $0.duration
             )
         }
     }

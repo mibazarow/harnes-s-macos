@@ -12,6 +12,13 @@ enum DemoTranscript {
     }
 
     static var messages: [ChatMessage]? {
+        guard let scenario else { return nil }
+        return messages(for: scenario)
+    }
+
+    /// The same lookup by name, so the screenshot tests can render every scenario
+    /// without going through the environment variable.
+    static func messages(for scenario: String) -> [ChatMessage]? {
         switch scenario {
         case "code": code
         case "memory": memory
