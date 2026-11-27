@@ -4,8 +4,8 @@
 
 [![Platform](https://img.shields.io/badge/macOS-27%2B%20Apple%20Silicon-black?style=flat-square)](#)
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange?style=flat-square)](https://swift.org)
-[![Tests](https://img.shields.io/badge/tests-963%20passed%20%2F%202%20skipped-brightgreen?style=flat-square)](#тесты)
-[![Tools](https://img.shields.io/badge/tools-85-b87333?style=flat-square)](#инструменты)
+[![Tests](https://img.shields.io/badge/tests-1056%20passed%20%2F%202%20skipped-brightgreen?style=flat-square)](#тесты)
+[![Tools](https://img.shields.io/badge/tools-83-b87333?style=flat-square)](#инструменты)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
 ![Отладка сборки: нашёл причину, поправил, прогнал тесты](DOCS/screenshots/code.png)
@@ -119,7 +119,7 @@ Swift 6 и SwiftUI, без Electron в рантайме. В простое — �
 
 **Работает с кодом.** Читает и правит файлы, применяет диффы, ищет по смыслу и по regex, гоняет сборку и тесты, коммитит. Определяет стек проекта и берёт его собственные команды, а не навязывает свои.
 
-**Смотрит на мир.** Пришлите скриншот — посмотрит. Снимает экран и страницы, распознаёт текст через Vision. Ходит по сайтам: сначала встроенный MCP-скрапер, потом настоящий Playwright с кликами, в крайнем случае обычный HTTP.
+**Смотрит на мир.** Пришлите скриншот — посмотрит. Снимает экран и страницы, распознаёт текст через Vision. Ходит по сайтам: сначала встроенный MCP-скрапер, потом постоянный Chrome for Testing с сохранённым профилем — вкладки и логины живут между вызовами, — в крайнем случае обычный HTTP.
 
 **Управляет машиной.** Системными API, а не через терминал: состояние машины одним вызовом, процессы без `ps aux | grep`, сеть одним вызовом, поиск по всей машине, ожидание изменений файлов через FSEvents вместо цикла `sleep`. Окна всех приложений с координатами и дисплеем. Шорткаты, AppleScript, логи — тоже инструменты.
 
@@ -146,7 +146,7 @@ Swift 6 и SwiftUI, без Electron в рантайме. В простое — �
 
 ## Как это выглядит
 
-Нативное окно, светлая бумага, markdown с подсветкой кода, таблицами и цитатами. Оба участника в пузырях: ваш — справа на тёплой плашке, ответ — слева на белой. Имени роли и времени в транскрипте нет: кто написал, видно по стороне и оттенку. Размышления модели и вызовы инструментов — свёрнутые строки, раскрываются по клику. Файлы перетаскиваются прямо в поле ввода.
+Нативное окно, светлая бумага, markdown с подсветкой кода, таблицами и цитатами. Оба участника в пузырях: ваш — справа на тёплой плашке, ответ — слева на белой. Имени роли и времени в транскрипте нет: кто написал, видно по стороне и оттенку. Вызовы инструментов одного сообщения собраны в один блок с заголовком вида «12 вызовов · 3 ошибки · 18 с»: пока ответ пишется, блок раскрыт, потом сворачивается до трёх строк, ошибки видны всегда. Размышления модели — свёрнутые строки, раскрываются по клику. Файлы перетаскиваются прямо в поле ввода.
 
 Тема одна — светлая **«Пузыри»**: бумажный фон `#FBFAF8`, медные акценты, тёмный текст. Колонка чата не шире 1100 pt и стоит по центру, поэтому на широком мониторе строки не разъезжаются.
 
@@ -180,12 +180,12 @@ Swift 6 и SwiftUI, без Electron в рантайме. В простое — �
 
 ## Установка
 
-Последняя версия — [1.2.7](https://github.com/mibazarow/harnes-s-macos/releases/latest): `Harness-1.2.7.dmg`.
+Последняя версия — [1.2.8](https://github.com/mibazarow/harnes-s-macos/releases/latest): `Harness-1.2.8.dmg`.
 
 Открыть образ, перетащить `Harness.app` в `Applications`. Сборка подписана **Developer ID** и нотаризована Apple, если в релизе пристёгнут тикет нотаризации. Проверить это на скачанном файле можно так:
 
 ```bash
-xcrun stapler validate Harness-1.2.7.dmg
+xcrun stapler validate Harness-1.2.8.dmg
 spctl -a -vvv -t install /Applications/Harness.app
 ```
 
@@ -227,7 +227,7 @@ xcodebuild -project Harness.xcodeproj -scheme Harness -derivedDataPath .build \
 
 ## Требования
 
-Приложение не устанавливает ничего само. Проверка идёт один раз при старте: если чего-то нет, в начале первого ответа появится одна строка с фактом и командой для Терминала. Повторно она не показывается, пока состояние не изменится.
+Приложение не ставит пакеты через менеджеры и не качает бинарники само. Проверка идёт один раз при старте: если чего-то нет, в начале первого ответа появится одна строка с фактом и командой для Терминала. Повторно она не показывается, пока состояние не изменится. Единственное исключение — модель эмбеддингов: она скачивается сама при первом запуске в `models/`.
 
 | Что | Зачем | Обязательность |
 |---|---|---|
@@ -235,6 +235,8 @@ xcodebuild -project Harness.xcodeproj -scheme Harness -derivedDataPath .build \
 | Xcode Command Line Tools (`xcode-select --install`) | `git_status`, `git_diff`, `git_log`, `git_commit` | обязательный для git-инструментов |
 | `ripgrep` (`brew install ripgrep`) | быстрый поиск по коду; без него — `grep` | необязательный |
 | `python3` с `openpyxl` | полное чтение `.xlsx`; без него — упрощённо | необязательный |
+| Node + Playwright (`npm i playwright` в `~/HARNES_S_DATA/tools`) | `browser` | необязательный |
+| Chrome for Testing в `~/HARNES_S_DATA/HarnessBrowser.app` | постоянный браузер с сохранённым профилем; сам ничего не скачивает | необязательный |
 
 ---
 
@@ -244,18 +246,21 @@ xcodebuild -project Harness.xcodeproj -scheme Harness -derivedDataPath .build \
 App/          точка входа, окно, меню, демо-диалоги
 UI/           транскрипт, композер, настройки, подсветка
 Core/
-  Agent/      цикл агента, инструменты, контекст, защиты, патчи, ONNX-эмбеддер
+  Agent/      цикл агента, инструменты, контекст, защиты, патчи, ONNX-эмбеддер,
+              управление окнами и меню (AX), браузер, фоновые процессы
   LLM/        SSE-клиент (чат, reasoning, tool_calls, vision)
   MCP/        stdio-клиент MCP
   Style/      анализ манеры речи, профиль, рендер блока
   Skills/     манифест SKILL.md, загрузчик, импортёр
   Commands/   слэш-команды (единый источник для палитры и /help)
+  Theme/      токены, шрифты, настройки темы
   Highlight/  подсветка кода
 Services/     хранилище, провайдеры, память, эмбеддинги, индексатор,
-              планировщик, безопасность файлов, история
+              планировщик, безопасность файлов, история, фоновые процессы
 Storage/      схема SQLite и миграции (GRDB)
 Models/       доменные модели и ChatStore
-Tests/        752 теста, включая живой SSE-сервер, MCP и FSEvents
+vendor/       onnxruntime — вендоренная копия (см. «Зависимости»)
+Tests/        1056 тестов, включая живой SSE-сервер, MCP и FSEvents
 ```
 
 ## Данные
@@ -266,33 +271,38 @@ Tests/        752 теста, включая живой SSE-сервер, MCP и
 HARNES_S_DATA/
 ├── database/harness.db   providers, secrets, memory, embeddings, messages,
 │                         schedules, todos, trash, file_versions, app_state
-├── config/               mcp.json, скиллы, gsd
+├── config/               mcp.json, skills/, workspaces.json
 ├── workspace/            рабочая папка по умолчанию
-├── models/               EmbeddingGemma 2 (ONNX), скачивается при первом запуске
+├── models/               EmbeddingGemma 2 (ONNX), ~330 МБ, скачивается при первом запуске
 ├── tools/                Playwright и его node_modules
+├── HarnessBrowser.app/   Google Chrome for Testing для постоянного браузера
+├── browser-profile/      профиль этого браузера: вкладки и логины живут между вызовами
 ├── artifacts/            скриншоты, крупные выводы
 ├── versions/             снапшоты файлов перед правкой
 ├── trash/                удалённое, восстановимое
+├── backups/              бэкапы базы, снимки настроек, старые версии приложения
 └── logs/                 логи MCP и latency.log
 ```
+
+Рабочую папку можно переключить инструментом `workspace` — выбор живёт в `config/workspaces.json` и переживает перезапуск.
 
 Перенос на другую машину — копирование одной папки.
 
 ## Инструменты
 
-85 штук. Редкие группы по умолчанию едут в модель одной строкой и раскрывают полную схему через `tool_load`: каталог схем — постоянный налог на контекст.
+83 штуки. Редкие группы по умолчанию едут в модель одной строкой и раскрывают полную схему через `tool_load`: каталог схем — постоянный налог на контекст.
 
 **Файлы:** `fs_list`, `fs_read`, `fs_write`, `edit_file`, `apply_patch`, `read_many`, `fs_tree`, `fs_grep`, `fs_glob`, `fs_copy`, `fs_move`, `fs_mkdir`, `trash_paths`, `restore_trashed`, `file_versions`, `restore_version`, `undo_list`.
 
-**Код:** `project_overview`, `search_code`, `index_workspace`, `bash`, `git_status`, `git_diff`, `git_log`, `git_commit`, `git_stash`, `git`.
+**Код:** `project_overview`, `search_code`, `index_workspace`, `workspace`, `bash`, `git_status`, `git_diff`, `git_log`, `git_commit`, `git_stash`, `git`.
 
 **Машина:** `system`, `process`, `network`, `spotlight`, `watch`, `windows`, `apps`, `power`, `display`, `keyboard`, `mouse`, `clipboard`, `files`, `settings`, `launchd`, `notify`, `ui`, `observe`, `activity`, `permissions`.
 
 `ui` — самый недооценённый: читает AX-дерево любого приложения (`tree`), ищет элементы по смыслу (`find`), нажимает по пути (`click` через `AXPress`, без координат), ходит по меню (`menu_list`, `menu_click`), ставит значения и фокус. Работает там, где нет ни API, ни CLI.
 
-**Агент:** `task`, `todowrite`, `todo_read`, `schedule_add`, `schedule_list`, `schedule_remove`, `skill_list`, `skill_read`, `skill_install`, `skill_remove`, `skill_learn`, `mcp_list`, `mcp_tools`, `tool_load`.
+**Агент:** `todowrite`, `todo_read`, `schedule_add`, `schedule_list`, `schedule_remove`, `skill_list`, `skill_read`, `skill_install`, `skill_remove`, `skill_learn`, `mcp_list`, `mcp_tools`, `tool_load`.
 
-**Знания:** `memory_add`, `memory_search`, `memory_forget`, `memory_list`, `secret_save`, `secret_get`, `secret_search`.
+**Знания:** `memory_add`, `memory_search`, `memory_forget`, `memory_list`, `memory_stats`, `secret_save`, `secret_get`, `secret_search`.
 
 **Мир:** `webfetch`, `websearch`, `browser`, `screenshot`, `ocr`, `image_read`, `doc_read`, `doc_write`, `shortcut`, `app_script`, `app_logs`, `calendar`, `contacts`, `share`, плюс инструменты MCP-серверов как `mcp__<server>__<tool>`.
 
@@ -318,15 +328,17 @@ HARNES_S_DATA/
 
 ## Слэш-команды
 
-`/help`, `/clear`, `/compact`, `/checkpoint`, `/skills`, `/skill`, `/mcp`, `/remember`, `/memory`, `/search`, `/secret`.
+`/help`, `/clear`, `/compact`, `/stats`, `/checkpoint`, `/skills`, `/skill`, `/mcp`, `/remember`, `/memory`, `/search`, `/secret`.
 
 ## Тесты
 
-829 тестов: SSE-клиент на локальном сервере, кодирование запроса, применение патчей, определение проекта, защиты агента, профиль стиля, консолидация памяти, планировщик, MCP handshake с живыми серверами, ONNX-эмбеддер, докачка модели, скиллы, компакция, извлечение фактов, отбор инструментов, отмена долгих вызовов, системные инструменты с разбором `lsof -F` и живым FSEvents.
+1056 тестов: SSE-клиент на локальном сервере, кодирование запроса, применение патчей, определение проекта, защиты агента, профиль стиля, консолидация памяти, планировщик, MCP handshake с живыми серверами, ONNX-эмбеддер, докачка модели, скиллы, компакция, извлечение фактов, отбор инструментов, отмена долгих вызовов, системные инструменты с разбором `lsof -F` и живым FSEvents, AX-дерево и пункты меню, вёрстка транскрипта и блок вызовов инструментов.
 
 ## Зависимости
 
-[GRDB.swift](https://github.com/groue/GRDB.swift) · [swift-markdown](https://github.com/apple/swift-markdown) · [swift-transformers](https://github.com/huggingface/swift-transformers) · [onnxruntime-swift-package-manager](https://github.com/microsoft/onnxruntime-swift-package-manager) · [Nordwand Mono](https://github.com/tywr/Nordwand-Mono) (шрифт, MIT, встроен)
+[GRDB.swift](https://github.com/groue/GRDB.swift) · [swift-markdown](https://github.com/apple/swift-markdown) · [swift-transformers](https://github.com/huggingface/swift-transformers) · [Nordwand Mono](https://github.com/tywr/Nordwand-Mono) (шрифт, MIT, встроен)
+
+ONNX Runtime лежит в репозитории: `vendor/onnxruntime` — копия `microsoft/onnxruntime-swift-package-manager` с локальным `onnxruntime.xcframework` (только `macos-arm64`). Апстрим удалён с GitHub 18.11.2026, поэтому пакет не резолвится по URL и вендорен целиком; подробности — в `vendor/onnxruntime/Package.swift`.
 
 ## Ограничения
 
