@@ -45,6 +45,7 @@ struct RootView: View {
                 providerLabel: providerDirectory.label,
                 contextLabel: contextLabel(for: usage),
                 contextWarning: usage?.overThreshold ?? false,
+                contextHelp: contextHelp(for: usage),
                 modelLabel: modelLabel,
                 modelWarning: modelWarning,
                 spent: chat.spent,
@@ -85,7 +86,7 @@ struct RootView: View {
             services?.modelInstaller?.startIfNeeded()
             await chat.loadHistory()
             await providerDirectory.reload()
-            chat.refreshContextUsage(contextWindow: providerDirectory.contextWindow ?? 128_000)
+            chat.refreshContextUsage(contextWindow: providerDirectory.resolvedWindow ?? ProviderModel.defaultContextWindow)
             await chat.warmUpMCP()
             startScheduler()
         }
@@ -105,9 +106,11 @@ struct RootView: View {
         }
         .onChange(of: settings.compactionThresholdPercent) { _, newValue in
             chat.compactionThreshold = newValue
-            chat.refreshContextUsage(contextWindow: providerDirectory.contextWindow ?? 128_000)
+            chat.refreshContextUsage(contextWindow: providerDirectory.resolvedWindow ?? ProviderModel.defaultContextWindow)
         }
-        .onChange(of: providerDirectory.contextWindow) { oldValue, newValue in
+        // R45: the status line follows the resolved window, not the raw row value, so
+        // the composer and the settings caption cannot disagree.
+        .onChange(of: providerDirectory.resolvedWindow) { oldValue, newValue in
             guard let oldValue, let newValue, newValue < oldValue else {
                 if let newValue { chat.refreshContextUsage(contextWindow: newValue) }
                 return
@@ -195,6 +198,22 @@ struct RootView: View {
             }
         }
         services.scheduler.start()
+    }
+
+    /// R45: the pill keeps its format; the explanation of where the window came from
+    /// goes into the tooltip, so a number in the settings and a number in the composer
+    /// no longer look like a contradiction.
+    private func contextHelp(for usage: ContextUsage?) -> String {
+        let base = "Заполнение окна контекста"
+        guard let usage else { return base }
+        var parts = ["Окно: \(usage.contextWindow.formatted())"]
+        if let source = providerDirectory.contextWindowSource {
+            parts.append("источник: \(source.label)")
+        }
+        if usage.overThreshold {
+            parts.append("история превышает порог: при отправке старые сообщения свернутся в саммари")
+        }
+        return parts.joined(separator: " · ") + " · " + base.lowercased()
     }
 
     private func contextLabel(for usage: ContextUsage?) -> String {

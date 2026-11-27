@@ -7,13 +7,47 @@ final class ModelContextPreferencesTests: XCTestCase {
         UserDefaults(suiteName: "ctx-\(UUID().uuidString)")!
     }
 
-    func testKnownModelWinsOverTheStoredNumber() {
+    /// R45: the number in the provider settings is the truth. The old contract let a
+    /// substring guess ("deepseek" → 128 000) override it, and that is the bug.
+    func testProviderNumberWinsOverTheKnownModelTable() {
         let resolution = ModelContextPreferences.resolve(
-            providerID: "p", model: "claude-sonnet-4", providerWindow: 32_000,
+            providerID: "p", model: "deepseek-v4.1-flash-1017", providerWindow: 245_000,
+            defaults: defaults()
+        )
+        XCTAssertEqual(resolution.window, 245_000)
+        XCTAssertEqual(resolution.source, .provider)
+    }
+
+    /// A row still holding the default is "never set": the table fills it in.
+    func testDefaultProviderWindowLetsTheModelTableFillIn() {
+        let resolution = ModelContextPreferences.resolve(
+            providerID: "p", model: "gemini-2.5-pro",
+            providerWindow: ProviderModel.defaultContextWindow,
+            defaults: defaults()
+        )
+        XCTAssertEqual(resolution.window, 1_000_000)
+        XCTAssertEqual(resolution.source, .model)
+    }
+
+    /// Clearing the field writes zero; that must read as "from the model" too.
+    func testClearedProviderWindowFallsBackToTheModel() {
+        let resolution = ModelContextPreferences.resolve(
+            providerID: "p", model: "claude-sonnet-4", providerWindow: 0,
             defaults: defaults()
         )
         XCTAssertEqual(resolution.window, 200_000)
         XCTAssertEqual(resolution.source, .model)
+    }
+
+    /// Unknown model and an untouched row: the row's default is all there is.
+    func testUnknownModelWithDefaultRowKeepsTheDefault() {
+        let resolution = ModelContextPreferences.resolve(
+            providerID: "p", model: "my-local-model",
+            providerWindow: ProviderModel.defaultContextWindow,
+            defaults: defaults()
+        )
+        XCTAssertEqual(resolution.window, ProviderModel.defaultContextWindow)
+        XCTAssertEqual(resolution.source, .provider)
     }
 
     func testSwitchingModelChangesTheBudgetWithoutCode() {
@@ -63,7 +97,7 @@ final class ModelContextPreferencesTests: XCTestCase {
 
     func testSourceLabelsAreDistinct() {
         XCTAssertEqual(ContextWindowSource.model.label, "модель")
-        XCTAssertEqual(ContextWindowSource.provider.label, "провайдер")
+        XCTAssertEqual(ContextWindowSource.provider.label, "из настроек")
         XCTAssertEqual(ContextWindowSource.manual.label, "вручную")
     }
 }

@@ -71,12 +71,16 @@ struct TranscriptView: View {
                         .opacity(0.85)
                     }
 
+                    // R43: the spacer is the scroll target and it carries the real gap.
+                    // A hairline here meant `scrollTo(anchor: .bottom)` parked a 1 pt dot
+                    // at the bottom edge and the stack's own bottom padding stayed below
+                    // the fold, so the last bubble sat flush against the composer.
                     Color.clear
-                        .frame(height: Spacing.hairline)
+                        .frame(height: Spacing.offGrid20)
                         .id(bottomID)
                 }
                 .padding(.horizontal, Spacing.zero)
-                .padding(.vertical, Spacing.offGrid20)
+                .padding(.top, Spacing.offGrid20)
                 // The chat column never grows past 1100 pt, whatever the window does.
                 .frame(maxWidth: Layout.chatContainer, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)

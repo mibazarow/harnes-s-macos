@@ -74,6 +74,58 @@ final class DesignLayoutTests: XCTestCase {
         )
     }
 
+    /// R43: the scroll target must carry the real gap, not a hairline below it, and the
+    /// composer must have air above its card.
+    func testLastBubbleHasAGapAboveTheComposer() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let transcript = try String(
+            contentsOf: root.appendingPathComponent("UI/Chat/TranscriptView.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            transcript.contains("frame(height: Spacing.offGrid20)"),
+            "нижний спейсер должен нести настоящий зазор, а не волосок"
+        )
+        XCTAssertFalse(
+            transcript.contains(".padding(.vertical, Spacing.offGrid20)"),
+            "вертикальный паддинг уводил зазор за кадр"
+        )
+
+        let composer = try String(
+            contentsOf: root.appendingPathComponent("UI/Chat/ComposerView.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            composer.contains(".padding(.top, Spacing.small)"),
+            "между кромкой скролла и карточкой поля нужен зазор"
+        )
+    }
+
+    /// R44: one model list, and the check mark is the choice. No second picker.
+    func testSettingsHaveOneModelList() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("UI/Settings/ProvidersSettingsView.swift"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(
+            source.contains("Picker(\"Основная модель\""),
+            "отдельного пикера основной модели больше нет"
+        )
+        XCTAssertTrue(
+            source.contains("ModelSelection.choices(providers)"),
+            "список строится из моделей всех провайдеров"
+        )
+        XCTAssertTrue(source.contains("settings.mainModel = choice.id"))
+        XCTAssertTrue(source.contains("Добавить модель"))
+        XCTAssertTrue(source.contains("Сначала добавь провайдера и загрузи его модели."))
+    }
+
     func testProseColumnIsNarrowerThanTheContainer() {
         // Step 6: 1100 pt container, 760 pt prose, code and tables on the full width.
         XCTAssertLessThan(Layout.textColumn, Layout.chatContainer)

@@ -4,6 +4,7 @@ struct ProvidersSettingsView: View {
     let services: AppServices?
     @Environment(ProviderDirectory.self) private var directory
     @Environment(AppSettings.self) private var settings
+    @Environment(\.theme) private var theme
 
     @State private var providers: [ProviderModel] = []
     @State private var loading = true
@@ -11,6 +12,8 @@ struct ProvidersSettingsView: View {
     @State private var editing: ProviderModel?
     @State private var deleting: ProviderModel?
     @State private var deleteError: String?
+    /// R44: add or rename a model without opening the provider editor.
+    @State private var modelDraft: ModelDraft?
 
     var body: some View {
         Group {
@@ -31,6 +34,18 @@ struct ProvidersSettingsView: View {
             if let services {
                 ProviderEditorView(provider: provider, service: services.providers) {
                     Task { await reload() }
+                }
+            }
+        }
+        .sheet(item: $modelDraft) { draft in
+            ModelEditorSheet(draft: draft, providers: providers) { providerID, oldName, newName in
+                Task {
+                    await saveModel(
+                        providerID: providerID,
+                        replacing: oldName,
+                        with: newName,
+                        adding: draft.mode == .add
+                    )
                 }
             }
         }
@@ -89,7 +104,7 @@ struct ProvidersSettingsView: View {
             } else {
                 List {
                     Section("Модели") {
-                        modelPickers()
+                        modelList(services: services)
                     }
                     Section("Провайдеры") {
                         ForEach(providers) { provider in
@@ -109,7 +124,7 @@ struct ProvidersSettingsView: View {
                         Label("Добавить", systemImage: "plus")
                     }
                     Spacer()
-                    Text("Провайдеры — только подключения. Рабочие модели выбираются выше.")
+                    Text("Отметь модель в списке — она пойдёт в чат и в сжатие.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -135,7 +150,10 @@ struct ProvidersSettingsView: View {
                     .font(AppFont.mono(Size.iconSmall))
                     .foregroundStyle(.secondary)
 
-                Text("\(provider.summary) · \(provider.contextWindow.formatted()) контекст")
+                // R45: the list shows the window that will actually be used for this
+                // provider's own model, not the raw row value that a known-model entry
+                // may override.
+                Text("\(provider.summary) · \(resolvedWindow(for: provider).formatted()) контекст")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -146,8 +164,10 @@ struct ProvidersSettingsView: View {
                 rowActions(provider, services: services)
             } label: {
                 Image(systemName: "ellipsis")
+                    .foregroundStyle(.secondary)
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .frame(width: Size.controlRegular)
         }
         .padding(.vertical, Spacing.tight)
@@ -163,32 +183,169 @@ struct ProvidersSettingsView: View {
         Button("Удалить", role: .destructive) { deleting = provider }
     }
 
-    /// The two app-wide choices. Both lists are built from what is saved in the
-    /// providers, so adding a connection is enough for its models to appear here.
+    /// R44: one list of every model of every provider. The check mark *is* the working
+    /// model — there is no second picker to keep in sync.
     @ViewBuilder
-    private func modelPickers() -> some View {
+    private func modelList(services: AppServices) -> some View {
         let choices = ModelSelection.choices(providers)
         if choices.isEmpty {
             Text("Сначала добавь провайдера и загрузи его модели.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else {
-            Picker("Основная модель", selection: mainModelBinding) {
-                ForEach(choices) { choice in
-                    Text(choice.label).tag(choice.id)
-                }
-            }
-            .pickerStyle(.menu)
-            .onChange(of: settings.mainModel) { _, _ in
-                Task {
-                    await directory.reload()
-                    await reload()
-                }
+            let current = mainModelBinding.wrappedValue
+            ForEach(choices) { choice in
+                modelRow(choice, current: current, services: services)
             }
 
-            Text("Основная — для чата и сжатия.")
+            Button {
+                modelDraft = ModelDraft(
+                    mode: .add,
+                    providerID: providers.first?.id ?? "",
+                    name: "",
+                    originalName: ""
+                )
+            } label: {
+                Label("Добавить модель", systemImage: "plus")
+                    .foregroundStyle(theme.accent)
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+        }
+    }
+
+    private func modelRow(
+        _ choice: ModelChoice,
+        current: String,
+        services: AppServices
+    ) -> some View {
+        let isCurrent = choice.id == current
+        return HStack(spacing: Spacing.offGrid10) {
+            Button {
+                select(choice)
+            } label: {
+                // The mark is the app's accent, not the system blue: settings use the
+                // same copper as the chat.
+                Image(systemName: isCurrent ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(isCurrent ? theme.accent : Color.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(isCurrent ? "Эта модель используется" : "Сделать основной")
+
+            // Mono only for the model name: the provider is a label, not an identifier.
+            Text(choice.model)
+                .font(AppFont.mono(FontSize.transcriptDefault))
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Text(choice.providerName)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer(minLength: Spacing.small)
+
+            Menu {
+                Button("Изменить имя…") {
+                    modelDraft = ModelDraft(
+                        mode: .edit,
+                        providerID: choice.providerID,
+                        name: choice.model,
+                        originalName: choice.model
+                    )
+                }
+                Divider()
+                Button("Удалить модель", role: .destructive) {
+                    Task { await deleteModel(choice, services: services) }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .foregroundStyle(.secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: Size.controlRegular)
+        }
+        .padding(.vertical, Spacing.offGrid2)
+        .contentShape(Rectangle())
+        .onTapGesture { select(choice) }
+        .contextMenu {
+            Button("Изменить имя…") {
+                modelDraft = ModelDraft(
+                    mode: .edit,
+                    providerID: choice.providerID,
+                    name: choice.model,
+                    originalName: choice.model
+                )
+            }
+            Button("Удалить модель", role: .destructive) {
+                Task { await deleteModel(choice, services: services) }
+            }
+        }
+    }
+
+    /// Marking a row is the choice: the same key the picker used to write.
+    private func select(_ choice: ModelChoice) {
+        guard settings.mainModel != choice.id else { return }
+        settings.mainModel = choice.id
+        Task {
+            await directory.reload()
+            await reload()
+        }
+    }
+
+    private func deleteModel(_ choice: ModelChoice, services: AppServices) async {
+        guard var provider = providers.first(where: { $0.id == choice.providerID }) else { return }
+        provider.models.removeAll { $0 == choice.model }
+        if provider.defaultModel == choice.model {
+            provider.defaultModel = provider.models.first
+        }
+        if provider.cheapModel == choice.model {
+            provider.cheapModel = nil
+        }
+        do {
+            _ = try await services.providers.save(provider)
+            // A stale `settings.mainModel` is fine: `mainModelBinding` falls back to the
+            // model that will really be sent.
+            await directory.reload()
+            await reload()
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
+    private func saveModel(
+        providerID: String,
+        replacing oldName: String,
+        with newName: String,
+        adding: Bool
+    ) async {
+        guard let services else { return }
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              var provider = providers.first(where: { $0.id == providerID }) else { return }
+
+        if adding {
+            guard !provider.models.contains(trimmed) else { return }
+            provider.models.append(trimmed)
+        } else {
+            guard let index = provider.models.firstIndex(of: oldName) else { return }
+            provider.models[index] = trimmed
+            if provider.defaultModel == oldName { provider.defaultModel = trimmed }
+            if provider.cheapModel == oldName { provider.cheapModel = trimmed }
+        }
+
+        do {
+            _ = try await services.providers.save(provider)
+            // Renaming the working model keeps the mark on it.
+            if !adding,
+               settings.mainModel == ModelSelection.raw(providerID: providerID, model: oldName) {
+                settings.mainModel = ModelSelection.raw(providerID: providerID, model: trimmed)
+            }
+            await directory.reload()
+            await reload()
+        } catch {
+            errorText = error.localizedDescription
         }
     }
 
@@ -207,6 +364,14 @@ struct ProvidersSettingsView: View {
             },
             set: { settings.mainModel = $0 }
         )
+    }
+
+    private func resolvedWindow(for provider: ProviderModel) -> Int {
+        ModelContextPreferences.resolve(
+            providerID: provider.id,
+            model: provider.defaultModel ?? provider.models.first ?? "",
+            providerWindow: provider.contextWindow
+        ).window
     }
 
     private func color(for health: String) -> Color {
@@ -313,11 +478,6 @@ struct ProviderEditorView: View {
                             .frame(width: Spacing.offGrid32 * 3 + Spacing.offGrid14)
                             .multilineTextAlignment(.trailing)
                             .font(AppFont.mono(FontSize.transcriptDefault))
-                            .onChange(of: provider.contextWindow) { _, _ in
-                                // R34.2: typing a number is an explicit override. The
-                                // model-derived value would otherwise silently replace it.
-                                ModelContextPreferences.setManual(true, providerID: provider.id)
-                            }
                         Stepper("", value: $provider.contextWindow, in: 2_000...4_000_000, step: 8_000)
                             .labelsHidden()
                         Text("токенов")
@@ -340,13 +500,11 @@ struct ProviderEditorView: View {
                         .foregroundStyle(.secondary)
 
                     if ModelContextPreferences.isManual(providerID: provider.id) {
-                        Button("Сбросить ручное окно") {
+                        // R45: the row's own number wins, so "reset" means going back to
+                        // the default, which the resolver reads as "ask the model table".
+                        Button("Сбросить окно к модели") {
                             ModelContextPreferences.setManual(false, providerID: provider.id)
-                            if let known = ModelContextPreferences.knownWindow(
-                                for: provider.defaultModel ?? ""
-                            ) {
-                                provider.contextWindow = known
-                            }
+                            provider.contextWindow = ProviderModel.defaultContextWindow
                         }
                         .font(.caption)
                     }
@@ -479,8 +637,13 @@ struct ProviderEditorView: View {
         defer { saving = false }
 
         if provider.contextWindow < 1_000 {
-            provider.contextWindow = 128_000
+            provider.contextWindow = ProviderModel.defaultContextWindow
         }
+        // R45: the row is the source of truth now, so a number that arrived by any path
+        // is kept as written. The old per-provider flag only relabels the same number as
+        // "вручную" and would stop a cleared field from falling back to the model table,
+        // so it is cleared on save.
+        ModelContextPreferences.setManual(false, providerID: provider.id)
 
         if provider.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             provider.name = URL(string: provider.baseURL)?.host ?? provider.baseURL
@@ -494,5 +657,84 @@ struct ProviderEditorView: View {
             isError = true
             message = error.localizedDescription
         }
+    }
+}
+
+/// R44: a model being added or renamed from the list. `originalName` is empty for an
+/// add, and the name that has to be replaced for an edit.
+struct ModelDraft: Identifiable {
+    enum Mode {
+        case add
+        case edit
+    }
+
+    let id = UUID()
+    let mode: Mode
+    let providerID: String
+    var name: String
+    let originalName: String
+}
+
+/// The small sheet behind "Добавить модель" and "Изменить имя…". It touches only the
+/// provider's model list, never the connection fields.
+struct ModelEditorSheet: View {
+    let draft: ModelDraft
+    let providers: [ProviderModel]
+    let onSave: (_ providerID: String, _ oldName: String, _ newName: String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var providerID: String
+    @State private var name: String
+
+    init(
+        draft: ModelDraft,
+        providers: [ProviderModel],
+        onSave: @escaping (_ providerID: String, _ oldName: String, _ newName: String) -> Void
+    ) {
+        self.draft = draft
+        self.providers = providers
+        self.onSave = onSave
+        _providerID = State(initialValue: draft.providerID)
+        _name = State(initialValue: draft.name)
+    }
+
+    private var trimmed: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.medium) {
+            Text(draft.mode == .add ? "Новая модель" : "Имя модели")
+                .font(.headline)
+
+            if draft.mode == .add {
+                Picker("Провайдер", selection: $providerID) {
+                    ForEach(providers) { provider in
+                        Text(provider.name).tag(provider.id)
+                    }
+                }
+            } else if let provider = providers.first(where: { $0.id == draft.providerID }) {
+                Text(provider.name)
+                    .foregroundStyle(.secondary)
+            }
+
+            TextField("Имя модели", text: $name)
+                .font(AppFont.mono(FontSize.transcriptDefault))
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Spacer()
+                Button("Отмена") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Сохранить") {
+                    onSave(providerID, draft.originalName, trimmed)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(trimmed.isEmpty || providerID.isEmpty)
+            }
+        }
+        .padding(Spacing.large)
+        .frame(width: Spacing.offGrid32 * 13)
     }
 }

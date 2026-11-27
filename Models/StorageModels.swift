@@ -30,6 +30,9 @@ enum ReasoningLevel: String, Codable, CaseIterable, Identifiable, Sendable {
 struct ProviderModel: Identifiable, Sendable, Equatable {
     static let defaultTemperature: Double = 0.2
     static let temperatureRange: ClosedRange<Double> = 0...2
+    /// The value a row starts with. A row still holding it counts as "the window was
+    /// never set", which is what lets the known-model table fill in (R45).
+    static let defaultContextWindow: Int = 128_000
 
     var id: String
     var name: String
@@ -63,7 +66,7 @@ struct ProviderModel: Identifiable, Sendable, Equatable {
         models: [String] = [],
         defaultModel: String? = nil,
         cheapModel: String? = nil,
-        contextWindow: Int = 128_000,
+        contextWindow: Int = ProviderModel.defaultContextWindow,
         reasoningLevel: ReasoningLevel = .off,
         temperature: Double = ProviderModel.defaultTemperature,
         inputPrice: Double? = nil,

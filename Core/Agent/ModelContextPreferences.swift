@@ -1,12 +1,12 @@
 import Foundation
 
-/// R34.2: the working window comes from the model, not from a number typed by hand.
+/// R34.2 / R45: the working window.
 ///
-/// A provider row has one `context_window` field, and it was the only source. Switching
-/// from a 32k model to a 128k one left the budget at 32k (half the window wasted) or the
-/// other way round (a 400 from the provider). Here the window is resolved from the model
-/// name when it is known, and the stored value is used only as a fallback or as an
-/// explicit override.
+/// The number written in the provider settings is the truth about that connection. The
+/// table of known model families is a guess by substring, and it must not silently
+/// replace an explicit number: a person who sets 245 000 for a model the table thinks
+/// holds 128 000 expects 245 000. The table therefore applies only when the row still
+/// carries the default (R45).
 enum ContextWindowSource: String, Sendable {
     /// Taken from the model name.
     case model
@@ -18,7 +18,9 @@ enum ContextWindowSource: String, Sendable {
     var label: String {
         switch self {
         case .model: "модель"
-        case .provider: "провайдер"
+        // The number lives in the provider settings, so that is what the caption says.
+        // "провайдер" read like a third party guessing; "из настроек" is the fact.
+        case .provider: "из настроек"
         case .manual: "вручную"
         }
     }
@@ -101,6 +103,18 @@ enum ModelContextPreferences {
         defaults.set(manual, forKey: manualPrefix + providerID)
     }
 
+    /// True when the row carries a number somebody chose, rather than the value a new
+    /// row starts with. A zero or the default counts as "never set".
+    static func isExplicitProviderWindow(_ window: Int) -> Bool {
+        window > 0 && window != ProviderModel.defaultContextWindow
+    }
+
+    /// R45 priority: per-model manual number → legacy manual flag → the provider row's
+    /// own number → the known-model table → the row (or its default).
+    ///
+    /// The table moved below the provider value: it is a guess by substring and used to
+    /// win over a number the person had entered, which is exactly what the bug report
+    /// saw. It still fills in for models nobody configured by hand.
     static func resolve(
         providerID: String,
         model: String,
@@ -113,8 +127,11 @@ enum ModelContextPreferences {
             return ContextWindowResolution(window: max(manual, 1_000), source: .manual)
         }
         // Legacy flag applies to the window.
-        if isManual(providerID: providerID, defaults: defaults) {
+        if isManual(providerID: providerID, defaults: defaults), providerWindow > 0 {
             return ContextWindowResolution(window: max(providerWindow, 1_000), source: .manual)
+        }
+        if isExplicitProviderWindow(providerWindow) {
+            return ContextWindowResolution(window: providerWindow, source: .provider)
         }
         if let known = knownWindow(for: model) {
             return ContextWindowResolution(window: known, source: .model)

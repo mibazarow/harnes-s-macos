@@ -264,4 +264,76 @@ final class DesignSnapshotTests: XCTestCase {
             window.contentView = nil
         }
     }
+
+    /// R44 + R45: the providers tab shows one model list with a single mark, and the
+    /// window a provider row reports is the one the app will actually use.
+    @MainActor
+    func testRenderProvidersSettings() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("harness-design")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let database = try AppDatabase(inMemory: true)
+        let services = AppServices(database: database)
+        let deep = try await services.providers.save(ProviderModel(
+            name: "DeepPlusVibe",
+            baseURL: "https://api.deepvibe.example/v1",
+            models: ["deepseek-v4.1-flash-1017", "deepseek-v4.1-pro"],
+            defaultModel: "deepseek-v4.1-flash-1017",
+            contextWindow: 245_000,
+            isDefault: true
+        ))
+        _ = try await services.providers.save(ProviderModel(
+            name: "Локальный",
+            baseURL: "https://local.example/v1",
+            models: ["gemma-3-27b"],
+            defaultModel: "gemma-3-27b",
+            contextWindow: ProviderModel.defaultContextWindow
+        ))
+
+        let name = "snapshot-settings-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        addTeardownBlock { defaults.removePersistentDomain(forName: name) }
+        defaults.set(
+            ModelSelection.raw(providerID: deep.id, model: "deepseek-v4.1-pro"),
+            forKey: ModelSelection.mainModelKey
+        )
+
+        let settings = AppSettings(defaults: defaults)
+        let providerDirectory = ProviderDirectory(service: services.providers, defaults: defaults)
+        await providerDirectory.reload()
+
+        // The bug the task reported: 245 000 in the settings, 128 000 in the status bar.
+        XCTAssertEqual(providerDirectory.resolvedWindow, 245_000)
+        XCTAssertEqual(providerDirectory.contextWindowSource, .provider)
+
+        let view = ProvidersSettingsView(services: services)
+            .environment(providerDirectory)
+            .environment(settings)
+            .environment(\.theme, ThemeTokens.copper)
+            .preferredColorScheme(.light)
+            .frame(width: 720, height: 760)
+
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(origin: .zero, size: NSSize(width: 720, height: 760))
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: .aqua)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+
+        // Let the view's `.task` list the providers before the picture is taken.
+        for _ in 0..<40 {
+            try await Task.sleep(for: .milliseconds(25))
+            host.layoutSubtreeIfNeeded()
+        }
+
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        let url = directory.appendingPathComponent("settings-providers.png")
+        try data.write(to: url)
+        XCTAssertGreaterThan(data.count, 10_000, "settings-providers")
+        print("SNAPSHOT \(url.path)")
+        window.contentView = nil
+    }
 }

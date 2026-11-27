@@ -12,6 +12,8 @@ struct ComposerView: View {
     let providerLabel: String
     let contextLabel: String
     let contextWarning: Bool
+    /// R45: where the window came from, shown as the pill's tooltip.
+    var contextHelp: String = "Заполнение окна контекста"
     let modelLabel: String?
     let modelWarning: Bool
     let spent: Double
@@ -168,9 +170,7 @@ struct ComposerView: View {
                         Text(contextLabel)
                     }
                     .modifier(MetaPill(warning: contextWarning))
-                    .help(contextWarning
-                          ? "История превышает порог окна: при отправке старые сообщения свернутся в саммари"
-                          : "Заполнение окна контекста")
+                    .help(contextHelp)
                 }
                 .font(.caption2)
                 .padding(.leading, Spacing.offGrid18)
@@ -189,6 +189,9 @@ struct ComposerView: View {
         .frame(maxWidth: Layout.chatContainer)
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.horizontal, Spacing.large)
+        // R43: air between the scroll edge and the field card, so the last bubble does
+        // not read as glued to the composer.
+        .padding(.top, Spacing.small)
         .padding(.bottom, Spacing.medium)
         .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
             handleDrop(providers)
